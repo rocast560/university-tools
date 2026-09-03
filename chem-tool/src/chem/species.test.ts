@@ -42,4 +42,11 @@ describe('buildSpecies', () => {
     expect(s.formula).toBe('C2H6');
     expect(new Set(Array.from({ length: 50 }, newId)).size).toBe(50);
   });
+  test('precomputed 3D keeps the geometry the seed declares', () => {
+    const base = buildSpecies({ name: 'Methane', smiles: 'C', source: 'library' });
+    const star = buildSpecies({ name: 'Methane', smiles: 'C', molfile3d: base.molfile3d, geometry: 'star', source: 'library' });
+    expect(star.geometry).toBe('star');
+    const def = buildSpecies({ name: 'Methane', smiles: 'C', molfile3d: base.molfile3d, source: 'library' });
+    expect(def.geometry).toBe('conformer');
+  });
 });

@@ -17,6 +17,8 @@ export interface SpeciesSeed {
   molfile?: string;
   /** Precomputed 3D molfile (library entries); skips conformer generation. */
   molfile3d?: string;
+  /** Provenance of molfile3d when it is precomputed; defaults to 'conformer'. */
+  geometry?: Geometry;
   source: Source;
   displayFormula?: string;
   iupacName?: string;
@@ -43,7 +45,7 @@ export function speciesFromMolecule(mol: OCL.Molecule, seed: SpeciesSeed): Speci
   const pre = seed.molfile3d ? parseMolfile(seed.molfile3d) : null;
   if (pre) {
     mol3d = reorderHeavyFirst(pre);
-    geometry = 'conformer';
+    geometry = seed.geometry ?? 'conformer';
   } else {
     ({ mol: mol3d, geometry } = to3D(mol));
   }
