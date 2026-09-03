@@ -1,0 +1,17 @@
+{
+  "name": "circuit-ai-tool",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Turn a KiCad schematic into a breadboard wiring diagram, with a build guide, checks, logic simulation, REST API and MCP server.",
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "breadboard": "bun scripts/breadboard.ts"
+  },
+  "engines": { "bun": ">=1.3" },
+  "devDependencies": {
+    "@types/bun": "^1.3.0",
+    "typescript": "^5.9.0"
+  }
+}
