@@ -189,8 +189,19 @@ function TypstWorkspaceView({ workspaceId }: { workspaceId: string }) {
     [detail],
   );
   const detailName = detail?.entry.name ?? 'document';
-  // A different workspace starts at its own main.typ.
-  useEffect(() => { setFile('main.typ'); }, [workspaceId]);
+  // A different workspace starts at its own main.typ, or the first .typ file
+  // when main.typ is absent (e.g. an opened folder without one). `detail` is
+  // cleared to null the instant `workspaceId` changes and only repopulates
+  // once the new workspace's files have loaded, so this waits for `detail`
+  // before choosing and then applies the default once per workspace — a
+  // later `typFiles` change from an unrelated detail reload (autosave, an
+  // asset edit, ...) must not clobber a manual file switch.
+  const defaultedForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!detail || defaultedForRef.current === workspaceId) return;
+    defaultedForRef.current = workspaceId;
+    setFile(typFiles.includes('main.typ') || typFiles.length === 0 ? 'main.typ' : typFiles[0]!);
+  }, [workspaceId, detail, typFiles]);
 
   const typstAssets = useAppStore((s) => s.typstAssets);
   // Ref mirror so the preview's click callback stays stable across renders.
