@@ -22,6 +22,8 @@ export function openapiDocument() {
       '/api/projects/{id}/checks': { get: op('Checks') },
       '/api/projects/{id}/truth-table': { get: op('Truth table') },
       '/api/projects/{id}/pinouts': { get: op('Chip pinouts with holes') },
+      '/api/projects/{id}/netlist': { get: op('kicad-cli netlist text (the client parses it to run the layout engine locally)') },
+      '/api/projects/{id}/sidecar': { get: op('Pinned placements, options and colours') },
       '/api/projects/{id}/board.svg': { get: op('Breadboard picture as SVG', { parameters: [id, { name: 'highlight', in: 'query', schema: { type: 'string' }, description: 'net:/A, ref:R1 or wire:3' }, { name: 'theme', in: 'query', schema: { type: 'string', enum: ['light', 'dark'] } }] }) },
       '/api/projects/{id}/board.png': { get: op('Breadboard picture as PNG') },
       '/api/projects/{id}/schematic.svg': { get: op('KiCad schematic as SVG') },

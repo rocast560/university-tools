@@ -80,4 +80,15 @@ describe('REST API', () => {
     const res = await app.request('/api/events');
     expect(res.headers.get('content-type')).toContain('text/event-stream');
   });
+
+  test('netlist text and sidecar for the client', async () => {
+    const { json, sch } = await setup();
+    const { id } = await (await json('/api/projects/open', { path: sch })).json();
+    const net = await json(`/api/projects/${id}/netlist`);
+    expect(net.headers.get('content-type')).toContain('text/plain');
+    expect((await net.text()).startsWith('(export')).toBe(true);
+    const side = await (await json(`/api/projects/${id}/sidecar`)).json();
+    expect(side.version).toBe(1);
+    expect(side.pinned).toEqual({});
+  });
 });

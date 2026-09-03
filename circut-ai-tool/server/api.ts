@@ -68,6 +68,8 @@ export function createApi(service: Service, events: Events<ProjectEvent>): Hono 
     return c.json(s.truthTable ?? { rows: [], note: s.note });
   });
   api.get('/projects/:id/pinouts', (c) => c.json(service.get(c.req.param('id')).doc.pinouts));
+  api.get('/projects/:id/netlist', (c) => c.body(service.get(c.req.param('id')).netlistText, 200, { 'content-type': 'text/plain; charset=utf-8' }));
+  api.get('/projects/:id/sidecar', (c) => c.json(service.get(c.req.param('id')).sidecar));
   api.get('/projects/:id/board.svg', (c) => {
     const p = service.get(c.req.param('id'));
     const svg = renderSvg(p.doc, { highlight: parseHighlight(c.req.query('highlight')), theme: c.req.query('theme') === 'dark' ? DARK : LIGHT });
