@@ -176,6 +176,18 @@ button:focus-visible {
   outline-offset: 1px;
 }
 
-/* Asset tree guide lines (BTCT drew these in its glass skin). */
-.atree-row { position: relative; }
-.atree-guide { position: absolute; left: 0; top: 0; bottom: 0; width: 1px; background: hsl(var(--border)); }
+/* Typst asset folder tree nesting (TypstAssetsPanel's .atree-* classes).
+   BTCT kept this in its glass skin, scoped to html[data-ui-theme="glass"];
+   there is no theme switch here, so it applies unconditionally. Without it a
+   subfolder sits flush with a root folder and only the chevron conveys depth.
+   Geometry matches BTCT: each level indents 19px (10 margin + 9 padding). */
+.atree-kids {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-left: 10px;
+  margin-top: 2px;
+  padding-left: 9px;
+}
+.atree-kids > .atree-item { position: relative; }
