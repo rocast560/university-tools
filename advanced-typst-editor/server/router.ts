@@ -100,7 +100,9 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
         if (method === 'GET') return json(200, { workspaces: service.list() });
         if (method === 'POST') {
           const body = await readJsonObject(req);
-          return json(201, { workspace: service.create({ name: optionalString(body, 'name') ?? '', group: optionalString(body, 'group') ?? null, source: optionalString(body, 'source') }) });
+          const g = body.group;
+          if (g !== undefined && g !== null && typeof g !== 'string') throw new HttpError(400, 'group must be a string or null');
+          return json(201, { workspace: service.create({ name: optionalString(body, 'name') ?? '', group: (g as string | null | undefined) ?? null, source: optionalString(body, 'source') }) });
         }
       }
       if (seg.length === 3 && seg[2] === 'open' && method === 'POST') {

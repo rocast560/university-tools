@@ -70,6 +70,23 @@ describe('router', () => {
     expect((await call('GET', '/api/backup')).status).toBe(200);
   });
 
+  it('accepts an explicit null group when creating a workspace, and rejects a non-string group', async () => {
+    const { call } = app();
+    const withNull = await call('POST', '/api/workspaces', { name: 'X', group: null });
+    expect(withNull.status).toBe(201);
+    const { workspace } = await withNull.json() as { workspace: { group: string | null } };
+    expect(workspace.group).toBeNull();
+
+    const withString = await call('POST', '/api/workspaces', { name: 'Y', group: 'G' });
+    expect(withString.status).toBe(201);
+    const { workspace: withStringWorkspace } = await withString.json() as { workspace: { group: string | null } };
+    expect(withStringWorkspace.group).toBe('G');
+
+    const withInvalid = await call('POST', '/api/workspaces', { name: 'Z', group: 123 });
+    expect(withInvalid.status).toBe(400);
+    expect(((await withInvalid.json()) as { error: string }).error).toBe('group must be a string or null');
+  });
+
   it('requires the bearer token when one is set, except for health', async () => {
     const { call } = app('secret');
     expect((await call('GET', '/api/health')).status).toBe(200);
