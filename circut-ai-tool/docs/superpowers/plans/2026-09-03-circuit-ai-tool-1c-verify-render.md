@@ -298,9 +298,14 @@ export function runChecks(design: Design, res: EngineResult): Check[] {
     else if (sinks.length) add('led-polarity', 'info', `${part.id} lights when ${sinks[0].ref} pin ${sinks[0].pin.num} is low`, [part.id]);
     else if (sources.length) add('led-polarity', 'info', `${part.id} lights when ${sources[0].ref} pin ${sources[0].pin.num} is high`, [part.id]);
     else add('led-polarity', 'info', `${part.id}: cathode on ${displayName(kNet)}, anode on ${displayName(aNet)}`, [part.id]);
-    const series = res.parts.find((r) => r.style === 'R' && r.id !== part.id && (r.nets.includes(kNet) || r.nets.includes(aNet)) && !(r.nets.includes(kNet) && r.nets.includes(aNet)));
+    const series = res.parts.find((r) => {
+      if (r.style !== 'R' || r.id === part.id) return false;
+      const sharesK = r.nets.includes(kNet) && !powerKind(kNet);
+      const sharesA = r.nets.includes(aNet) && !powerKind(aNet);
+      return sharesK !== sharesA;
+    });
     if (!series) {
-      if (!(kKind === '+' || aKind === 'gnd')) add('led-current', 'warning', `${part.id} has no series resistor on either side`, [part.id]);
+      add('led-current', 'warning', `${part.id} has no series resistor on either side`, [part.id]);
       continue;
     }
     const ohms = parseOhms(series.value);
