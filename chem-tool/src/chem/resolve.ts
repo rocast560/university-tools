@@ -57,8 +57,7 @@ export function createResolver(deps: { pubchem?: PubChemLike | null }): Resolver
     }
     if (!pubchem) throw new ResolveError(`No match for "${q}" in the library and PubChem is disabled`, suggestions(q));
     try {
-      const nameQuery = isFormula ? q : normalizeName(q);
-      const byName = await pubchem.byName(nameQuery);
+      const byName = await pubchem.byName(q);
       if (byName[0]) return { species: fromCompound(byName[0], q), alternatives: byName.slice(1, 6).map(altFromCompound) };
       if (hillBody) {
         const byFormula = await pubchem.byFormula(hillBody);
