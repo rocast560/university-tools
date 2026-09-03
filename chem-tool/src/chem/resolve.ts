@@ -4,7 +4,7 @@ import { hillFormula, looksLikeFormula, parseFormula } from './formula';
 import { findByFormula, findByName, normalizeName, suggestions, type LibraryEntry } from './library';
 import type { PubChem, PubChemCompound } from './pubchem';
 import { PubChemUnavailable } from './pubchem';
-import { buildSpecies } from './species';
+import { buildSpecies, newId } from './species';
 import { parseSmiles } from './structure';
 import type { Species } from './types';
 
@@ -70,17 +70,21 @@ export function createResolver(deps: { pubchem?: PubChemLike | null }): Resolver
     throw new ResolveError(`No chemical found for "${q}"`, suggestions(q));
   }
 
+  // Species ids address a species within a scene, so every caller must get its own. Minting on
+  // return (not only on a cache hit) keeps cached and fresh resolves indistinguishable.
+  const withOwnId = (r: ResolveResult): ResolveResult => ({ ...r, species: { ...r.species, id: newId() } });
+
   return {
     async resolve(query: string): Promise<ResolveResult> {
       const q = query.trim();
       if (!q) throw new ResolveError('Empty query');
       const key = normalizeName(q);
       const hit = cache.get(key);
-      if (hit) return hit;
+      if (hit) return withOwnId(hit);
       const result = await resolveUncached(q);
       if (cache.size >= 200) cache.delete(cache.keys().next().value!);
       cache.set(key, result);
-      return result;
+      return withOwnId(result);
     },
   };
 }

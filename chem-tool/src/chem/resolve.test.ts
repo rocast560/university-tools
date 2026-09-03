@@ -61,8 +61,10 @@ describe('resolve', () => {
   test('results are cached per normalised query', async () => {
     const pc = stub({ 'ibuprofen': [ibuprofen] });
     const r = createResolver({ pubchem: pc });
-    await r.resolve('Ibuprofen');
-    await r.resolve('ibuprofen ');
+    const first = await r.resolve('Ibuprofen');
+    const second = await r.resolve('ibuprofen ');
     expect(pc.calls).toEqual(['name:Ibuprofen']);
+    expect(second.species.smiles).toBe(first.species.smiles);
+    expect(second.species.id).not.toBe(first.species.id);
   });
 });
