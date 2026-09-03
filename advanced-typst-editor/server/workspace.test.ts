@@ -71,3 +71,82 @@ describe('workspace files', () => {
     expect(ws.listFolders()).toEqual([{ id: 'findings', name: 'findings', parentId: null, createdAt: expect.any(Number), updatedAt: expect.any(Number) }]);
   });
 });
+
+describe('workspace assets', () => {
+  it('uploads with sanitised, extension-corrected, de-duplicated names', () => {
+    const ws = openWorkspace(fixture());
+    const a = ws.addAsset({ kind: 'image', filename: '../we ird?.jpg', bytes: PNG_1x1, folder: null });
+    expect(a.id).toBe('assets/we_ird_.png'); // PNG bytes => .png, spaces/? => _
+    const b = ws.addAsset({ kind: 'image', filename: 'we_ird_.png', bytes: PNG_1x1, folder: null });
+    expect(b.id).toBe('assets/we_ird_-2.png');
+    const c = ws.addAsset({ kind: 'image', filename: 'shot.png', bytes: PNG_1x1, folder: 'new/deep' });
+    expect(c.id).toBe('assets/new/deep/shot.png');
+    expect(c.folderId).toBe('new/deep');
+    const f = ws.addAsset({ kind: 'font', filename: 'X.ttf', bytes: Buffer.alloc(8), folder: null, family: 'X Sans' });
+    expect(f.id).toBe('fonts/X.ttf');
+    expect(ws.readMeta().fonts['fonts/X.ttf']).toEqual({ family: 'X Sans' });
+    expect(() => ws.addAsset({ kind: 'image', filename: 'x.exe', bytes: PNG_1x1, folder: null })).toThrow(/not allowed/);
+    expect(() => ws.addAsset({ kind: 'image', filename: 'x.png', bytes: PNG_1x1, folder: '../out' })).toThrow();
+  });
+
+  it('patches framing and validates it', () => {
+    const ws = openWorkspace(fixture());
+    const a = ws.patchAsset('assets/findings/login.png', { crop: { x: 0.1, y: 0.1, w: 0.5, h: 0.5 }, blurs: [{ x: 0, y: 0, w: 0.2, h: 0.2, style: 'pixelate' }], width: 1920, height: 1080 });
+    expect(a.crop).toEqual({ x: 0.1, y: 0.1, w: 0.5, h: 0.5 });
+    expect(a.blurs?.[0]?.style).toBe('pixelate');
+    expect(ws.readMeta().assets['assets/findings/login.png']).toMatchObject({ width: 1920, height: 1080 });
+    expect(() => ws.patchAsset('assets/findings/login.png', { crop: { x: 0, y: 0, w: 0, h: 1 } })).toThrow(/crop/);
+    expect(() => ws.patchAsset('assets/findings/login.png', { blurs: [{ x: 0.9, y: 0, w: 0.5, h: 0.5 }] })).toThrow(/blur/);
+    expect(ws.patchAsset('assets/findings/login.png', { crop: null }).crop).toBeNull();
+    expect(() => ws.patchAsset('assets/nope.png', { crop: null })).toThrow(/not found/);
+  });
+
+  it('renames an asset, keeps the extension, and rewrites every .typ reference', () => {
+    const d = fixture();
+    put(d, 'chapters/intro.typ', '#image("/assets/findings/login.png", width: 50%)\n#image-placeholder("x", path: "/assets/findings/login.png")');
+    const ws = openWorkspace(d);
+    const { asset, references } = ws.renameAsset('assets/findings/login.png', 'Login Bypass.jpg');
+    expect(asset.id).toBe('assets/findings/Login_Bypass.png');
+    expect(references).toBe(3);
+    expect(fs.readFileSync(path.join(d, 'main.typ'), 'utf8')).toContain('"/assets/findings/Login_Bypass.png"');
+    expect(fs.readFileSync(path.join(d, 'chapters/intro.typ'), 'utf8')).not.toContain('login.png');
+    expect(fs.existsSync(path.join(d, 'assets/findings/login.png'))).toBe(false);
+  });
+
+  it('moves an asset between folders and keeps its framing', () => {
+    const d = fixture();
+    const ws = openWorkspace(d);
+    ws.patchAsset('assets/cover.png', { crop: { x: 0, y: 0, w: 1, h: 0.5 } });
+    const { asset, references } = ws.moveAsset('assets/cover.png', 'findings');
+    expect(asset.id).toBe('assets/findings/cover.png');
+    expect(asset.crop).toEqual({ x: 0, y: 0, w: 1, h: 0.5 });
+    expect(references).toBe(0);
+    expect(ws.readMeta().assets['assets/cover.png']).toBeUndefined();
+    expect(ws.moveAsset('assets/findings/cover.png', null).asset.id).toBe('assets/cover.png');
+  });
+
+  it('creates, renames and deletes folders; deleting moves contents up a level', () => {
+    const d = fixture();
+    const ws = openWorkspace(d);
+    expect(ws.createFolder('findings/auth')).toMatchObject({ id: 'findings/auth', name: 'auth', parentId: 'findings' });
+    ws.addAsset({ kind: 'image', filename: 'token.png', bytes: PNG_1x1, folder: 'findings/auth' });
+    put(d, 'main.typ', '#image("/assets/findings/auth/token.png")\n#image("/assets/findings/login.png")');
+    expect(ws.renameFolder('findings', 'Findings 2026').references).toBe(2);
+    expect(fs.readFileSync(path.join(d, 'main.typ'), 'utf8')).toContain('"/assets/Findings 2026/auth/token.png"');
+    const r = ws.deleteFolder('Findings 2026/auth');
+    expect(r.moved).toBe(1);
+    expect(fs.existsSync(path.join(d, 'assets/Findings 2026/token.png'))).toBe(true);
+    expect(fs.readFileSync(path.join(d, 'main.typ'), 'utf8')).toContain('"/assets/Findings 2026/token.png"');
+    expect(ws.listFolders().map((f) => f.id)).toEqual(['Findings 2026']);
+    expect(() => ws.createFolder('../x')).toThrow();
+  });
+
+  it('deletes an asset and its meta', () => {
+    const d = fixture();
+    const ws = openWorkspace(d);
+    ws.deleteAsset('assets/cover.png');
+    expect(fs.existsSync(path.join(d, 'assets/cover.png'))).toBe(false);
+    expect(ws.readMeta().assets['assets/cover.png']).toBeUndefined();
+    expect(() => ws.deleteAsset('assets/cover.png')).toThrow(/not found/);
+  });
+});
