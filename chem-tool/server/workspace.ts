@@ -1,5 +1,6 @@
 // The workspace store: the single mutation path for the live molecule state.
 
+import { EditError, applyEdits } from '../src/chem/edit';
 import { ResolveError, type Alternative, type ResolveResult, type Resolver } from '../src/chem/resolve';
 import { buildSpecies, newId, speciesFromMolecule } from '../src/chem/species';
 import { parseMolfile, parseSmiles } from '../src/chem/structure';
@@ -179,6 +180,40 @@ export class WorkspaceStore {
         const scene = this.scene(cmd.sceneId);
         scene.title = cmd.title;
         return { message: 'Scene renamed', sceneId: scene.id };
+      }
+      case 'edit': {
+        this.checkVersion(cmd.baseVersion);
+        const scene = this.activeScene();
+        const current = this.focused();
+        const mol = parseMolfile(current.molfile3d);
+        if (!mol) throw new CommandError(422, 'The current structure cannot be parsed');
+        let edited;
+        try {
+          edited = applyEdits(mol, cmd.ops);
+        } catch (err) {
+          if (err instanceof EditError) throw new CommandError(422, err.message, { atoms: current.atoms.map((a) => `${a.index}:${a.element}`).join(' ') });
+          throw err;
+        }
+        const name = cmd.name ?? (current.name.endsWith('(edited)') ? current.name : `${current.name} (edited)`);
+        const species = speciesFromMolecule(edited, { name, source: 'edit', category: current.category });
+        this.replaceFocused(scene, species);
+        return { message: `Applied ${cmd.ops.length} edit${cmd.ops.length === 1 ? '' : 's'}: now ${describe(species)}`, sceneId: scene.id, speciesId: species.id };
+      }
+      case 'undo':
+      case 'redo': {
+        const scene = this.activeScene();
+        const from = cmd.type === 'undo' ? scene.history.past : scene.history.future;
+        const to = cmd.type === 'undo' ? scene.history.future : scene.history.past;
+        const target = from.pop();
+        if (!target) throw new CommandError(400, cmd.type === 'undo' ? 'Nothing to undo' : 'Nothing to redo');
+        to.push(snapshotOf(scene));
+        scene.kind = target.kind;
+        scene.species = target.species;
+        scene.equation = target.equation;
+        scene.focusId = target.focusId;
+        scene.view = { ...scene.view, highlight: [] };
+        const species = this.focused(scene.id);
+        return { message: `${cmd.type === 'undo' ? 'Undid' : 'Redid'}: now ${describe(species)}`, sceneId: scene.id, speciesId: species.id };
       }
     }
   }
