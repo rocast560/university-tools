@@ -165,7 +165,7 @@ export function applyEdits(source: OCL.Molecule, ops: EditOp[]): OCL.Molecule {
   }
 
   mol.ensureHelperArrays(OCL.Molecule.cHelperNeighbours);
-  mol.removeExplicitHydrogens();
+  if (heavyAtomCount(mol) > 0) mol.removeExplicitHydrogens();
   mol.addImplicitHydrogens();
   mol.ensureHelperArrays(OCL.Molecule.cHelperNeighbours);
   for (let i = 0; i < mol.getAllAtoms(); i++) {
