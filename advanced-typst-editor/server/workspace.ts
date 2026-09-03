@@ -44,7 +44,7 @@ function walk(root: string, rel: string, out: FileEntry[]): void {
     const child = rel ? `${rel}/${e.name}` : e.name;
     if (e.isDirectory()) walk(root, child, out);
     else if (e.isFile()) {
-      if (child === META_FILE) continue;
+      if (child.toLowerCase() === META_FILE) continue;
       try {
         const st = fs.statSync(path.join(dir, e.name));
         out.push({ path: child, size: st.size, mtime: Math.round(st.mtimeMs) });
@@ -151,7 +151,7 @@ export function openWorkspace(root: string, opts: { now?: () => number } = {}): 
     },
     writeFile(rel, bytes) {
       const n = normalizeRel(rel);
-      if (n === META_FILE) throw new HttpError(400, 'workspace.json is managed by the app');
+      if (n && n.toLowerCase() === META_FILE) throw new HttpError(400, 'workspace.json is managed by the app');
       const a = abs(rel);
       writeAtomic(a, bytes);
       const st = fs.statSync(a);

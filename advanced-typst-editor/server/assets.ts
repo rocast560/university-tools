@@ -87,7 +87,7 @@ export function mimeFor(kind: TypstAssetKind, filename: string): string | null {
  * Force an image's extension to match its actual contents.
  *
  * Typst chooses its decoder from the file extension, so a PNG that someone
- * saved as `screenshot.jpg` would fail to decode at upload. Correcting
+ * saved as `screenshot.jpg` would fail to decode at compile time. Correcting
  * the name at upload, before any document references it, means that
  * mismatch can never reach a document in the first place.
  */

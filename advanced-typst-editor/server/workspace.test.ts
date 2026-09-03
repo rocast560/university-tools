@@ -43,6 +43,7 @@ describe('workspace files', () => {
     expect(ws.readFile('../x')).toBeNull();
     expect(() => ws.writeFile('../x', Buffer.alloc(1))).toThrow();
     expect(() => ws.writeFile('workspace.json', Buffer.alloc(1))).toThrow();
+    expect(() => ws.writeFile('Workspace.JSON', Buffer.alloc(1))).toThrow();
     expect(ws.deleteFile('refs.bib')).toBe(true);
     expect(ws.deleteFile('refs.bib')).toBe(false);
   });
