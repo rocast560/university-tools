@@ -40,6 +40,28 @@ describe.skipIf(!have)('edits verified through kicad-cli', () => {
     expect(rm.project.design.nets.get('/Y1')!.some((m) => m.ref === 'D3')).toBe(false);
   }, 60000);
 
+  test('removing a component prunes its stale pinned entry so a reused reference is not ghost-placed (finding 3)', async () => {
+    const { service, sch } = await realService();
+    const p = await service.open(sch);
+    const before = p.doc.pinHoles.D2;
+    const target = { '1': { col: before['1'].col + 4, row: before['1'].row }, '2': { col: before['2'].col + 4, row: before['2'].row } };
+    const pinned = await service.movePart(p.info.id, 'D2', target);
+    expect(pinned.sidecar.pinned.D2).toEqual(target);
+
+    const removed = await service.removeComponent(p.info.id, 'D2');
+    expect(removed.project.design.components.has('D2')).toBe(false);
+    // The stale sidecar.pinned.D2 entry must be pruned alongside sidecar.placed.D2
+    // when the component is fully removed -- otherwise nextReference() reusing
+    // "D2" for an unrelated later part would silently inherit this ghost pin.
+    expect(removed.project.sidecar.pinned.D2).toBeUndefined();
+
+    const added = await service.addComponent(p.info.id, { libId: 'Device:LED', value: 'LED', connections: { '1': 'Y1', '2': '+5V' } });
+    expect(added.ref).toBe('D2'); // confirms the reference number was reused
+    expect(added.project.sidecar.pinned.D2).toBeUndefined();
+    // The new D2 must come from normal auto-placement, not the old ghost pin.
+    expect(added.project.doc.pinHoles.D2).not.toEqual(target);
+  }, 60000);
+
   test('labels land on pins at every rotation and mirror', async () => {
     const { service, work } = await realService();
     const lib = (await createLibraryLookup({ symbolDir: KICAD_SYMBOL_DIR }).symbolText('Device:R')).replace(/^\(symbol/, '(symbol');

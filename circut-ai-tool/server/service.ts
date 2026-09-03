@@ -186,8 +186,16 @@ export class Service {
       if (removed) {
         for (const [ref, ids] of Object.entries(removed)) {
           if (ref === 'pin' || ref === '*') continue;
-          if (removed['*']) delete p.sidecar.placed[ref];
-          else for (const [pin, list] of Object.entries(p.sidecar.placed[ref] ?? {})) p.sidecar.placed[ref][pin] = list.filter((u) => !ids.includes(u));
+          if (removed['*']) {
+            delete p.sidecar.placed[ref];
+            // A fully-removed component frees its reference number for reuse
+            // (nextReference() picks max existing + 1), so a later add_component
+            // of the same prefix can land on this exact ref again. Without this,
+            // the new (possibly unrelated) part would silently inherit the old
+            // part's pinned hole position and orientation. See final-review
+            // Finding 3.
+            delete p.sidecar.pinned[ref];
+          } else for (const [pin, list] of Object.entries(p.sidecar.placed[ref] ?? {})) p.sidecar.placed[ref][pin] = list.filter((u) => !ids.includes(u));
         }
       }
       for (const [ref, pins] of Object.entries(result.placed)) {

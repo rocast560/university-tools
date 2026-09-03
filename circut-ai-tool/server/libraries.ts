@@ -28,7 +28,19 @@ export function parseSymLibTable(text: string, symbolDir: string): Map<string, s
 
 const exists = (p: string) => access(p).then(() => true, () => false);
 
+// `nickname` is the part of an assistant/user-supplied lib_id before the
+// first ":" (e.g. from add_component's libId). It ends up joined onto
+// symbolDir/projectDir below to build a candidate .kicad_sym path, so a
+// value like "../../../../Users/someone/private" must never reach path.join
+// unvalidated -- that's a path-traversal read outside the intended library
+// directories. See final-review Finding 4.
+function assertSafeNickname(nickname: string): void {
+  const bad = !nickname || nickname.includes('/') || nickname.includes('\\') || nickname.includes('..') || nickname.includes(':') || path.basename(nickname) !== nickname;
+  if (bad) throw new LibraryError(`"${nickname}" is not a valid library nickname (no path separators, "..", or ":")`);
+}
+
 export async function findLibraryFile(nickname: string, opts: { symbolDir: string; tableFile?: string; projectDir?: string }): Promise<string | null> {
+  assertSafeNickname(nickname);
   const table = opts.tableFile ?? path.join(process.env.APPDATA ?? '', 'kicad', '9.0', 'sym-lib-table');
   try {
     const map = parseSymLibTable(await readFile(table, 'utf8'), opts.symbolDir);

@@ -101,6 +101,29 @@ describe('pinned placements', () => {
     expect(r.error).toBeNull();
     expect(r.packages.find((p) => p.id === 'U3')!.col0).toBe(base.packages.find((p) => p.id === 'U3')!.col0 + shift);
   });
+
+  test('a two-lead part with a rail-connected leg can be re-pinned to another column of the same rail (finding 2)', () => {
+    // R1 in PL1_1's auto layout has one leg on a rail (T+/B+/etc.) -- this is
+    // the normal, correct placement tryPlaceTwoLead's "toRail" branch makes
+    // for any two-lead part whose net is a power net. Previously placePinned
+    // unconditionally rejected ANY pinned hole on a rail row, so putting R1
+    // back on a rail hole (even a perfectly valid, free one) via a manual
+    // pin/move always failed -- this silently broke "drag any part" for
+    // every rail-connected two-lead part.
+    const base = layout(pl1, emptySidecar());
+    const r1 = base.pinHoles.R1;
+    expect(isRail(r1['1'].row)).toBe(true);
+    const s = emptySidecar();
+    const newCol = r1['1'].col + 5;
+    s.pinned.R1 = { '1': { col: newCol, row: r1['1'].row }, '2': { col: newCol, row: r1['2'].row } };
+    const r = layout(pl1, s);
+    expect(r.warnings.some((w) => w.includes('R1'))).toBe(false);
+    expect(r.pinHoles.R1).toEqual(s.pinned.R1);
+    // The rail leg must not have poisoned routing: every hole used anywhere
+    // in the result stays a real, in-bounds hole (no NaN column from
+    // stripCol() on a rail "strip" like "T+").
+    for (const h of allHoles(r)) expect(Number.isFinite(h.col)).toBe(true);
+  });
 });
 
 describe('options', () => {

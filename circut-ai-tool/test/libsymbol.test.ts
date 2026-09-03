@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { KICAD_SYMBOL_DIR } from '../server/config.ts';
-import { createLibraryLookup, parseSymLibTable } from '../server/libraries.ts';
+import { createLibraryLookup, findLibraryFile, parseSymLibTable } from '../server/libraries.ts';
 import { extractLibSymbol } from '../src/kicad/libsymbol.ts';
 import { parseLibSymbol, pinsOfUnit, powerUnit } from '../src/kicad/schematic.ts';
 import { parse, isList } from '../src/sexpr.ts';
@@ -61,5 +61,17 @@ describe('library lookup', () => {
     expect((await lookup.symbolText('Device:LED')).startsWith('(symbol "Device:LED"')).toBe(true);
     await expect(lookup.symbolText('Nope:X')).rejects.toThrow(/library "Nope"/);
     await expect(lookup.symbolText('Device')).rejects.toThrow(/lib_id/);
+  });
+
+  test('rejects a path-traversal nickname instead of resolving outside symbolDir', async () => {
+    // Regression for final-review Finding 4: a lib_id nickname is
+    // assistant/user-supplied (e.g. add_component's libId), and previously
+    // flowed straight into path.join(symbolDir, `${nickname}.kicad_sym`)
+    // with no validation, letting "../../..." escape symbolDir.
+    await expect(findLibraryFile('../../../../Windows/System32/drivers/etc/hosts', { symbolDir: KICAD_SYMBOL_DIR })).rejects.toThrow(/valid library nickname/);
+    const lookup = createLibraryLookup({ symbolDir: KICAD_SYMBOL_DIR });
+    await expect(lookup.symbolText('../../../../Windows/System32/drivers/etc/hosts:Foo')).rejects.toThrow(/valid library nickname/);
+    // Backslashes, "..", and bare colons in the nickname must all be rejected too.
+    await expect(findLibraryFile('..\\..\\secrets', { symbolDir: KICAD_SYMBOL_DIR })).rejects.toThrow(/valid library nickname/);
   });
 });

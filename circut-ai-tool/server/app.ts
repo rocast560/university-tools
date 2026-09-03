@@ -17,10 +17,19 @@ const MIME: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js
 
 export function createApp(deps: { service: Service; events: Events<ProjectEvent>; mcp: () => McpServer }): Hono {
   const app = new Hono();
-  app.use('*', cors({ origin: '*', allowHeaders: ['content-type', 'mcp-session-id', 'mcp-protocol-version', 'authorization'], exposeHeaders: ['mcp-session-id'] }));
   app.route('/api', createApi(deps.service, deps.events));
   app.get('/openapi.json', (c) => c.json(openapiDocument()));
   app.get('/api/health', (c) => c.json({ ok: true }));
+
+  // CORS is scoped to the MCP endpoints only: they're meant to be reached by
+  // external MCP clients (a tunneled ChatGPT/claude.ai client, etc.) via
+  // server-to-server fetches. The /api/* REST routes read/write real
+  // schematic files on disk and must stay same-origin (no CORS middleware),
+  // since a browser page could otherwise use a normal cross-origin fetch to
+  // read or destroy the user's files. See final-review Finding 1.
+  const mcpCors = cors({ origin: '*', allowHeaders: ['content-type', 'mcp-session-id', 'mcp-protocol-version', 'authorization'], exposeHeaders: ['mcp-session-id'] });
+  app.use('/mcp', mcpCors);
+  app.use('/mcp-server/mcp', mcpCors);
 
   const mcpHandler = async (c: { req: { raw: Request } }) => {
     const server = deps.mcp();

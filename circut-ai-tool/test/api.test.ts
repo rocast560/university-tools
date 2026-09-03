@@ -101,4 +101,21 @@ describe('REST API', () => {
     const nope = await json(`/api/projects/${id}/edit/value`, { ref: 'R99', value: '1' });
     expect(nope.status).toBe(400);
   });
+
+  test('CORS is scoped to the MCP endpoints only, not the filesystem-writing REST routes (finding 1)', async () => {
+    const { app } = await setup();
+    const origin = 'http://evil.example';
+    // /api/* reads and writes real schematic files; it must stay same-origin.
+    // A browser page's cross-origin fetch must not get permission via CORS.
+    for (const path of ['/api/projects', '/api/health', '/openapi.json']) {
+      const res = await app.request(path, { headers: { origin } });
+      expect(res.headers.get('access-control-allow-origin')).toBeNull();
+    }
+    // /mcp (and its /mcp-server/mcp alias) are meant for external MCP
+    // clients reached over a tunnel; they keep permissive CORS.
+    for (const path of ['/mcp', '/mcp-server/mcp']) {
+      const res = await app.request(path, { method: 'OPTIONS', headers: { origin, 'access-control-request-method': 'POST' } });
+      expect(res.headers.get('access-control-allow-origin')).toBe('*');
+    }
+  });
 });

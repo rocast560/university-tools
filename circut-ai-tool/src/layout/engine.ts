@@ -251,15 +251,21 @@ class Engine {
         this.warnings.push(`pinned placement for ${ref} dropped: pins changed (${missing.join(', ')} missing)`);
         continue;
       }
-      const bad = pins.map((p) => holes[p]).find((h) => !this.b.inBounds(h) || !this.occ.isFree(h) || isRail(h.row));
+      const bad = pins.map((p) => holes[p]).find((h) => !this.b.inBounds(h) || !this.occ.isFree(h));
       if (bad) {
-        this.warnings.push(`pinned placement for ${ref} dropped: hole ${bad.row}${bad.col} is off the board, on a rail, or already taken`);
+        this.warnings.push(`pinned placement for ${ref} dropped: hole ${bad.row}${bad.col} is off the board or already taken`);
         continue;
       }
       const clean: Record<string, Hole> = {};
       for (const p of pins) {
         clean[p] = { col: holes[p].col, row: holes[p].row };
-        this.claimPin(ref, p, clean[p], comp.pins.get(p)?.net);
+        // A rail-row hole (e.g. one leg of a power-net-connected two-lead part)
+        // isn't a normal strip: stripOf() would return the rail name itself
+        // (e.g. "T+") and stripCol() on that yields NaN, poisoning downstream
+        // routing (pickStrip/routePower). The auto-placer's own rail leg in
+        // tryPlaceTwoLead never registers a strip home for it either — mirror
+        // that here by skipping addHome for rail-row pins.
+        this.claimPin(ref, p, clean[p], isRail(clean[p].row) ? undefined : comp.pins.get(p)?.net);
       }
       this.registerPlaced(ref, fp, comp, clean);
     }
