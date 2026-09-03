@@ -3,7 +3,7 @@ import type { PubChemCompound } from './pubchem';
 import { PubChemUnavailable } from './pubchem';
 import { ResolveError, createResolver } from './resolve';
 
-const aspirin: PubChemCompound = { cid: 2244, formula: 'C9H8O4', weight: 180.16, smiles: 'CC(=O)Oc1ccccc1C(=O)O', connectivitySmiles: 'CC(=O)Oc1ccccc1C(=O)O', iupac: '2-acetyloxybenzoic acid', title: 'Aspirin' };
+const ibuprofen: PubChemCompound = { cid: 3672, formula: 'C13H18O2', weight: 206.28, smiles: 'CC(C)Cc1ccc(cc1)C(C)C(=O)O', connectivitySmiles: 'CC(C)Cc1ccc(cc1)C(C)C(=O)O', iupac: '2-[4-(2-methylpropyl)phenyl]propanoic acid', title: 'Ibuprofen' };
 
 function stub(byName: Record<string, PubChemCompound[]> = {}, byFormula: Record<string, PubChemCompound[]> = {}) {
   return {
@@ -34,15 +34,15 @@ describe('resolve', () => {
     expect(res.species.name).toBe('C4H10');
   });
   test('PubChem by name, then by formula', async () => {
-    const pc = stub({ 'aspirin': [aspirin] }, { 'C9H8O4': [aspirin] });
+    const pc = stub({ 'ibuprofen': [ibuprofen] }, { 'C13H18O2': [ibuprofen] });
     const r = createResolver({ pubchem: pc });
-    const byName = await r.resolve('aspirin');
+    const byName = await r.resolve('ibuprofen');
     expect(byName.species.source).toBe('pubchem');
-    expect(byName.species.cid).toBe(2244);
-    expect(byName.species.iupacName).toBe('2-acetyloxybenzoic acid');
-    const byFormula = await r.resolve('C9H8O4');
-    expect(byFormula.species.name).toBe('Aspirin');
-    expect(pc.calls).toEqual(['name:aspirin', 'name:C9H8O4', 'formula:C9H8O4']);
+    expect(byName.species.cid).toBe(3672);
+    expect(byName.species.iupacName).toBe('2-[4-(2-methylpropyl)phenyl]propanoic acid');
+    const byFormula = await r.resolve('C13H18O2');
+    expect(byFormula.species.name).toBe('Ibuprofen');
+    expect(pc.calls).toEqual(['name:ibuprofen', 'name:C13H18O2', 'formula:C13H18O2']);
   });
   test('unknown query fails with suggestions', async () => {
     const r = createResolver({ pubchem: stub() });
@@ -59,10 +59,10 @@ describe('resolve', () => {
     expect(err.reason).toBe('timeout');
   });
   test('results are cached per normalised query', async () => {
-    const pc = stub({ 'aspirin': [aspirin] });
+    const pc = stub({ 'ibuprofen': [ibuprofen] });
     const r = createResolver({ pubchem: pc });
-    await r.resolve('Aspirin');
-    await r.resolve('aspirin ');
-    expect(pc.calls).toEqual(['name:Aspirin']);
+    await r.resolve('Ibuprofen');
+    await r.resolve('ibuprofen ');
+    expect(pc.calls).toEqual(['name:Ibuprofen']);
   });
 });

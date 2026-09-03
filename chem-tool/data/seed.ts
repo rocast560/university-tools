@@ -122,6 +122,7 @@ export const SEED: SeedEntry[] = [
   // Carboxylic acids and esters
   { name: 'Benzoic acid', formula: 'C7H6O2', smiles: 'OC(=O)c1ccccc1', category: E },
   { name: 'Ethyl acetate', formula: 'C4H8O2', smiles: 'CCOC(C)=O', aliases: ['ethyl ethanoate'], category: E },
+  { name: 'Aspirin', formula: 'C9H8O4', smiles: 'CC(=O)Oc1ccccc1C(=O)O', aliases: ['acetylsalicylic acid'], category: E, cid: 2244 },
   { name: 'Lactic acid', formula: 'C3H6O3', smiles: 'CC(O)C(=O)O', aliases: ['2-hydroxypropanoic acid'], category: E },
   // Amines and amides
   { name: 'Methylamine', formula: 'CH3NH2', smiles: 'CN', aliases: ['aminomethane'], category: N },
