@@ -578,13 +578,13 @@ describe('Service', () => {
   test('movePart persists to the sidecar and the layout follows', async () => {
     const { service, sch } = await makeService();
     const p = await service.open(sch);
-    const r1 = p.doc.pinHoles.R1;
-    const target = { '1': { col: r1['1'].col + 3, row: r1['1'].row }, '2': { col: r1['2'].col + 3, row: r1['2'].row } };
-    const moved = await service.movePart(p.info.id, 'R1', target);
-    expect(moved.doc.pinHoles.R1).toEqual(target);
-    expect(JSON.parse(readFileSync(sidecarPath(sch), 'utf8')).pinned.R1).toEqual(target);
-    await expect(service.movePart(p.info.id, 'R1', { '1': { col: 1, row: 'a' } })).rejects.toThrow(/pin 2/);
-    await expect(service.movePart(p.info.id, 'R1', { '1': p.doc.pinHoles.U1['1'], '2': p.doc.pinHoles.U1['2'] })).rejects.toThrow(/dropped|taken/);
+    const d2 = p.doc.pinHoles.D2;
+    const target = { '1': { col: d2['1'].col + 3, row: d2['1'].row }, '2': { col: d2['2'].col + 3, row: d2['2'].row } };
+    const moved = await service.movePart(p.info.id, 'D2', target);
+    expect(moved.doc.pinHoles.D2).toEqual(target);
+    expect(JSON.parse(readFileSync(sidecarPath(sch), 'utf8')).pinned.D2).toEqual(target);
+    await expect(service.movePart(p.info.id, 'D2', { '1': { col: 1, row: 'a' } })).rejects.toThrow(/pin 2/);
+    await expect(service.movePart(p.info.id, 'D2', { '1': p.doc.pinHoles.U1['1'], '2': p.doc.pinHoles.U1['2'] })).rejects.toThrow(/dropped|taken/);
     const reset = await service.resetLayout(p.info.id);
     expect(reset.sidecar.pinned).toEqual({});
   });
