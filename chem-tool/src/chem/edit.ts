@@ -64,7 +64,7 @@ class Editor {
   neighbours(cur: number, hydrogen: boolean): number[] {
     this.refresh();
     const out: number[] = [];
-    for (let k = 0; k < this.mol.getConnAtoms(cur); k++) {
+    for (let k = 0; k < this.mol.getAllConnAtoms(cur); k++) {
       const n = this.mol.getConnAtom(cur, k);
       if ((this.mol.getAtomicNo(n) === 1) === hydrogen) out.push(n);
     }
