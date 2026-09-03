@@ -51,9 +51,15 @@ export function parseDiagnostics(stderr: string, root: string): Diagnostic[] {
   return out;
 }
 
+const TYPST_TIMEOUT_MS = 120_000;
+
 function run(cli: string, args: string[], cwd: string): Promise<{ code: number; stderr: string }> {
   return new Promise((resolve) => {
-    execFile(cli, args, { cwd, windowsHide: true, maxBuffer: 16 * 1024 * 1024 }, (err, _stdout, stderr) => {
+    execFile(cli, args, { cwd, windowsHide: true, maxBuffer: 16 * 1024 * 1024, timeout: TYPST_TIMEOUT_MS, killSignal: 'SIGKILL' }, (err, _stdout, stderr) => {
+      if (err && ((err as { killed?: boolean }).killed || (err as { signal?: string | null }).signal)) {
+        resolve({ code: 124, stderr: 'error: typst timed out after 120 s' });
+        return;
+      }
       const code = err && typeof (err as { code?: unknown }).code === 'number' ? (err as { code: number }).code : err ? 1 : 0;
       resolve({ code, stderr: String(stderr ?? '') });
     });
@@ -62,14 +68,14 @@ function run(cli: string, args: string[], cwd: string): Promise<{ code: number; 
 
 export function createCompiler(deps: { settings: SettingsStore; service: WorkspaceService; typstCli: string | null }): CompileApi {
   const cli = () => resolveTypstCli(deps.typstCli, deps.settings.get().typstCli);
-  const require = () => { const c = cli(); if (!c) throw new HttpError(409, 'typst CLI not found: set TYPST_CLI or Settings > Typst CLI'); return c; };
+  const requireCli = () => { const c = cli(); if (!c) throw new HttpError(409, 'typst CLI not found: set TYPST_CLI or Settings > Typst CLI'); return c; };
 
   const compileAt = async (root: string, file: string, outPdf: string): Promise<CompileResult> => {
     const fontDir = path.join(root, 'fonts');
     const args = ['compile', '--root', root, '--ignore-system-fonts', '--diagnostic-format', 'short'];
     if (fs.existsSync(fontDir)) args.push('--font-path', fontDir);
     args.push(path.join(root, ...file.split('/')), outPdf);
-    const { code, stderr } = await run(require(), args, root);
+    const { code, stderr } = await run(requireCli(), args, root);
     const diagnostics = parseDiagnostics(stderr, root);
     return { ok: code === 0 && !diagnostics.some((d) => d.severity === 'error'), diagnostics };
   };
@@ -103,7 +109,12 @@ export function createCompiler(deps: { settings: SettingsStore; service: Workspa
           for (const [id, m] of framed) {
             const abs = path.join(root, ...id.split('/'));
             if (!fs.existsSync(abs)) continue;
-            const out = await bakeImage(new Uint8Array(fs.readFileSync(abs)), m, id);
+            let out: Uint8Array | null;
+            try {
+              out = await bakeImage(new Uint8Array(fs.readFileSync(abs)), m, id);
+            } catch (err) {
+              throw new HttpError(422, `${id}: ${err instanceof Error ? err.message : String(err)}`);
+            }
             if (out) { fs.writeFileSync(abs, out); baked += 1; }
           }
         }

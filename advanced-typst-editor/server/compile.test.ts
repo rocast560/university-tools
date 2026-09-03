@@ -52,13 +52,22 @@ describe.skipIf(!have)('createCompiler', () => {
     const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
     put(w.path, 'assets/shot.png', png);
     service.patchAsset(w.id, 'assets/shot.png', { blurs: [{ x: 0, y: 0, w: 1, h: 1 }] }, null);
+    const originalBytes = fs.readFileSync(path.join(w.path, 'assets', 'shot.png'));
     const out = await compile.exportPdf(w.id, undefined, undefined);
     expect(out.baked).toBe(1);
     expect(Buffer.from(out.bytes!.subarray(0, 4)).toString()).toBe('%PDF');
-    expect(fs.existsSync(path.join(w.path, 'assets', 'shot.png'))).toBe(true); // original untouched
+    expect(Buffer.from(fs.readFileSync(path.join(w.path, 'assets', 'shot.png'))).equals(originalBytes)).toBe(true); // original untouched
     const to = path.join(dataDir, 'out.pdf');
     const saved = await compile.exportPdf(w.id, undefined, to);
     expect(saved.path).toBe(to);
     expect(fs.statSync(to).size).toBeGreaterThan(100);
+  });
+  it('rejects an export when a framed asset cannot be baked', async () => {
+    const { service, compile } = setup();
+    const w = service.create({ name: 'C', group: null, source: '#image("/assets/x.svg", width: 5cm)' });
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10" fill="red"/></svg>';
+    put(w.path, 'assets/x.svg', svg);
+    service.patchAsset(w.id, 'assets/x.svg', { crop: { x: 0, y: 0, w: 0.5, h: 0.5 } }, null);
+    await expect(compile.exportPdf(w.id, undefined, undefined)).rejects.toThrow(/cannot be baked/);
   });
 });
