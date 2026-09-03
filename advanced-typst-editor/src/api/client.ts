@@ -25,6 +25,15 @@ async function req<T>(method: string, url: string, body?: unknown, raw = false):
   if (raw) return (await res.arrayBuffer()) as unknown as T;
   return (res.status === 204 ? null : await res.json()) as T;
 }
+/**
+ * Ceiling for a `keepalive` request body. Browsers cap the combined body of
+ * in-flight keepalive requests (~64 KiB in Chromium) and reject anything over
+ * it outright -- which would lose the very save keepalive exists to guarantee.
+ * A document past this size falls back to an ordinary request on unload: not
+ * guaranteed to land, but strictly better than one guaranteed to fail.
+ */
+const KEEPALIVE_MAX_BYTES = 60_000;
+
 const enc = encodeURIComponent;
 const wsUrl = (id: string) => `/api/workspaces/${enc(id)}`;
 const fileUrl = (id: string, p: string) => `${wsUrl(id)}/files/${p.split('/').map(enc).join('/')}`;
@@ -44,8 +53,15 @@ export const api = {
     return { text: await res.text(), etag: res.headers.get('etag') ?? '' };
   },
   readBytes: (id: string, path: string) => req<ArrayBuffer>('GET', fileUrl(id, path), undefined, true).then((b) => new Uint8Array(b)),
-  writeText: (id: string, path: string, text: string, keepalive = false) =>
-    fetch(fileUrl(id, path), { method: 'PUT', headers: { 'x-client-id': CLIENT_ID, 'content-type': 'application/octet-stream' }, body: new TextEncoder().encode(text), keepalive }).then((r) => { if (!r.ok) throw new ApiError(r.status, `save failed (${r.status})`); }),
+  writeText: (id: string, path: string, text: string, keepalive = false) => {
+    const body = new TextEncoder().encode(text);
+    return fetch(fileUrl(id, path), {
+      method: 'PUT',
+      headers: { 'x-client-id': CLIENT_ID, 'content-type': 'application/octet-stream' },
+      body,
+      keepalive: keepalive && body.byteLength <= KEEPALIVE_MAX_BYTES,
+    }).then((r) => { if (!r.ok) throw new ApiError(r.status, `save failed (${r.status})`); });
+  },
   deleteFile: (id: string, path: string) => req<{ ok: true }>('DELETE', fileUrl(id, path)),
   uploadAsset: (id: string, file: Blob, opts: { kind: TypstAssetKind; filename: string; folder: string | null; family?: string | null }) => {
     const qs = new URLSearchParams({ kind: opts.kind, filename: opts.filename });

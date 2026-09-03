@@ -68,6 +68,34 @@ export function createWorkspaceService(deps: ServiceDeps): WorkspaceService {
     bus.emit({ type: 'workspace.changed', id, paths, origin });
   };
 
+  /**
+   * An asset/folder rename, move or delete that also rewrote `.typ` sources.
+   *
+   * It announces two things, and they need different origins:
+   *
+   * - `meta` (the asset ids, the `assets/<rel>` folder paths) keeps `origin`.
+   *   Only the asset/folder list listens for those, and it refreshes without
+   *   looking at the origin at all, so this half behaves exactly as before.
+   * - `files` (the `.typ` sources the server rewrote) goes out as `origin: null`.
+   *   An open editor ignores `workspace.changed` events carrying its own client
+   *   id -- that filter is what stops its autosave writes echoing back as
+   *   external changes -- so attributing the server's own reference rewrite to
+   *   the tab that asked for the move would leave that tab's buffer holding the
+   *   pre-rewrite path, break its preview, and let its next autosave put the
+   *   stale path straight back over the rewrite. Nobody typed those bytes, so
+   *   the rewrite belongs to no client and every tab treats it as external.
+   *
+   * Order matters: a client keeps a single "last change" slot, so the rewrite
+   * goes out last and is the notice an editor is guaranteed to act on. Own-write
+   * marks for both sets land before either emit, so the watcher never races the
+   * fs echo of a path it has not been told about yet.
+   */
+  const rewrote = (id: string, meta: string[], files: string[], origin: string | null) => {
+    for (const p of files) watcher?.markOwnWrite(id, p);
+    changed(id, [...new Set(meta)], origin);
+    if (files.length) bus.emit({ type: 'workspace.changed', id, paths: [...new Set(files)], origin: null });
+  };
+
   const register = (input: { path: string; name: string; group: string | null; library: boolean }): WorkspaceEntry => {
     const e = settings.addWorkspace(input);
     watcher?.watch(e.id, e.path);
@@ -186,13 +214,13 @@ export function createWorkspaceService(deps: ServiceDeps): WorkspaceService {
     renameAsset(id, assetId, stem, origin) {
       const ws = liveFs(id);
       const r = ws.renameAsset(assetId, stem);
-      changed(id, [...new Set([...r.files, assetId, r.asset.id])], origin);
+      rewrote(id, [assetId, r.asset.id], r.files, origin);
       return r;
     },
     moveAsset(id, assetId, folder, origin) {
       const ws = liveFs(id);
       const r = ws.moveAsset(assetId, folder);
-      changed(id, [...new Set([...r.files, assetId, r.asset.id])], origin);
+      rewrote(id, [assetId, r.asset.id], r.files, origin);
       return r;
     },
     deleteAsset(id, assetId, origin) {
@@ -207,13 +235,13 @@ export function createWorkspaceService(deps: ServiceDeps): WorkspaceService {
     renameFolder(id, rel, newRel, origin) {
       const ws = liveFs(id);
       const r = ws.renameFolder(rel, newRel);
-      changed(id, [...new Set([...r.files, `assets/${rel}`, `assets/${newRel}`])], origin);
+      rewrote(id, [`assets/${rel}`, `assets/${newRel}`], r.files, origin);
       return r;
     },
     deleteFolder(id, rel, origin) {
       const ws = liveFs(id);
       const r = ws.deleteFolder(rel);
-      changed(id, [...new Set([...r.files, `assets/${rel}`])], origin);
+      rewrote(id, [`assets/${rel}`], r.files, origin);
       return r;
     },
   };

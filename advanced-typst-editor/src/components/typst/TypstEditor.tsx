@@ -7,7 +7,7 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 import { useEffect, useRef, memo } from 'react';
-import { Annotation, EditorState } from '@codemirror/state';
+import { Annotation, EditorState, Transaction } from '@codemirror/state';
 import {
   EditorView, lineNumbers, highlightActiveLine, highlightActiveLineGutter,
   drawSelection, keymap,
@@ -192,6 +192,11 @@ export function insertAtTypstCursor(text: string): boolean {
  * same file would see that write as "changed on disk while you have unsaved
  * edits". Programmatic *edits* (slot placement, replace-all) deliberately do
  * not carry it: those are real changes the parent has yet to see.
+ *
+ * Such a push is also kept out of the undo history (`Transaction.addToHistory`
+ * is false alongside it): an undoable external edit is the same overwrite by
+ * another route, since one Ctrl+Z would replace it through a plain transaction
+ * that *does* report through `onChange` and autosave the pre-external text back.
  */
 const fromParentValue = Annotation.define<boolean>();
 
@@ -200,7 +205,9 @@ const fromParentValue = Annotation.define<boolean>();
  * and suffix kept), so the caret and undo history survive a rewrite that only
  * touched one slot or one search match. Returns false when no editor is mounted.
  *
- * `echo: false` suppresses the resulting `onChange` (see `fromParentValue`).
+ * `echo: false` suppresses the resulting `onChange` and keeps the push out of
+ * the undo history (see `fromParentValue`); `echo: true` -- a real programmatic
+ * edit -- stays undoable.
  */
 export function setTypstEditorContent(next: string, echo = true): boolean {
   const view = activeView;
@@ -213,7 +220,7 @@ export function setTypstEditorContent(next: string, echo = true): boolean {
   while (endCur > start && endNext > start && cur[endCur - 1] === next[endNext - 1]) { endCur--; endNext--; }
   view.dispatch({
     changes: { from: start, to: endCur, insert: next.slice(start, endNext) },
-    annotations: echo ? undefined : fromParentValue.of(true),
+    annotations: echo ? undefined : [fromParentValue.of(true), Transaction.addToHistory.of(false)],
   });
   return true;
 }

@@ -13,6 +13,9 @@ const PNG_1x1 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
 const dirs: string[] = [];
 afterEach(() => { for (const d of dirs.splice(0)) rmDir(d); });
 
+type ChangedEvent = Extract<ServerEvent, { type: 'workspace.changed' }>;
+const changes = (events: ServerEvent[]): ChangedEvent[] => events.filter((e): e is ChangedEvent => e.type === 'workspace.changed');
+
 function setup() {
   const dataDir = tmpDir(); dirs.push(dataDir);
   const bus = createEventBus();
@@ -152,9 +155,69 @@ describe('workspace service', () => {
 
     expect(marked).toEqual(expect.arrayContaining(['main.typ', 'assets/a.png', 'assets/b.png', 'workspace.json']));
     expect(marked).not.toContain('other.typ');
-    const last = events.at(-1);
-    if (last?.type !== 'workspace.changed') throw new Error('expected a workspace.changed event');
-    expect(last.paths).toEqual(expect.arrayContaining(['main.typ', 'assets/a.png', 'assets/b.png']));
-    expect(last.paths).not.toContain('other.typ');
+    const announced = changes(events).flatMap((e) => e.paths);
+    expect(announced).toEqual(expect.arrayContaining(['main.typ', 'assets/a.png', 'assets/b.png']));
+    expect(announced).not.toContain('other.typ');
+  });
+
+  // ── The reference rewrite belongs to nobody ──────────────────────────────
+  // Renaming/moving an asset or a folder rewrites every .typ file that pointed
+  // at it. An open editor ignores workspace.changed events carrying its own
+  // client id (that filter exists so its autosave writes don't echo back as
+  // external changes), so attributing the server's rewrite to the tab that
+  // asked for the move would leave that tab's buffer on the pre-rewrite path --
+  // and its next autosave would put the stale path straight back over the
+  // rewrite. The rewritten sources therefore go out with origin: null.
+
+  it('announces an asset rename/move rewrite with a null origin, the asset paths with the caller`s', () => {
+    const { svc, events } = setup();
+    const w = svc.create({ name: 'A', group: null, source: '#image("/assets/shots/a.png")\n' });
+    svc.addAsset(w.id, { kind: 'image', filename: 'a.png', bytes: PNG_1x1, folder: 'shots' }, 'client-1');
+
+    events.length = 0;
+    svc.renameAsset(w.id, 'assets/shots/a.png', 'b', 'client-1');
+    let ch = changes(events);
+    expect(ch).toHaveLength(2);
+    expect(ch[0]).toEqual({ type: 'workspace.changed', id: w.id, paths: ['assets/shots/a.png', 'assets/shots/b.png'], origin: 'client-1' });
+    expect(ch[1]).toEqual({ type: 'workspace.changed', id: w.id, paths: ['main.typ'], origin: null });
+
+    events.length = 0;
+    svc.moveAsset(w.id, 'assets/shots/b.png', null, 'client-1');
+    ch = changes(events);
+    expect(ch).toHaveLength(2);
+    expect(ch[0]).toEqual({ type: 'workspace.changed', id: w.id, paths: ['assets/shots/b.png', 'assets/b.png'], origin: 'client-1' });
+    expect(ch[1]).toEqual({ type: 'workspace.changed', id: w.id, paths: ['main.typ'], origin: null });
+  });
+
+  it('announces a folder rename/delete rewrite with a null origin too', () => {
+    const { svc, events } = setup();
+    const w = svc.create({ name: 'A', group: null, source: '#image("/assets/shots/a.png")\n' });
+    svc.addAsset(w.id, { kind: 'image', filename: 'a.png', bytes: PNG_1x1, folder: 'shots' }, null);
+
+    events.length = 0;
+    svc.renameFolder(w.id, 'shots', 'screens', 'client-1');
+    let ch = changes(events);
+    expect(ch).toHaveLength(2);
+    expect(ch[0]).toEqual({ type: 'workspace.changed', id: w.id, paths: ['assets/shots', 'assets/screens'], origin: 'client-1' });
+    expect(ch[1]).toEqual({ type: 'workspace.changed', id: w.id, paths: ['main.typ'], origin: null });
+
+    events.length = 0;
+    svc.deleteFolder(w.id, 'screens', 'client-1');
+    ch = changes(events);
+    expect(ch).toHaveLength(2);
+    expect(ch[0]).toEqual({ type: 'workspace.changed', id: w.id, paths: ['assets/screens'], origin: 'client-1' });
+    expect(ch[1]).toEqual({ type: 'workspace.changed', id: w.id, paths: ['main.typ'], origin: null });
+  });
+
+  it('skips the rewrite event entirely when no .typ file referenced the asset', () => {
+    const { svc, events } = setup();
+    const w = svc.create({ name: 'A', group: null, source: '= nothing references it\n' });
+    svc.addAsset(w.id, { kind: 'image', filename: 'a.png', bytes: PNG_1x1, folder: 'shots' }, null);
+
+    events.length = 0;
+    svc.renameFolder(w.id, 'shots', 'screens', 'client-1');
+    expect(changes(events)).toEqual([
+      { type: 'workspace.changed', id: w.id, paths: ['assets/shots', 'assets/screens'], origin: 'client-1' },
+    ]);
   });
 });

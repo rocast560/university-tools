@@ -16,7 +16,7 @@ export function useWorkspaceFile(workspaceId: string, path: string) {
   const [loading, setLoading] = useState(true);
   const [dirty, setDirty] = useState(false);
   const [externalChange, setExternalChange] = useState(false);
-  const saver = useRef(createAutosave({ delayMs: AUTOSAVE_MS, save: async (t) => { await api.writeText(workspaceId, path, t); } }));
+  const saver = useRef(createAutosave({ delayMs: AUTOSAVE_MS, save: async (t, keepalive) => { await api.writeText(workspaceId, path, t, keepalive); } }));
   const lastChange = useAppStore((s) => s.lastChange);
   const seenSeq = useRef(0);
 
@@ -28,14 +28,18 @@ export function useWorkspaceFile(workspaceId: string, path: string) {
   }, [workspaceId, path]);
 
   useEffect(() => {
-    saver.current = createAutosave({ delayMs: AUTOSAVE_MS, save: async (t) => { await api.writeText(workspaceId, path, t); setDirty(false); } });
+    saver.current = createAutosave({ delayMs: AUTOSAVE_MS, save: async (t, keepalive) => { await api.writeText(workspaceId, path, t, keepalive); setDirty(false); } });
     setLoading(true);
     void load().finally(() => setLoading(false));
     const s = saver.current;
-    const flushKeepalive = () => { void s.flush(); };
-    window.addEventListener('pagehide', flushKeepalive);
-    window.addEventListener('blur', flushKeepalive);
-    return () => { void s.flush(); s.dispose(); window.removeEventListener('pagehide', flushKeepalive); window.removeEventListener('blur', flushKeepalive); };
+    // pagehide is the last chance to save: ask for a keepalive request so the
+    // browser is allowed to finish it after the document is gone. blur is not
+    // an unload (and fires constantly), so it saves the ordinary way.
+    const onPagehide = () => { void s.flush(true); };
+    const onBlur = () => { void s.flush(); };
+    window.addEventListener('pagehide', onPagehide);
+    window.addEventListener('blur', onBlur);
+    return () => { void s.flush(); s.dispose(); window.removeEventListener('pagehide', onPagehide); window.removeEventListener('blur', onBlur); };
   }, [workspaceId, path, load]);
 
   // External edits (MCP, VS Code, restore): reload when clean, ask when dirty.

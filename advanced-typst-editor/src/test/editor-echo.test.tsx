@@ -1,6 +1,14 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render } from '@testing-library/react';
+import { EditorView } from '@codemirror/view';
+import { undo, undoDepth } from '@codemirror/commands';
 import { TypstEditor, setTypstEditorContent } from '@/components/typst/TypstEditor';
+
+const viewIn = (container: HTMLElement): EditorView => {
+  const view = EditorView.findFromDOM(container.querySelector('.cm-editor') as HTMLElement);
+  if (!view) throw new Error('no CodeMirror view mounted');
+  return view;
+};
 
 /**
  * An external edit (MCP, VS Code, "reload from disk") reaches the editor as a
@@ -29,5 +37,38 @@ describe('TypstEditor change echo', () => {
 
     expect(setTypstEditorContent('= one, edited')).toBe(true);
     expect(onChange).toHaveBeenCalledWith('= one, edited');
+  });
+
+  /**
+   * Suppressing the echo is not enough on its own: if the external edit lands
+   * in the undo history, one Ctrl+Z rolls it back through an ordinary
+   * transaction, which *does* report through onChange -- and the autosave then
+   * writes the pre-external text straight back over someone else's edit. The
+   * exact thing the echo suppression exists to prevent, via undo.
+   */
+  it('does not put a value-prop push into the undo history', () => {
+    const onChange = vi.fn();
+    const { container, rerender } = render(<TypstEditor value="= one" onChange={onChange} docKey="w3:main.typ" />);
+    const view = viewIn(container);
+
+    rerender(<TypstEditor value="= two" onChange={onChange} docKey="w3:main.typ" />);
+    expect(view.state.doc.toString()).toBe('= two');
+    expect(undoDepth(view.state)).toBe(0);
+
+    undo(view);
+    expect(view.state.doc.toString()).toBe('= two');
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('keeps a programmatic rewrite undoable', () => {
+    const onChange = vi.fn();
+    const { container } = render(<TypstEditor value="= one" onChange={onChange} docKey="w4:main.typ" />);
+    const view = viewIn(container);
+
+    expect(setTypstEditorContent('= one, edited')).toBe(true);
+    expect(undoDepth(view.state)).toBe(1);
+
+    undo(view);
+    expect(view.state.doc.toString()).toBe('= one');
   });
 });
