@@ -67,8 +67,6 @@ export function createWorkspaceService(deps: ServiceDeps): WorkspaceService {
     watcher?.markOwnWrite(id, 'workspace.json');
     bus.emit({ type: 'workspace.changed', id, paths, origin });
   };
-  /** Paths whose bytes changed because of a rename/move: the .typ files plus the two asset paths. */
-  const touched = (ws: WorkspaceFs, extra: string[]): string[] => [...new Set([...ws.typFiles(), ...extra])];
 
   const register = (input: { path: string; name: string; group: string | null; library: boolean }): WorkspaceEntry => {
     const e = settings.addWorkspace(input);
@@ -188,13 +186,13 @@ export function createWorkspaceService(deps: ServiceDeps): WorkspaceService {
     renameAsset(id, assetId, stem, origin) {
       const ws = liveFs(id);
       const r = ws.renameAsset(assetId, stem);
-      changed(id, touched(ws, [assetId, r.asset.id]), origin);
+      changed(id, [...new Set([...r.files, assetId, r.asset.id])], origin);
       return r;
     },
     moveAsset(id, assetId, folder, origin) {
       const ws = liveFs(id);
       const r = ws.moveAsset(assetId, folder);
-      changed(id, touched(ws, [assetId, r.asset.id]), origin);
+      changed(id, [...new Set([...r.files, assetId, r.asset.id])], origin);
       return r;
     },
     deleteAsset(id, assetId, origin) {
@@ -209,13 +207,13 @@ export function createWorkspaceService(deps: ServiceDeps): WorkspaceService {
     renameFolder(id, rel, newRel, origin) {
       const ws = liveFs(id);
       const r = ws.renameFolder(rel, newRel);
-      changed(id, touched(ws, [`assets/${rel}`, `assets/${newRel}`]), origin);
+      changed(id, [...new Set([...r.files, `assets/${rel}`, `assets/${newRel}`])], origin);
       return r;
     },
     deleteFolder(id, rel, origin) {
       const ws = liveFs(id);
       const r = ws.deleteFolder(rel);
-      changed(id, touched(ws, [`assets/${rel}`]), origin);
+      changed(id, [...new Set([...r.files, `assets/${rel}`])], origin);
       return r;
     },
   };

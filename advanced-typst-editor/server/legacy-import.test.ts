@@ -61,4 +61,25 @@ describe('importLegacy', () => {
     expect(w.assets).toBe(3);
     expect(fs.readdirSync(path.join(w.path, 'assets')).sort()).toEqual(['evil.png', 'shot-2.png', 'shot.png']);
   });
+
+  it('imports two same-run legacy documents sharing a name into suffixed folders', () => {
+    const legacyDir = tmpDir(); dirs.push(legacyDir);
+    const dataDir = tmpDir(); dirs.push(dataDir);
+    put(legacyDir, 'folders.json', JSON.stringify({ folders: [] }));
+    put(legacyDir, 'documents/doc1.json', JSON.stringify({
+      id: 'doc1', name: 'Dup', folderId: null, source: '= One', assets: [], createdAt: 0,
+    }));
+    put(legacyDir, 'documents/doc2.json', JSON.stringify({
+      id: 'doc2', name: 'Dup', folderId: null, source: '= Two', assets: [], createdAt: 0,
+    }));
+
+    const r = importLegacy({ legacyDir, dataDir, log: () => {} });
+    expect(r.imported.map((w) => w.name)).toEqual(['Dup', 'Dup']);
+    const workspacesDir = path.join(dataDir, 'workspaces');
+    expect(fs.existsSync(path.join(workspacesDir, 'Dup'))).toBe(true);
+    expect(fs.existsSync(path.join(workspacesDir, 'Dup (2)'))).toBe(true);
+
+    // running again is idempotent: both names are now already registered
+    expect(importLegacy({ legacyDir, dataDir, log: () => {} }).imported).toHaveLength(0);
+  });
 });

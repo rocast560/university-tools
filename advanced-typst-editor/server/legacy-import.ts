@@ -19,12 +19,15 @@ export function importLegacy(opts: { legacyDir: string; dataDir: string; log?: (
   const groupOf = (id: string | null) => folders.find((f) => f.id === id)?.name ?? null;
   const docsDir = path.join(opts.legacyDir, 'documents');
   const imported: Array<{ name: string; group: string | null; path: string; assets: number }> = [];
-  const already = new Set(settings.listWorkspaces().map((w) => w.name));
+  // Only names registered *before* this run are skipped for idempotence; a name collision
+  // between two legacy documents within the same run instead falls through to
+  // uniqueDirName below, which suffixes the second one (e.g. "Dup (2)").
+  const preexisting = new Set(settings.listWorkspaces().map((w) => w.name));
 
   for (const file of fs.readdirSync(docsDir).filter((f) => f.endsWith('.json')).sort()) {
     const doc = readJson<LegacyDoc | null>(path.join(docsDir, file), null);
     if (!doc || typeof doc.source !== 'string') { log('skipping unreadable', file); continue; }
-    if (already.has(doc.name)) { log('already imported', doc.name); continue; }
+    if (preexisting.has(doc.name)) { log('already imported', doc.name); continue; }
     const dir = path.join(workspacesDir, uniqueDirName(workspacesDir, safeDirName(doc.name)));
     ensureDir(dir);
     fs.writeFileSync(path.join(dir, 'main.typ'), doc.source);
@@ -60,7 +63,6 @@ export function importLegacy(opts: { legacyDir: string; dataDir: string; log?: (
     }
     if (Object.keys(meta.assets).length || Object.keys(meta.fonts).length) openWorkspace(dir).writeMeta(meta);
     settings.addWorkspace({ path: dir, name: doc.name, group: groupOf(doc.folderId), library: true });
-    already.add(doc.name);
     imported.push({ name: doc.name, group: groupOf(doc.folderId), path: dir, assets: count });
     log(`imported ${doc.name} (${count} assets)`);
   }

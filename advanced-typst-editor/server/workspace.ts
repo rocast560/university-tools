@@ -35,12 +35,13 @@ export interface WorkspaceFs {
   getAsset(id: string): TypstAsset;
   addAsset(input: { kind: TypstAssetKind; filename: string; bytes: Uint8Array; folder: string | null; family?: string | null }): TypstAsset;
   patchAsset(id: string, patch: { crop?: unknown; blurs?: unknown; width?: unknown; height?: unknown; family?: unknown }): TypstAsset;
-  renameAsset(id: string, stem: string): { asset: TypstAsset; references: number };
-  moveAsset(id: string, folder: string | null): { asset: TypstAsset; references: number };
+  /** `files`: the relative paths of the .typ files actually rewritten (a subset of every .typ file). */
+  renameAsset(id: string, stem: string): { asset: TypstAsset; references: number; files: string[] };
+  moveAsset(id: string, folder: string | null): { asset: TypstAsset; references: number; files: string[] };
   deleteAsset(id: string): void;
   createFolder(rel: string): AssetFolder;
-  renameFolder(rel: string, newRel: string): { references: number };
-  deleteFolder(rel: string): { references: number; moved: number };
+  renameFolder(rel: string, newRel: string): { references: number; files: string[] };
+  deleteFolder(rel: string): { references: number; moved: number; files: string[] };
   /** Rewrite `"<oldTypstPath>"` to `"<newTypstPath>"` in every .typ file; returns how many references changed. */
   rewriteReferences(oldTypstPath: string, newTypstPath: string): number;
 }
@@ -163,8 +164,10 @@ export function openWorkspace(root: string, opts: { now?: () => number } = {}): 
 
   const namesIn = (dirAbs: string): string[] => { try { return fs.readdirSync(dirAbs); } catch { return []; } };
 
-  const rewriteReferences = (oldTypstPath: string, newTypstPath: string): number => {
+  /** Rewrites in place and reports which .typ files were actually changed, for own-write marking. */
+  const rewriteReferencesTracked = (oldTypstPath: string, newTypstPath: string): { total: number; files: string[] } => {
     let total = 0;
+    const files: string[] = [];
     for (const rel of listFiles().map((f) => f.path).filter((p) => p.endsWith('.typ'))) {
       const a = path.join(rootAbs, ...rel.split('/'));
       const src = fs.readFileSync(a, 'utf8');
@@ -172,9 +175,11 @@ export function openWorkspace(root: string, opts: { now?: () => number } = {}): 
       if (n === 0) continue;
       writeAtomic(a, retargetAssetPath(src, oldTypstPath, newTypstPath));
       total += n;
+      files.push(rel);
     }
-    return total;
+    return { total, files };
   };
+  const rewriteReferences: WorkspaceFs['rewriteReferences'] = (oldTypstPath, newTypstPath) => rewriteReferencesTracked(oldTypstPath, newTypstPath).total;
 
   /** Move a meta record from one id to another (no-op when absent). */
   const moveMeta = (kind: TypstAssetKind, from: string, to: string): void => {
@@ -189,16 +194,16 @@ export function openWorkspace(root: string, opts: { now?: () => number } = {}): 
   const writeMetaRaw = (meta: WorkspaceJson) => writeAtomic(path.join(rootAbs, META_FILE), JSON.stringify(normaliseMeta(meta), null, 2));
 
   /** Rename/move one asset file to a new directory + filename, rewriting references and meta. */
-  const relocate = (asset: TypstAsset, dirRel: string, filename: string): { asset: TypstAsset; references: number } => {
+  const relocate = (asset: TypstAsset, dirRel: string, filename: string): { asset: TypstAsset; references: number; files: string[] } => {
     const newId = `${dirRel}/${filename}`;
-    if (newId === asset.id) return { asset, references: 0 };
+    if (newId === asset.id) return { asset, references: 0, files: [] };
     const from = path.join(rootAbs, ...asset.id.split('/'));
     const to = path.join(rootAbs, ...newId.split('/'));
     fs.mkdirSync(path.dirname(to), { recursive: true });
     fs.renameSync(from, to);
     moveMeta(asset.kind, asset.id, newId);
-    const references = rewriteReferences(`/${asset.id}`, `/${newId}`);
-    return { asset: getAsset(newId), references };
+    const { total: references, files } = rewriteReferencesTracked(`/${asset.id}`, `/${newId}`);
+    return { asset: getAsset(newId), references, files };
   };
 
   const addAsset: WorkspaceFs['addAsset'] = ({ kind, filename, bytes, folder, family }) => {
@@ -309,12 +314,15 @@ export function openWorkspace(root: string, opts: { now?: () => number } = {}): 
     fs.mkdirSync(path.dirname(toAbs), { recursive: true });
     fs.renameSync(fromAbs, toAbs);
     let references = 0;
+    const files = new Set<string>();
     for (const a of before) {
       const newId = `${ASSETS_DIR}/${to}/${a.id.slice(`${ASSETS_DIR}/${from}/`.length)}`;
       moveMeta('image', a.id, newId);
-      references += rewriteReferences(`/${a.id}`, `/${newId}`);
+      const r = rewriteReferencesTracked(`/${a.id}`, `/${newId}`);
+      references += r.total;
+      for (const f of r.files) files.add(f);
     }
-    return { references };
+    return { references, files: [...files] };
   };
 
   const deleteFolder: WorkspaceFs['deleteFolder'] = (rel) => {
@@ -326,6 +334,7 @@ export function openWorkspace(root: string, opts: { now?: () => number } = {}): 
     const parent = assetDir(parentRel);
     let references = 0;
     let moved = 0;
+    const files = new Set<string>();
     for (const entry of fs.readdirSync(dirAbs, { withFileTypes: true })) {
       const target = uniqueFilename(namesIn(parent.abs), entry.name);
       const fromId = `${ASSETS_DIR}/${n}/${entry.name}`;
@@ -337,15 +346,19 @@ export function openWorkspace(root: string, opts: { now?: () => number } = {}): 
         for (const a of under) {
           const newId = toId + a.id.slice(fromId.length);
           moveMeta('image', a.id, newId);
-          references += rewriteReferences(`/${a.id}`, `/${newId}`);
+          const r = rewriteReferencesTracked(`/${a.id}`, `/${newId}`);
+          references += r.total;
+          for (const f of r.files) files.add(f);
         }
       } else {
         moveMeta('image', fromId, toId);
-        references += rewriteReferences(`/${fromId}`, `/${toId}`);
+        const r = rewriteReferencesTracked(`/${fromId}`, `/${toId}`);
+        references += r.total;
+        for (const f of r.files) files.add(f);
       }
     }
     fs.rmdirSync(dirAbs);
-    return { references, moved };
+    return { references, moved, files: [...files] };
   };
 
   return {

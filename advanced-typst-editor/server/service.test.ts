@@ -5,7 +5,10 @@ import type { ServerEvent } from '../src/types';
 import { createEventBus } from './events';
 import { createSettingsStore } from './settings';
 import { createWorkspaceService } from './service';
+import type { Watcher } from './watcher';
 import { tmpDir, rmDir, put } from './test-util';
+
+const PNG_1x1 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
 
 const dirs: string[] = [];
 afterEach(() => { for (const d of dirs.splice(0)) rmDir(d); });
@@ -123,5 +126,35 @@ describe('workspace service', () => {
     const big = tmpDir(); dirs.push(big);
     for (let i = 0; i < 5001; i++) fs.writeFileSync(path.join(big, `f${i}.txt`), '');
     expect(() => svc.openFolder(big, undefined)).toThrow(/5000/);
+  });
+
+  it('marks only the .typ files actually rewritten as own-writes, not every .typ file', () => {
+    const dataDir = tmpDir(); dirs.push(dataDir);
+    const bus = createEventBus();
+    const events: ServerEvent[] = [];
+    bus.subscribe((e) => events.push(e));
+    const settings = createSettingsStore(dataDir, { now: () => 1000 });
+    const marked: string[] = [];
+    const watcher: Watcher = {
+      watch() {},
+      unwatch() {},
+      markOwnWrite(_id, rel) { marked.push(rel); },
+      close() {},
+    };
+    const svc = createWorkspaceService({ settings, bus, watcher, dataDir, workspacesDir: path.join(dataDir, 'workspaces'), template: '= Template\n', now: () => 1000 });
+    const w = svc.create({ name: 'A', group: null, source: '#image("/assets/a.png")' });
+    svc.addAsset(w.id, { kind: 'image', filename: 'a.png', bytes: PNG_1x1, folder: null }, null);
+    svc.writeFile(w.id, 'other.typ', Buffer.from('no references here'), null);
+
+    marked.length = 0;
+    events.length = 0;
+    svc.renameAsset(w.id, 'assets/a.png', 'b', null);
+
+    expect(marked).toEqual(expect.arrayContaining(['main.typ', 'assets/a.png', 'assets/b.png', 'workspace.json']));
+    expect(marked).not.toContain('other.typ');
+    const last = events.at(-1);
+    if (last?.type !== 'workspace.changed') throw new Error('expected a workspace.changed event');
+    expect(last.paths).toEqual(expect.arrayContaining(['main.typ', 'assets/a.png', 'assets/b.png']));
+    expect(last.paths).not.toContain('other.typ');
   });
 });

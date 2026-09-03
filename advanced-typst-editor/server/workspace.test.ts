@@ -105,9 +105,10 @@ describe('workspace assets', () => {
     const d = fixture();
     put(d, 'chapters/intro.typ', '#image("/assets/findings/login.png", width: 50%)\n#image-placeholder("x", path: "/assets/findings/login.png")');
     const ws = openWorkspace(d);
-    const { asset, references } = ws.renameAsset('assets/findings/login.png', 'Login Bypass.jpg');
+    const { asset, references, files } = ws.renameAsset('assets/findings/login.png', 'Login Bypass.jpg');
     expect(asset.id).toBe('assets/findings/Login_Bypass.png');
     expect(references).toBe(3);
+    expect(files.sort()).toEqual(['chapters/intro.typ', 'main.typ']);
     expect(fs.readFileSync(path.join(d, 'main.typ'), 'utf8')).toContain('"/assets/findings/Login_Bypass.png"');
     expect(fs.readFileSync(path.join(d, 'chapters/intro.typ'), 'utf8')).not.toContain('login.png');
     expect(fs.existsSync(path.join(d, 'assets/findings/login.png'))).toBe(false);
