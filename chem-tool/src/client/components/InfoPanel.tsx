@@ -3,7 +3,8 @@ import { load } from '../commands';
 import { useStore } from '../store';
 
 export function InfoPanel({ species, scene }: { species: Species; scene: Scene }) {
-  const alternatives = useStore((s) => s.alternatives);
+  const alt = useStore((s) => s.alternatives);
+  const alternatives = alt.speciesId === species.id ? alt.items : [];
   return (
     <div className="info">
       <h2>{species.name}</h2>

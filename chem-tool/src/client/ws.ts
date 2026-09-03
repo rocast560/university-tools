@@ -34,14 +34,16 @@ export function handleMessage(msg: Record<string, unknown>): void {
 }
 
 export function connect(): void {
+  if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
   const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
   useStore.getState().setConnection('connecting');
   const ws = new WebSocket(url);
   socket = ws;
-  ws.onopen = () => { attempt = 0; useStore.getState().setConnection('open'); ws.send(JSON.stringify({ type: 'hello', windowId })); };
-  ws.onmessage = (e) => handleMessage(JSON.parse(String(e.data)));
-  ws.onerror = () => ws.close();
+  ws.onopen = () => { if (ws !== socket) return; attempt = 0; useStore.getState().setConnection('open'); ws.send(JSON.stringify({ type: 'hello', windowId })); };
+  ws.onmessage = (e) => { if (ws !== socket) return; handleMessage(JSON.parse(String(e.data))); };
+  ws.onerror = () => { if (ws !== socket) return; ws.close(); };
   ws.onclose = () => {
+    if (ws !== socket) return;
     socket = null;
     useStore.getState().setConnection('closed');
     for (const p of pending.values()) p.reject(new CommandFailed('Connection lost', 0, {}));

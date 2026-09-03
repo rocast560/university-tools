@@ -15,3 +15,10 @@ test('handleMessage applies state, surfaces errors, forwards unknown messages', 
   handleMessage({ type: 'snapshot_request', id: 'x' });
   expect(seen).toEqual([{ type: 'snapshot_request', id: 'x' }]);
 });
+
+test('alternatives are scoped to the species they were resolved for', () => {
+  useStore.getState().setAlternatives('abc123', [{ name: 'Dimethyl ether', formula: 'C2H6O', smiles: 'COC' }]);
+  expect(useStore.getState().alternatives).toEqual({ speciesId: 'abc123', items: [{ name: 'Dimethyl ether', formula: 'C2H6O', smiles: 'COC' }] });
+  useStore.getState().setAlternatives(null, []);
+  expect(useStore.getState().alternatives.items).toEqual([]);
+});

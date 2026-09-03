@@ -11,12 +11,12 @@ export interface ClientState {
   panel: Panel;
   toast: string | null;
   lastActor: string | null;
-  alternatives: Alternative[];
+  alternatives: { speciesId: string | null; items: Alternative[] };
   setWorkspace(ws: Workspace, actor: string): void;
   setConnection(c: Connection): void;
   setPanel(p: Panel): void;
   showToast(t: string | null): void;
-  setAlternatives(a: Alternative[]): void;
+  setAlternatives(speciesId: string | null, items: Alternative[]): void;
 }
 
 export const useStore = create<ClientState>((set) => ({
@@ -25,10 +25,10 @@ export const useStore = create<ClientState>((set) => ({
   panel: 'structure',
   toast: null,
   lastActor: null,
-  alternatives: [],
+  alternatives: { speciesId: null, items: [] },
   setWorkspace: (workspace, actor) => set({ workspace, lastActor: actor }),
   setConnection: (connection) => set({ connection }),
   setPanel: (panel) => set({ panel }),
   showToast: (toast) => set({ toast }),
-  setAlternatives: (alternatives) => set({ alternatives }),
+  setAlternatives: (speciesId, items) => set({ alternatives: { speciesId, items } }),
 }));

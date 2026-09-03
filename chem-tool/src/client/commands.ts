@@ -12,7 +12,7 @@ function report(err: unknown): never {
 export async function load(query: string, newScene = false) {
   try {
     const r = await sendCommand({ type: 'load', query, newScene });
-    useStore.getState().setAlternatives(r.alternatives ?? []);
+    useStore.getState().setAlternatives(r.speciesId ?? null, r.alternatives ?? []);
     return r;
   } catch (err) { report(err); }
 }
