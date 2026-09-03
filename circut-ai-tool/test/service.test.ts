@@ -15,7 +15,7 @@ export async function makeService(opts: { watch?: boolean } = {}) {
   const registry = new ProjectRegistry(path.join(work, 'data'));
   await registry.load();
   const events = new Events<ProjectEvent>();
-  const service = new Service({ kicad: fakeKicad(readFixture('PL1_1.net')), registry, events, watch: opts.watch ?? false, projectsDir: work });
+  const service = new Service({ kicad: fakeKicad(readFixture('PL1_1.net')), registry, events, watch: opts.watch ?? false, projectsDir: work, libs: { symbolText: async (id) => { throw new Error(`no lib ${id}`); } } });
   return { service, sch, events, work };
 }
 

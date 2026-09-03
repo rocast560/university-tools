@@ -3,8 +3,9 @@
 // sidecar; schematic edits (part 4) change the .kicad_sch through this
 // class as well so that mtime checks, backups and rebuilds live in one place.
 
-import { readFile, stat } from 'node:fs/promises';
+import { copyFile, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { addComponent, connectPin, disconnectPin, removeComponent, setValue, type OpResult } from '../src/kicad/ops.ts';
 import { parseSchematic, type Schematic } from '../src/kicad/schematic.ts';
 import type { Hole, Options, Sidecar } from '../src/layout/types.ts';
 import { emptySidecar } from '../src/layout/types.ts';
@@ -12,6 +13,7 @@ import { parseNetlist, type Design } from '../src/netlist.ts';
 import { buildLayoutDoc, type LayoutDoc } from '../src/pipeline.ts';
 import { simulate, type SimResult } from '../src/sim/index.ts';
 import type { KicadCli } from './kicad-cli.ts';
+import type { LibraryLookup } from './libraries.ts';
 import { normalizePath, projectId, readSidecar, scanProjects, writeSidecar, type ProjectInfo, type ProjectRegistry } from './projects.ts';
 import { watchFile, type Events } from './watch.ts';
 
@@ -47,7 +49,20 @@ export interface ServiceDeps {
   events: Events<ProjectEvent>;
   watch: boolean;
   projectsDir: string;
+  libs: LibraryLookup;
 }
+
+export interface EditOutcome {
+  project: OpenProject;
+  backup: string;
+  notes: string[];
+  ref?: string;
+  unit?: number;
+}
+
+const rethrow = (e: unknown): never => {
+  throw e instanceof ServiceError ? e : new ServiceError((e as Error).message, 400);
+};
 
 export class Service {
   private open_ = new Map<string, OpenProject>();
@@ -127,6 +142,75 @@ export class Service {
     this.stops.delete(id);
     this.open_.delete(id);
     this.deps.events.emit({ projectId: id, type: 'closed' });
+  }
+
+  private async backup(p: OpenProject): Promise<string> {
+    const dir = path.join(path.dirname(p.info.path), '.circuit-ai-backups');
+    await mkdir(dir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
+    const target = path.join(dir, `${p.info.name}-${stamp}.kicad_sch`);
+    await copyFile(p.info.path, target);
+    const old = (await readdir(dir)).filter((f) => f.startsWith(`${p.info.name}-`) && f.endsWith('.kicad_sch')).sort().reverse().slice(20);
+    for (const f of old) await rm(path.join(dir, f), { force: true });
+    return target;
+  }
+
+  async edit(id: string, run: (p: OpenProject) => Promise<OpResult>): Promise<EditOutcome> {
+    const p = this.get(id);
+    const s = await stat(p.info.path);
+    if (s.mtimeMs !== p.mtimeMs || s.size !== p.size) throw new ServiceError('the schematic changed on disk since it was read; call refresh (or reopen) and try again', 409);
+    const result = await run(p);
+    const backup = await this.backup(p);
+    await writeFile(p.info.path, result.text);
+    const removed = result.placed['-'];
+    if (removed) {
+      for (const [ref, ids] of Object.entries(removed)) {
+        if (ref === 'pin' || ref === '*') continue;
+        if (removed['*']) delete p.sidecar.placed[ref];
+        else for (const [pin, list] of Object.entries(p.sidecar.placed[ref] ?? {})) p.sidecar.placed[ref][pin] = list.filter((u) => !ids.includes(u));
+      }
+    }
+    for (const [ref, pins] of Object.entries(result.placed)) {
+      if (ref === '-') continue;
+      for (const [pin, ids] of Object.entries(pins)) ((p.sidecar.placed[ref] ??= {})[pin] ??= []).push(...ids);
+    }
+    await writeSidecar(p.info.path, p.sidecar);
+    const fresh = await this.refresh(id);
+    return { project: fresh, backup, notes: result.notes, ref: result.ref, unit: result.unit };
+  }
+
+  addComponent(id: string, a: { libId: string; value?: string; ref?: string; connections?: Record<string, string> }) {
+    return this.edit(id, (p) => addComponent(p.schematic, p.design, a, this.deps.libs.symbolText).catch(rethrow));
+  }
+  connect(id: string, ref: string, pin: string, net: string) {
+    return this.edit(id, (p) => connectPin(p.schematic, p.design, ref, pin, net, this.deps.libs.symbolText).catch(rethrow));
+  }
+  disconnect(id: string, ref: string, pin: string) {
+    return this.edit(id, async (p) => {
+      try {
+        return disconnectPin(p.schematic, ref, pin, p.sidecar.placed);
+      } catch (e) {
+        return rethrow(e);
+      }
+    });
+  }
+  removeComponent(id: string, ref: string) {
+    return this.edit(id, async (p) => {
+      try {
+        return removeComponent(p.schematic, ref, p.sidecar.placed);
+      } catch (e) {
+        return rethrow(e);
+      }
+    });
+  }
+  setValue(id: string, ref: string, value: string) {
+    return this.edit(id, async (p) => {
+      try {
+        return setValue(p.schematic, ref, value);
+      } catch (e) {
+        return rethrow(e);
+      }
+    });
   }
 
   /** Rebuild the doc from the current design and sidecar, persist the sidecar. */
