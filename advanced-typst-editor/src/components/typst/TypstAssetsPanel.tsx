@@ -451,6 +451,11 @@ export const TypstAssetsPanel = memo(function TypstAssetsPanel({
   const [error, setError] = useState<string | null>(null);
   const [placing, setPlacing] = useState<TypstAsset | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Mirror of the live source: the folder-tree drop handler needs it, and
+  // taking it as a dependency would rebuild that handler (and re-render the
+  // whole tree) on every keystroke.
+  const sourceRef = useRef(source);
+  sourceRef.current = source;
 
   // Folder navigation. `null` is the root level.
   const [selectedFolder, setSelectedFolder] = useState<ID | null>(null);
@@ -546,6 +551,31 @@ export const TypstAssetsPanel = memo(function TypstAssetsPanel({
     [ingest, selectedFolder],
   );
 
+  /**
+   * Move an image into a folder (or back to the root).
+   *
+   * The server moves the file and rewrites every `"/assets/…"` reference in
+   * the workspace's .typ files, but it attributes that rewrite to *this*
+   * client -- and an editor ignores `workspace.changed` events it caused
+   * itself, so its buffer would keep the pre-move path: the preview fails to
+   * load the image, and the next autosave puts the stale path back on disk.
+   * Repoint the live buffer here, exactly as the rename flow does.
+   */
+  const moveAssetInto = useCallback(
+    async (assetId: ID, folderId: ID | null) => {
+      const oldPath = assetPath({ id: assetId });
+      try {
+        const newPath = assetPath({ id: await moveTypstAssetToFolder(assetId, folderId) });
+        const cur = sourceRef.current;
+        const next = retargetAssetPath(cur, oldPath, newPath);
+        if (next !== cur) onSourceChange(next);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    },
+    [moveTypstAssetToFolder, onSourceChange],
+  );
+
   /** Drop onto a folder row (or the root row, folderId = null). */
   const onDropInto = useCallback(
     (e: React.DragEvent, folderId: ID | null) => {
@@ -553,7 +583,7 @@ export const TypstAssetsPanel = memo(function TypstAssetsPanel({
       e.stopPropagation();
       setDragOver(false);
       const assetId = e.dataTransfer.getData(ASSET_DRAG);
-      if (assetId) { void moveTypstAssetToFolder(assetId, folderId); return; }
+      if (assetId) { void moveAssetInto(assetId, folderId); return; }
       const movedFolder = e.dataTransfer.getData(FOLDER_DRAG);
       if (movedFolder) {
         if (folderId && isDescendantFolder(folders, folderId, movedFolder)) return; // cycle
@@ -563,7 +593,7 @@ export const TypstAssetsPanel = memo(function TypstAssetsPanel({
       }
       if (e.dataTransfer.files?.length) void ingest(e.dataTransfer.files, folderId);
     },
-    [folders, ingest, moveAssetFolder, moveTypstAssetToFolder],
+    [folders, ingest, moveAssetFolder, moveAssetInto],
   );
 
   const onDragStartAsset = useCallback((e: React.DragEvent, asset: TypstAsset) => {

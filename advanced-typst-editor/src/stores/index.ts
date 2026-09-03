@@ -30,7 +30,8 @@ export interface AppState {
   // BTCT-compatible asset slice
   loadTypstAssets(): Promise<void>;
   addTypstAsset(file: File, kind: TypstAssetKind, folderId?: ID | null): Promise<TypstAsset>;
-  moveTypstAssetToFolder(assetId: ID, folderId: ID | null): Promise<void>;
+  /** Moves the file and rewrites every reference on disk; returns the asset's new id. */
+  moveTypstAssetToFolder(assetId: ID, folderId: ID | null): Promise<ID>;
   createAssetFolder(name: string, parentId?: ID | null): Promise<AssetFolder>;
   renameAssetFolder(id: ID, name: string): Promise<void>;
   moveAssetFolder(id: ID, parentId: ID | null): Promise<void>;
@@ -86,7 +87,7 @@ export const useAppStore = create<AppState>((set, get) => {
       await reloadDetail();
       return get().typstAssets.find((a) => a.id === asset.id) ?? asset;
     },
-    async moveTypstAssetToFolder(assetId, folderId) { await api.moveAsset(get().activeWorkspaceId!, assetId, folderId); await reloadDetail(); },
+    async moveTypstAssetToFolder(assetId, folderId) { const r = await api.moveAsset(get().activeWorkspaceId!, assetId, folderId); await reloadDetail(); return r.asset.id; },
     async createAssetFolder(name, parentId) { const f = await api.createFolder(get().activeWorkspaceId!, folderPathFor(parentId ?? null, name)); await reloadDetail(); return f; },
     async renameAssetFolder(id, name) { await api.renameFolder(get().activeWorkspaceId!, id, renamedFolderPath(id, name)); await reloadDetail(); },
     async moveAssetFolder(id, parentId) { await api.renameFolder(get().activeWorkspaceId!, id, movedFolderPath(id, parentId)); await reloadDetail(); },

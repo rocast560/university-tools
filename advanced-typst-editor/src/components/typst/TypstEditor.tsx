@@ -7,7 +7,7 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 import { useEffect, useRef, memo } from 'react';
-import { EditorState } from '@codemirror/state';
+import { Annotation, EditorState } from '@codemirror/state';
 import {
   EditorView, lineNumbers, highlightActiveLine, highlightActiveLineGutter,
   drawSelection, keymap,
@@ -184,11 +184,25 @@ export function insertAtTypstCursor(text: string): boolean {
 }
 
 /**
+ * Marks a transaction that only pushes the parent's own `value` back into the
+ * view (a reload from disk, an MCP/VS Code edit). The parent already holds
+ * that exact string, so echoing it back through `onChange` would flag the
+ * buffer dirty and autosave it straight back to the server -- an external edit
+ * would answer itself with a redundant write, and a second tab watching the
+ * same file would see that write as "changed on disk while you have unsaved
+ * edits". Programmatic *edits* (slot placement, replace-all) deliberately do
+ * not carry it: those are real changes the parent has yet to see.
+ */
+const fromParentValue = Annotation.define<boolean>();
+
+/**
  * Replace the whole document with `next` as a minimal change (common prefix
  * and suffix kept), so the caret and undo history survive a rewrite that only
  * touched one slot or one search match. Returns false when no editor is mounted.
+ *
+ * `echo: false` suppresses the resulting `onChange` (see `fromParentValue`).
  */
-export function setTypstEditorContent(next: string): boolean {
+export function setTypstEditorContent(next: string, echo = true): boolean {
   const view = activeView;
   if (!view) return false;
   const cur = view.state.doc.toString();
@@ -197,7 +211,10 @@ export function setTypstEditorContent(next: string): boolean {
   while (start < cur.length && start < next.length && cur[start] === next[start]) start++;
   let endCur = cur.length, endNext = next.length;
   while (endCur > start && endNext > start && cur[endCur - 1] === next[endNext - 1]) { endCur--; endNext--; }
-  view.dispatch({ changes: { from: start, to: endCur, insert: next.slice(start, endNext) } });
+  view.dispatch({
+    changes: { from: start, to: endCur, insert: next.slice(start, endNext) },
+    annotations: echo ? undefined : fromParentValue.of(true),
+  });
   return true;
 }
 
@@ -221,7 +238,11 @@ export const TypstEditor = memo(function TypstEditor({ value, onChange, docKey }
             { key: 'Mod-f', preventDefault: true, run: () => { onSearchRequest?.(); return true; } },
             ...historyKeymap, ...defaultKeymap, indentWithTab,
           ]),
-          EditorView.updateListener.of((u) => { if (u.docChanged) onChangeRef.current(u.state.doc.toString()); }),
+          EditorView.updateListener.of((u) => {
+            if (!u.docChanged) return;
+            if (u.transactions.some((tr) => tr.annotation(fromParentValue))) return;
+            onChangeRef.current(u.state.doc.toString());
+          }),
         ],
       }),
     });
@@ -232,11 +253,13 @@ export const TypstEditor = memo(function TypstEditor({ value, onChange, docKey }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docKey]);
 
-  // External replacement (reload from disk, search-and-replace, slot placement): apply as one transaction.
+  // The parent's text changed under us (a reload from disk after an MCP or
+  // VS Code edit): apply it as one transaction, without echoing it back as an
+  // edit the parent then has to save again.
   useEffect(() => {
     const view = viewRef.current;
     if (!view || view.state.doc.toString() === value) return;
-    setTypstEditorContent(value);
+    setTypstEditorContent(value, false);
   }, [value]);
 
   return <div ref={hostRef} className="h-full w-full overflow-hidden" />;

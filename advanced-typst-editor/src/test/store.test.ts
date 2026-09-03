@@ -30,6 +30,14 @@ describe('store folder actions map to API paths', () => {
     expect(calls.find((c) => c.method === 'DELETE')?.url).toContain('path=Findings%2Fauth');
     expect(useAppStore.getState().assetFolders).toEqual(detail.folders);
   });
+  // The panel repoints the open document at the moved file, so it needs the
+  // id the server actually stored (sanitised, de-duplicated), not a guess.
+  it('moving an asset returns its new id', async () => {
+    mockFetch({ 'GET /api/workspaces/w1': detail, 'PATCH *': { asset: { id: 'assets/Findings/shot.png' }, references: 1 } });
+    const newId = await useAppStore.getState().moveTypstAssetToFolder('assets/shot.png', 'Findings');
+    expect(newId).toBe('assets/Findings/shot.png');
+    expect(calls[0]).toMatchObject({ method: 'PATCH', body: { folder: 'Findings' } });
+  });
   it('reloads the active workspace on a change event, debounced', async () => {
     vi.useFakeTimers();
     mockFetch({ 'GET /api/workspaces/w1': detail });
