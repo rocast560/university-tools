@@ -50,7 +50,7 @@ export function Viewer3D({ species, view }: { species: Species; view: ViewState 
         <div className="group">
           <button className={view.spin ? 'active' : ''} onClick={() => setView({ spin: !view.spin })}>spin</button>
           <button className={view.showHydrogens ? 'active' : ''} onClick={() => setView({ showHydrogens: !view.showHydrogens })}>H</button>
-          <button onClick={() => setView({ camera: { preset: 'fit', rotation: [0, 0, 0] }, highlight: [] })}>reset</button>
+          <button onClick={() => { viewer.current?.resetCamera(); setView({ camera: { preset: 'fit', rotation: [0, 0, 0] }, highlight: [] }); }}>reset</button>
           <button onClick={download}>PNG</button>
         </div>
       </div>

@@ -6,6 +6,7 @@ import type { Species, ViewState } from '../chem/types';
 export interface Viewer3DApi {
   setSpecies(species: Species, view: ViewState): void;
   setView(view: ViewState, species: Species): void;
+  resetCamera(): void;
   snapshot(): string;
   resize(): void;
   destroy(): void;
@@ -32,6 +33,16 @@ export function createViewer(container: HTMLElement): Viewer3DApi {
   let currentId: string | null = null;
   let lastCamera = '';
 
+  function resetCameraTo(camera: ViewState['camera']) {
+    viewer.zoomTo();
+    const v = viewer.getView() as number[];
+    viewer.setView([v[0], v[1], v[2], v[3], ...PRESET_Q[camera.preset]]);
+    const [rx, ry, rz] = camera.rotation;
+    if (rx) viewer.rotate(rx, 'x');
+    if (ry) viewer.rotate(ry, 'y');
+    if (rz) viewer.rotate(rz, 'z');
+  }
+
   function apply(view: ViewState, species: Species, resetCamera: boolean) {
     viewer.setStyle({}, styleSpec(view.style));
     if (!view.showHydrogens) viewer.setStyle({ elem: 'H' }, {});
@@ -45,15 +56,7 @@ export function createViewer(container: HTMLElement): Viewer3DApi {
         });
       }
     }
-    if (resetCamera) {
-      viewer.zoomTo();
-      const v = viewer.getView() as number[];
-      viewer.setView([v[0], v[1], v[2], v[3], ...PRESET_Q[view.camera.preset]]);
-      const [rx, ry, rz] = view.camera.rotation;
-      if (rx) viewer.rotate(rx, 'x');
-      if (ry) viewer.rotate(ry, 'y');
-      if (rz) viewer.rotate(rz, 'z');
-    }
+    if (resetCamera) resetCameraTo(view.camera);
     viewer.spin(view.spin ? 'y' : false);
     viewer.render();
   }
@@ -74,6 +77,11 @@ export function createViewer(container: HTMLElement): Viewer3DApi {
       const changed = cam !== lastCamera;
       lastCamera = cam;
       apply(view, species, changed);
+    },
+    resetCamera: () => {
+      resetCameraTo({ preset: 'fit', rotation: [0, 0, 0] });
+      viewer.render();
+      lastCamera = JSON.stringify({ preset: 'fit', rotation: [0, 0, 0] });
     },
     snapshot: () => viewer.pngURI(),
     resize: () => viewer.resize(),
