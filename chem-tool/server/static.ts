@@ -14,10 +14,11 @@ const MIME: Record<string, string> = {
 export function registerStatic(app: Hono, root: string): void {
   const base = path.resolve(root);
   app.get('/*', async (c) => {
-    let p = decodeURIComponent(new URL(c.req.url).pathname);
-    if (p.endsWith('/')) p += 'index.html';
+    const requested = decodeURIComponent(new URL(c.req.url).pathname);
+    const p = requested.endsWith('/') ? requested + 'index.html' : requested;
     const file = path.resolve(base, '.' + p);
     if (!file.startsWith(base)) return c.text('Forbidden', 403);
+    const wantsPage = !path.extname(requested);
     const ext = path.extname(file);
     try {
       const s = await stat(file);
@@ -30,7 +31,7 @@ export function registerStatic(app: Hono, root: string): void {
         },
       });
     } catch {
-      if (ext) return c.notFound();
+      if (!wantsPage) return c.notFound();
       try {
         return c.html((await readFile(path.join(base, 'index.html'))).toString());
       } catch {
