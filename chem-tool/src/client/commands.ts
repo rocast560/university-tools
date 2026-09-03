@@ -1,4 +1,4 @@
-import type { ViewPatch } from '../../server/schemas';
+import type { EditOpInput, ViewPatch } from '../../server/schemas';
 import { useStore } from './store';
 import { CommandFailed, sendCommand } from './ws';
 
@@ -23,3 +23,6 @@ export const switchScene = (sceneId: string) => sendCommand({ type: 'switch_scen
 export const closeScene = (sceneId: string) => sendCommand({ type: 'close_scene', sceneId }).catch(report);
 export const renameScene = (sceneId: string, title: string) => sendCommand({ type: 'rename_scene', sceneId, title }).catch(report);
 export const setStructure = (molfile: string, baseVersion: number) => sendCommand({ type: 'set_structure', molfile, baseVersion });
+export const undo = () => sendCommand({ type: 'undo' }).catch(report);
+export const redo = () => sendCommand({ type: 'redo' }).catch(report);
+export const edit = (ops: EditOpInput[], baseVersion?: number) => sendCommand({ type: 'edit', ops, baseVersion });

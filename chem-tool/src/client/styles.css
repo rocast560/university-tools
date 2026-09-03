@@ -53,3 +53,7 @@ body { font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; color: v
 .snippet pre { margin: 0; padding: 8px 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; white-space: pre-wrap; word-break: break-all; }
 .snippet button { margin-top: 4px; font: inherit; font-size: 12px; }
 button.primary { margin-top: 8px; background: var(--accent); color: white; border: 0; border-radius: 6px; padding: 8px 14px; font: inherit; cursor: pointer; }
+
+.sketch-host { height: 440px; border: 1px solid var(--line); border-radius: 6px; background: white; }
+.history { display: flex; gap: 4px; }
+.history button:disabled { opacity: 0.4; cursor: default; }

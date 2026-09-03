@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { load } from './commands';
+import { load, redo, undo } from './commands';
 import { ConnectDialog } from './components/ConnectDialog';
 import { SceneTabs } from './components/SceneTabs';
 import { SearchBar } from './components/SearchBar';
@@ -27,6 +27,17 @@ export default function App() {
     if (q) { load(q).catch(() => {}); history.replaceState(null, '', location.pathname); }
   }, [workspace]);
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.closest('.sketch-host'))) return;
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+      if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) { e.preventDefault(); redo(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   if (!workspace || !scene || !species) return <div className="loading">Connecting to ChemTool…</div>;
 
   return (
@@ -34,6 +45,10 @@ export default function App() {
       <header className="topbar">
         <SearchBar />
         <SceneTabs />
+        <div className="history">
+          <button className="tab" disabled={scene.history.past.length === 0} onClick={() => undo()} title="Undo (Ctrl+Z)">↶</button>
+          <button className="tab" disabled={scene.history.future.length === 0} onClick={() => redo()} title="Redo (Ctrl+Y)">↷</button>
+        </div>
         <button className="tab" onClick={() => setConnectOpen(true)}>Connect</button>
         <StatusBar />
       </header>
