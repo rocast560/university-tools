@@ -1,6 +1,6 @@
 // PubChem PUG REST client. The only module in src/chem that talks to the network.
 // At most 5 requests per second (210 ms spacing). 200 and 404 answers are cached on disk so a
-// repeated lookup never hits the network twice; errors are not cached.
+// repeated lookup never hits the network twice; errors and unparseable bodies are not cached.
 
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -31,6 +31,11 @@ export interface PubChemOptions {
 interface CachedResponse { status: number; body: string }
 
 const PROPERTIES = 'MolecularFormula,MolecularWeight,SMILES,ConnectivitySMILES,IUPACName,Title';
+const JSON_ACCEPT = 'application/json';
+
+function parseJson<T>(body: string): T {
+  try { return JSON.parse(body) as T; } catch { throw new PubChemUnavailable('PubChem returned a malformed JSON response'); }
+}
 
 export class PubChem {
   private readonly fetchImpl: typeof fetch;
@@ -76,7 +81,7 @@ export class PubChem {
   }
 
   /** Rate limited, cached GET. Resolves for 200 and 404; throws PubChemUnavailable otherwise. */
-  private get(url: string, accept = 'application/json'): Promise<CachedResponse> {
+  private get(url: string, accept: string = JSON_ACCEPT): Promise<CachedResponse> {
     const existing = this.inflight.get(url);
     if (existing) return existing;
     const job = (async () => {
@@ -93,6 +98,9 @@ export class PubChem {
         if (res.status !== 200 && res.status !== 404) throw new PubChemUnavailable(`PubChem answered ${res.status} for ${url}`);
         return { status: res.status, body };
       });
+      // Never persist a body we cannot read: a cached unparseable 200 would repeat the same failure
+      // for that query until the cache file is deleted by hand.
+      if (accept === JSON_ACCEPT) parseJson(result.body);
       await this.writeCache(url, result);
       return result;
     })();
@@ -102,7 +110,7 @@ export class PubChem {
   }
 
   private static parseProperties(body: string): PubChemCompound[] {
-    const json = JSON.parse(body) as { PropertyTable?: { Properties?: Array<Record<string, string | number>> } };
+    const json = parseJson<{ PropertyTable?: { Properties?: Array<Record<string, string | number>> } }>(body);
     return (json.PropertyTable?.Properties ?? []).map((p) => ({
       cid: Number(p.CID),
       formula: String(p.MolecularFormula ?? ''),
@@ -133,7 +141,7 @@ export class PubChem {
   async byFormula(formula: string, max = 8): Promise<PubChemCompound[]> {
     const res = await this.get(`${BASE}/compound/fastformula/${encodeURIComponent(formula)}/cids/JSON?MaxRecords=${max}`);
     if (res.status !== 200) return [];
-    const json = JSON.parse(res.body) as { IdentifierList?: { CID?: number[] } };
+    const json = parseJson<{ IdentifierList?: { CID?: number[] } }>(res.body);
     return this.byCids((json.IdentifierList?.CID ?? []).slice(0, max));
   }
 
@@ -146,14 +154,14 @@ export class PubChem {
   async synonyms(cid: number, max = 30): Promise<string[]> {
     const res = await this.get(`${BASE}/compound/cid/${cid}/synonyms/JSON`);
     if (res.status !== 200) return [];
-    const json = JSON.parse(res.body) as { InformationList?: { Information?: Array<{ Synonym?: string[] }> } };
+    const json = parseJson<{ InformationList?: { Information?: Array<{ Synonym?: string[] }> } }>(res.body);
     return (json.InformationList?.Information?.[0]?.Synonym ?? []).slice(0, max);
   }
 
   async description(cid: number): Promise<string | null> {
     const res = await this.get(`${BASE}/compound/cid/${cid}/description/JSON`);
     if (res.status !== 200) return null;
-    const json = JSON.parse(res.body) as { InformationList?: { Information?: Array<{ Description?: string }> } };
+    const json = parseJson<{ InformationList?: { Information?: Array<{ Description?: string }> } }>(res.body);
     return json.InformationList?.Information?.find((i) => i.Description)?.Description ?? null;
   }
 }

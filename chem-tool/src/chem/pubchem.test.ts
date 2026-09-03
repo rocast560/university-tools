@@ -39,6 +39,14 @@ describe('PubChem', () => {
     expect(await pc.byName('nothing')).toEqual([]);
     await expect(pc.byName('broken')).rejects.toBeInstanceOf(PubChemUnavailable);
   });
+  test('a malformed 200 body is reported as unavailable and never cached', async () => {
+    const calls: string[] = [];
+    const pc = new PubChem({ fetch: fakeFetch({ '/compound/name/garbled/': { status: 200, body: '<html>maintenance</html>' } }, calls), cacheDir: dir, minIntervalMs: 0 });
+    await expect(pc.byName('garbled')).rejects.toBeInstanceOf(PubChemUnavailable);
+    expect(await readdir(dir)).toEqual([]);
+    await expect(pc.byName('garbled')).rejects.toBeInstanceOf(PubChemUnavailable);
+    expect(calls).toHaveLength(2);
+  });
   test('byFormula chains cids to properties', async () => {
     const calls: string[] = [];
     const pc = new PubChem({ fetch: fakeFetch({
