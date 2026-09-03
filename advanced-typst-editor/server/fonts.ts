@@ -61,14 +61,14 @@ export function fontFamily(bytes: Uint8Array): string | null {
 
 /**
  * Parse typst fonts --variants output to find which family was added.
- * Lines not starting with '- ' are family headers; lines starting with '- Style:' are faces.
+ * Lines not starting with whitespace are family headers; lines matching /^\s*- Style:/ are faces.
  */
-function familyOfAddedFace(base: string, withFont: string): string | null {
+export function familyOfAddedFace(base: string, withFont: string): string | null {
   const parseListing = (listing: string): Map<string, number> => {
     const families = new Map<string, number>();
     let currentFamily: string | null = null;
     for (const line of listing.split('\n')) {
-      if (line.startsWith('- ')) {
+      if (/^\s*- Style:/.test(line)) {
         // It's a face line under the current family
         if (currentFamily) families.set(currentFamily, (families.get(currentFamily) ?? 0) + 1);
       } else if (line.trim() && !line.startsWith(' ')) {

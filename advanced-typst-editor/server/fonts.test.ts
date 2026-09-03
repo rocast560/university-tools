@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fontFamily, fontFamilyViaTypst } from './fonts';
+import { fontFamily, fontFamilyViaTypst, familyOfAddedFace } from './fonts';
 import { OLD, TYPST_CLI } from './test-util';
 
 describe('fontFamily', () => {
@@ -16,18 +16,66 @@ describe('fontFamily', () => {
   });
 });
 
-describe('familyOfAddedFace (via fontFamilyViaTypst internal)', () => {
-  it('returns the family name when a new family header appears', async () => {
-    // This test uses an inline fixture since familyOfAddedFace is not exported
-    // We test indirectly through fontFamilyViaTypst's logic
-    // The function should find "New Computer Modern" when added
-    const result = await fontFamilyViaTypst(TYPST_CLI, fs.readFileSync(path.join(OLD, 'fonts', 'NewCM10-Regular.otf')), '.otf');
-    if (TYPST_CLI) expect(result).toBe('New Computer Modern');
+describe('familyOfAddedFace', () => {
+  it('returns new family name when a family header is added', () => {
+    const base = `Family X
+- Style: Normal, Weight: 400
+Family Y
+- Style: Normal, Weight: 400`;
+    const withFont = `Family X
+- Style: Normal, Weight: 400
+Family Y
+- Style: Normal, Weight: 400
+Family Z
+- Style: Normal, Weight: 400`;
+    expect(familyOfAddedFace(base, withFont)).toBe('Family Z');
   });
 
-  it('returns the family name when an existing family gains a style line', async () => {
-    const result = await fontFamilyViaTypst(TYPST_CLI, fs.readFileSync(path.join(OLD, 'fonts', 'LibertinusSerif-Semibold.otf')), '.otf');
-    if (TYPST_CLI) expect(result).toBe('Libertinus Serif');
+  it('returns existing family name when it gains an extra style line', () => {
+    const base = `Family X
+- Style: Normal, Weight: 400
+Family Y
+- Style: Normal, Weight: 400`;
+    const withFont = `Family X
+- Style: Normal, Weight: 400
+Family Y
+- Style: Normal, Weight: 400
+- Style: Bold, Weight: 700`;
+    expect(familyOfAddedFace(base, withFont)).toBe('Family Y');
+  });
+
+  it('returns null when listings are identical', () => {
+    const listing = `Family X
+- Style: Normal, Weight: 400
+Family Y
+- Style: Normal, Weight: 400`;
+    expect(familyOfAddedFace(listing, listing)).toBeNull();
+  });
+
+  it('treats family absent from base as having 0 faces', () => {
+    const base = `Family X
+- Style: Normal, Weight: 400`;
+    const withFont = `Family X
+- Style: Normal, Weight: 400
+Family Y
+- Style: Normal, Weight: 400
+- Style: Bold, Weight: 700`;
+    expect(familyOfAddedFace(base, withFont)).toBe('Family Y');
+  });
+
+  it('ignores non-Style dash-prefixed lines', () => {
+    const base = `Family X
+- Style: Normal, Weight: 400
+- note: something
+Family Y
+- Style: Normal, Weight: 400`;
+    const withFont = `Family X
+- Style: Normal, Weight: 400
+- note: something
+Family Y
+- Style: Normal, Weight: 400
+- Style: Bold, Weight: 700`;
+    expect(familyOfAddedFace(base, withFont)).toBe('Family Y');
   });
 });
 
