@@ -5,8 +5,8 @@ import { HttpError, json, optionalString, readJsonObject, requireString } from '
 import type { SettingsStore } from './settings';
 import type { WorkspaceService } from './service';
 import { serveStatic } from './static';
-import { MAX_ASSET_BYTES } from './assets';
-import { fontFamily } from './fonts';
+import { MAX_ASSET_BYTES, extensionOf } from './assets';
+import { fontFamily, fontFamilyViaTypst } from './fonts';
 
 /** Filled in by later tasks; null => the route answers 503. */
 export interface BackupApi {
@@ -130,8 +130,14 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
       if (seg[3] === 'assets') {
         if (seg.length === 4 && method === 'POST') {
           const kind = url.searchParams.get('kind') === 'font' ? 'font' : 'image';
+          const filename = url.searchParams.get('filename') ?? 'asset';
           const bytes = await readBody(req);
-          const asset = service.addAsset(id, { kind, filename: url.searchParams.get('filename') ?? 'asset', bytes, folder: url.searchParams.get('folder') || null, family: url.searchParams.get('family') ?? (kind === 'font' ? fontFamily(bytes) : null) }, origin);
+          let family = url.searchParams.get('family');
+          if (!family && kind === 'font') {
+            const ext = extensionOf(filename);
+            family = (await fontFamilyViaTypst(deps.compile?.available() ?? null, bytes, ext)) ?? fontFamily(bytes);
+          }
+          const asset = service.addAsset(id, { kind, filename, bytes, folder: url.searchParams.get('folder') || null, family }, origin);
           return json(201, { asset });
         }
         if (rest && method === 'PATCH') {

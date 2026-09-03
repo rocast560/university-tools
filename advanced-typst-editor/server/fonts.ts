@@ -1,3 +1,11 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
+
 /**
  * Family name from an SFNT (ttf/otf/ttc) `name` table. Prefers the
  * typographic family (nameID 16) over the legacy family (nameID 1), and
@@ -48,5 +56,87 @@ export function fontFamily(bytes: Uint8Array): string | null {
     return candidates[0]?.value ?? null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Parse typst fonts --variants output to find which family was added.
+ * Lines not starting with '- ' are family headers; lines starting with '- Style:' are faces.
+ */
+function familyOfAddedFace(base: string, withFont: string): string | null {
+  const parseListing = (listing: string): Map<string, number> => {
+    const families = new Map<string, number>();
+    let currentFamily: string | null = null;
+    for (const line of listing.split('\n')) {
+      if (line.startsWith('- ')) {
+        // It's a face line under the current family
+        if (currentFamily) families.set(currentFamily, (families.get(currentFamily) ?? 0) + 1);
+      } else if (line.trim() && !line.startsWith(' ')) {
+        // It's a family header
+        currentFamily = line.trim();
+        families.set(currentFamily, 0);
+      }
+    }
+    return families;
+  };
+
+  const baseFamilies = parseListing(base);
+  const withFamilies = parseListing(withFont);
+
+  for (const [family, count] of withFamilies) {
+    if ((baseFamilies.get(family) ?? 0) < count) {
+      return family;
+    }
+  }
+  return null;
+}
+
+/** Cache of base font listings per CLI path to avoid repeated spawning */
+const baseListingCache = new Map<string, Promise<string>>();
+
+/**
+ * Family name via typst CLI fonts --variants output. Falls back to null if CLI unavailable.
+ * Caches the base listing per CLI path to minimize process spawning.
+ */
+export async function fontFamilyViaTypst(cli: string | null, bytes: Uint8Array, ext: string): Promise<string | null> {
+  if (!cli) return null;
+
+  // Normalize extension to start with '.'
+  const extNorm = ext.startsWith('.') ? ext : `.${ext}`;
+
+  // Get or fetch base listing (cached)
+  let baseListing: string;
+  if (!baseListingCache.has(cli)) {
+    const basePromise = execFileAsync(cli, ['fonts', '--ignore-system-fonts', '--variants'], {
+      windowsHide: true,
+      timeout: 10000,
+    }).then((res) => res.stdout).catch(() => '');
+    baseListingCache.set(cli, basePromise);
+  }
+  baseListing = await baseListingCache.get(cli)!;
+
+  // Create temp dir, write font, run with font, clean up
+  let tempDir: string | null = null;
+  try {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tfs-font-'));
+    const fontPath = path.join(tempDir, `font${extNorm}`);
+    fs.writeFileSync(fontPath, bytes);
+
+    const { stdout: withFontOutput } = await execFileAsync(cli, ['fonts', '--ignore-system-fonts', '--variants', '--font-path', tempDir], {
+      windowsHide: true,
+      timeout: 10000,
+    });
+
+    return familyOfAddedFace(baseListing, withFontOutput);
+  } catch {
+    return null;
+  } finally {
+    if (tempDir) {
+      try {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      } catch {
+        // Best effort cleanup
+      }
+    }
   }
 }
