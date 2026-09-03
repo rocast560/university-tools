@@ -1403,10 +1403,10 @@ export function renderSvg(res: EngineResult, opts: RenderOptions = {}): string {
   const size = svgSize(res.board);
   const layers = [
     drawBoard(res, t),
-    el('g', { class: 'packages' }, res.packages.map((p) => drawPackage(p, res, t, sim, hl?.wire !== undefined ? () => undefined : dim)).join('')),
+    el('g', { class: 'packages' }, res.packages.map((p) => drawPackage(p, res, t, sim, hl?.wire !== undefined || hl?.net !== undefined ? () => undefined : dim)).join('')),
     el('g', { class: 'parts' }, res.parts.map((p) => drawPart(p, res, t, sim, dimPart)).join('')),
     el('g', { class: 'wires' }, res.wires.map((w, i) => drawWire(w, i, res.nets[w.net]?.color ?? t.text, t, dim([w.net], [], i))).join('')),
-    drawSupply(res, t, dim),
+    drawSupply(res, t, hl?.wire !== undefined ? () => undefined : dim),
   ];
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${size.viewBox}" width="${size.width}" height="${size.height}" font-family="ui-monospace, Consolas, monospace">${layers.join('')}</svg>`;
 }
