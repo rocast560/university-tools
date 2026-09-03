@@ -12,6 +12,7 @@ export interface SimInput {
   name: string;
   net: string;
   control: string;
+  key: string;
   activeLow: boolean;
 }
 
@@ -101,10 +102,10 @@ export function buildSimModel(design: Design, res: EngineResult): SimModel {
   for (const n of res.power.gnd) model.power[n] = 0;
   for (const n of res.power.minus) model.power[n] = 0;
   const seenInput = new Set<string>();
-  const addInput = (net: string, other: string, control: string) => {
+  const addInput = (net: string, other: string, control: string, key: string) => {
     if (powerKind(net) || isUnconnected(net) || seenInput.has(net)) return;
     seenInput.add(net);
-    model.inputs.push({ name: displayName(net), net, control, activeLow: powerKind(other) !== '+' });
+    model.inputs.push({ name: displayName(net), net, control, key, activeLow: powerKind(other) !== '+' });
   };
   const dipPosition = new Map<string, string>();
   for (const pkg of res.packages) if (pkg.kind === 'dipswitch' && pkg.map) for (const [pos, ref] of Object.entries(pkg.map)) if (pkg.id === 'SW') dipPosition.set(ref, `DIP position ${pos}`);
@@ -118,8 +119,8 @@ export function buildSimModel(design: Design, res: EngineResult): SimModel {
     switch (fp.kind) {
       case 'lead2': {
         if (fp.style === 'SW' || fp.style === 'BTN') {
-          addInput(net(fp.a), net(fp.b), dipPosition.get(ref) ?? ref);
-          addInput(net(fp.b), net(fp.a), dipPosition.get(ref) ?? ref);
+          addInput(net(fp.a), net(fp.b), dipPosition.get(ref) ?? ref, ref);
+          addInput(net(fp.b), net(fp.a), dipPosition.get(ref) ?? ref, ref);
         } else if (fp.style === 'LED') model.leds.push({ ref, cathode: net(fp.a), anode: net(fp.b) });
         else if (fp.style === 'R') model.resistors.push([net(fp.a), net(fp.b)]);
         else model.notSimulated.push(`${ref} (${res.values[ref]})`);
@@ -127,8 +128,8 @@ export function buildSimModel(design: Design, res: EngineResult): SimModel {
       }
       case 'dipswitch':
         fp.pairs.forEach(([a, b], i) => {
-          addInput(net(a), net(b), `${ref} position ${i + 1}`);
-          addInput(net(b), net(a), `${ref} position ${i + 1}`);
+          addInput(net(a), net(b), `${ref} position ${i + 1}`, `${ref}:${i + 1}`);
+          addInput(net(b), net(a), `${ref} position ${i + 1}`, `${ref}:${i + 1}`);
         });
         break;
       case 'sevenseg': {
