@@ -38,11 +38,11 @@ function make() {
   const resolver = createResolver({ pubchem: null });
   const store = new WorkspaceStore(createInitialWorkspace(), resolver);
   const windowMessages: Record<string, unknown>[] = [];
-  createApp({ store, resolver, upgradeWebSocket: upgrade, onWindowMessage: (m) => { windowMessages.push(m); } });
+  const { ws: registry } = createApp({ store, resolver, upgradeWebSocket: upgrade, onWindowMessage: (m) => { windowMessages.push(m); } });
   const socket = fakeSocket();
   events().onOpen?.(new Event('open'), socket.makeCtx());
   const deliver = (msg: unknown) => events().onMessage?.(createWSMessageEvent(typeof msg === 'string' ? msg : JSON.stringify(msg)), socket.makeCtx());
-  return { events, store, socket, windowMessages, deliver };
+  return { events, store, socket, windowMessages, deliver, registry };
 }
 
 describe('server WebSocket', () => {
@@ -93,6 +93,12 @@ describe('server WebSocket', () => {
     deliver({ type: 'hello', windowId: 'w1' });
     deliver({ type: 'snapshot_response', id: 'snap1', pngBase64: 'AAAA' });
     expect(windowMessages).toEqual([{ type: 'snapshot_response', id: 'snap1', pngBase64: 'AAAA' }]);
+  });
+
+  test('close removes the client even with a different WSContext instance', () => {
+    const { events, socket, registry } = make();
+    events().onClose?.(new CloseEvent('close'), socket.makeCtx());
+    expect(registry!.clients.size).toBe(0);
   });
 
   test('broadcast keeps history depth but not the snapshots themselves', async () => {
