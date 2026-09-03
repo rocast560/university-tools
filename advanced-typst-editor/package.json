@@ -9,6 +9,7 @@
     "build": "tsc -p tsconfig.json --noEmit && vite build",
     "preview": "vite preview",
     "fonts": "bun scripts/fonts.ts",
+    "build:sidecar": "bun scripts/build-sidecar.ts",
     "test": "vitest run",
     "test:server": "vitest run --project server",
     "test:ui": "vitest run --project ui",
