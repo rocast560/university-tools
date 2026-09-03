@@ -926,11 +926,11 @@ describe('REST API', () => {
     const { json, sch } = await setup();
     const { id } = await (await json('/api/projects/open', { path: sch })).json();
     const before = await (await json(`/api/projects/${id}/layout`)).json();
-    const r1 = before.pinHoles.R1;
-    const holes = { '1': { col: r1['1'].col + 3, row: r1['1'].row }, '2': { col: r1['2'].col + 3, row: r1['2'].row } };
-    const moved = await (await json(`/api/projects/${id}/layout/move`, { ref: 'R1', holes })).json();
-    expect(moved.pinHoles.R1).toEqual(holes);
-    const bad = await json(`/api/projects/${id}/layout/move`, { ref: 'R1', holes: { '1': { col: 1, row: 'a' } } });
+    const d2 = before.pinHoles.D2;
+    const holes = { '1': { col: d2['1'].col + 3, row: d2['1'].row }, '2': { col: d2['2'].col + 3, row: d2['2'].row } };
+    const moved = await (await json(`/api/projects/${id}/layout/move`, { ref: 'D2', holes })).json();
+    expect(moved.pinHoles.D2).toEqual(holes);
+    const bad = await json(`/api/projects/${id}/layout/move`, { ref: 'D2', holes: { '1': { col: 1, row: 'a' } } });
     expect(bad.status).toBe(400);
     expect((await bad.json()).error).toMatch(/pin 2/);
     const opts = await (await json(`/api/projects/${id}/layout/options`, { dipSwitchPositions: 4 })).json();
