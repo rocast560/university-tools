@@ -1,0 +1,26 @@
+{
+  "name": "typst-studio",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev:server": "bun --watch server/index.ts",
+    "test": "vitest run",
+    "test:server": "vitest run --project server",
+    "test:ui": "vitest run --project ui",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.server.json --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "fflate": "^0.8.3",
+    "jimp": "^1.6.1",
+    "zod": "^4.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "jsdom": "^30.0.0",
+    "typescript": "^6.0.3",
+    "vite": "^8.2.0",
+    "vitest": "^4.1.0"
+  }
+}
