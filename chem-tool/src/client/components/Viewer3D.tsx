@@ -2,9 +2,16 @@ import { useEffect, useRef, useState } from 'react';
 import type { Species, ViewState } from '../../chem/types';
 import { setView } from '../commands';
 import type { Viewer3DApi } from '../viewer3d';
+import { extraHandlers, sendRaw } from '../ws';
 
 /** Set by the mounted viewer; used by the live snapshot responder (phase 2). */
 export let snapshotProvider: (() => string | null) | null = null;
+
+extraHandlers.push((msg) => {
+  if (msg.type !== 'snapshot_request') return;
+  const url = snapshotProvider?.() ?? null;
+  sendRaw({ type: 'snapshot_response', id: msg.id, pngBase64: url ? url.split(',')[1] : null });
+});
 
 const STYLES: ViewState['style'][] = ['ballstick', 'stick', 'spacefill', 'wireframe'];
 const LABELS: ViewState['labels'][] = ['none', 'element', 'index'];

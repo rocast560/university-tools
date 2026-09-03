@@ -45,14 +45,18 @@ export function speciesText(s: Species, deps: AppDeps, scene?: Scene): string {
   ].filter(Boolean).join('\n');
 }
 
-/** Software-rendered 3D PNG. Phase 2 asks a live window first. */
-export async function render3dPng(deps: AppDeps, scene: Scene, species: Species, width: number, style?: ViewState['style']): Promise<Uint8Array> {
+/** 3D PNG: the live window's WebGL view when one answers, otherwise the software renderer. */
+export async function render3dPng(deps: AppDeps, scene: Scene, species: Species, width: number, style?: ViewState['style']): Promise<{ bytes: Uint8Array; live: boolean }> {
+  if (deps.snapshots && !style && scene.id === deps.store.get().activeSceneId && species.id === scene.focusId) {
+    const live = await deps.snapshots.request(scene.id, width, Math.round(width * 0.75));
+    if (live) return { bytes: live, live: true };
+  }
   const [rx, ry, rz] = scene.view.camera.rotation;
   const svg = renderSnapshotSvg(species.atoms, species.bonds, {
     width, height: Math.round(width * 0.75), style: style ?? scene.view.style, showHydrogens: scene.view.showHydrogens,
     highlight: scene.view.highlight, rotation: [20 + rx, 30 + ry, rz],
   });
-  return svgToPng(svg, width);
+  return { bytes: await svgToPng(svg, width), live: false };
 }
 
 function fail(err: unknown): ToolResult {
@@ -128,8 +132,8 @@ export function createMcpServer(deps: AppDeps): McpServer {
     inputSchema: { speciesId: speciesIdArg, style: z.enum(['ballstick', 'stick', 'spacefill', 'wireframe']).optional(), width: widthArg },
   }, (args) => run(async () => {
     const { scene, species } = current(args.speciesId);
-    const bytes = await render3dPng(deps, scene, species, args.width, args.style);
-    return { content: [text(`3D view of ${describe(species)} (software renderer)`), { type: 'image', data: Buffer.from(bytes).toString('base64'), mimeType: 'image/png' }] };
+    const { bytes, live } = await render3dPng(deps, scene, species, args.width, args.style);
+    return { content: [text(`3D view of ${describe(species)} (${live ? 'live window' : 'software renderer'})`), { type: 'image', data: Buffer.from(bytes).toString('base64'), mimeType: 'image/png' }] };
   }));
 
   server.registerTool('get_structure', {
@@ -205,7 +209,7 @@ export function createMcpServer(deps: AppDeps): McpServer {
     const camera = preset || rotate ? { preset: preset ?? scene.view.camera.preset, rotation } : undefined;
     await store.dispatch({ type: 'set_view', view: { ...fields, ...(camera ? { camera } : {}) } }, 'mcp');
     const species = store.focused(scene.id);
-    const bytes = await render3dPng(deps, store.activeScene(), species, width);
+    const { bytes } = await render3dPng(deps, store.activeScene(), species, width);
     return { content: [text(`View updated: ${JSON.stringify(store.activeScene().view)}`), { type: 'image', data: Buffer.from(bytes).toString('base64'), mimeType: 'image/png' }] };
   }));
 

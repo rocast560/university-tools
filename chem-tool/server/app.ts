@@ -7,6 +7,7 @@ import type { UpgradeWebSocket } from 'hono/ws';
 import type { Resolver } from '../src/chem/resolve';
 import { registerApi } from './api';
 import { mountMcp } from './mcp';
+import type { SnapshotBroker } from './snapshots';
 import { registerStatic } from './static';
 import { registerWs, type WindowClient, type WsRegistry } from './ws';
 import type { WorkspaceStore } from './workspace';
@@ -18,6 +19,7 @@ export interface AppDeps {
   upgradeWebSocket?: UpgradeWebSocket;
   host?: string;
   port?: number;
+  snapshots?: SnapshotBroker;
   /** Messages from a window that are not hello/command (phase 2: snapshot_response). */
   onWindowMessage?: (msg: Record<string, unknown>, client: WindowClient) => void;
 }

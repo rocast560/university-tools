@@ -68,6 +68,10 @@ export function registerApi(app: Hono, deps: AppDeps): void {
     const scene = deps.store.scene(c.req.query('scene') || undefined);
     const species = deps.store.focused(scene.id);
     const width = Number(c.req.query('w') ?? 640);
+    if (deps.snapshots) {
+      const live = await deps.snapshots.request(scene.id, width, Number(c.req.query('h') ?? Math.round(width * 0.75)));
+      if (live) return png(live);
+    }
     const [rx, ry, rz] = scene.view.camera.rotation;
     const svg = renderSnapshotSvg(species.atoms, species.bonds, {
       width, height: Number(c.req.query('h') ?? Math.round(width * 0.75)), style: scene.view.style,
