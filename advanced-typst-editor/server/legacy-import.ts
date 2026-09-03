@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { AssetMeta, WorkspaceJson } from '../src/types';
+import { sanitizeFilename, uniqueFilename } from './assets';
 import { ensureDir, readJson, safeDirName, uniqueDirName } from './fsx';
 import { fontFamily } from './fonts';
 import { createSettingsStore } from './settings';
@@ -28,14 +29,25 @@ export function importLegacy(opts: { legacyDir: string; dataDir: string; log?: (
     ensureDir(dir);
     fs.writeFileSync(path.join(dir, 'main.typ'), doc.source);
     const meta: WorkspaceJson = { version: 1, assets: {}, fonts: {} };
+    const usedAssetNames = new Set<string>();
+    const usedFontNames = new Set<string>();
     let count = 0;
     for (const a of doc.assets ?? []) {
       const blob = path.join(opts.legacyDir, 'blobs', a.id);
       if (!fs.existsSync(blob)) { log(`missing blob for ${doc.name}/${a.filename}`); continue; }
       const sub = a.kind === 'font' ? 'fonts' : 'assets';
       ensureDir(path.join(dir, sub));
-      fs.copyFileSync(blob, path.join(dir, sub, a.filename));
-      const id = `${sub}/${a.filename}`;
+      // Sanitise (strip any directory components, e.g. "../evil.png") and
+      // de-duplicate against sibling assets of the same kind in this
+      // document, so two legacy assets sharing a filename don't overwrite
+      // one another on disk or in workspace.json.
+      const used = a.kind === 'font' ? usedFontNames : usedAssetNames;
+      const name0 = sanitizeFilename(a.filename);
+      const name = uniqueFilename(used, name0);
+      used.add(name);
+      if (name !== a.filename) log(`renamed ${doc.name}/${a.filename} -> ${sub}/${name}`);
+      fs.copyFileSync(blob, path.join(dir, sub, name));
+      const id = `${sub}/${name}`;
       if (a.kind === 'font') {
         // R5: a legacy font record with no fontFamily falls back to sniffing
         // the SFNT name table from the blob's bytes.
