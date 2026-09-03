@@ -147,7 +147,11 @@ export class Service {
   private async backup(p: OpenProject): Promise<string> {
     const dir = path.join(path.dirname(p.info.path), '.circuit-ai-backups');
     await mkdir(dir, { recursive: true });
-    const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
+    // Millisecond precision (not just YYYYMMDD-HHMMSS) so a burst of edits within the same
+    // second doesn't collapse onto one filename and silently lose every backup but the last.
+    // Lexicographic order still equals chronological order: this only appends more digits of
+    // the same left-to-right significance, it doesn't reorder anything.
+    const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').replace('.', '').slice(0, 18);
     const target = path.join(dir, `${p.info.name}-${stamp}.kicad_sch`);
     await copyFile(p.info.path, target);
     const old = (await readdir(dir)).filter((f) => f.startsWith(`${p.info.name}-`) && f.endsWith('.kicad_sch')).sort().reverse().slice(20);
@@ -155,28 +159,49 @@ export class Service {
     return target;
   }
 
-  async edit(id: string, run: (p: OpenProject) => Promise<OpResult>): Promise<EditOutcome> {
-    const p = this.get(id);
+  /** Throws the same 409 both times edit() checks freshness, against the SAME values read at open/refresh time. */
+  private async assertFresh(p: OpenProject): Promise<void> {
     const s = await stat(p.info.path);
     if (s.mtimeMs !== p.mtimeMs || s.size !== p.size) throw new ServiceError('the schematic changed on disk since it was read; call refresh (or reopen) and try again', 409);
+  }
+
+  async edit(id: string, run: (p: OpenProject) => Promise<OpResult>): Promise<EditOutcome> {
+    const p = this.get(id);
+    await this.assertFresh(p);
     const result = await run(p);
+    // A malformed op result must never reach disk: re-parse before doing anything else.
+    try {
+      parseSchematic(result.text, p.info.name);
+    } catch (e) {
+      throw new ServiceError(`the edit produced an invalid schematic and was not written: ${(e as Error).message}`, 400);
+    }
     const backup = await this.backup(p);
+    // run() above may have awaited (library fetches, ...); re-check right before the write so a
+    // concurrent external change made while we were working is refused instead of silently lost.
+    // This is against the SAME p.mtimeMs/p.size captured before run(), not a fresh read of "now".
+    await this.assertFresh(p);
     await writeFile(p.info.path, result.text);
-    const removed = result.placed['-'];
-    if (removed) {
-      for (const [ref, ids] of Object.entries(removed)) {
-        if (ref === 'pin' || ref === '*') continue;
-        if (removed['*']) delete p.sidecar.placed[ref];
-        else for (const [pin, list] of Object.entries(p.sidecar.placed[ref] ?? {})) p.sidecar.placed[ref][pin] = list.filter((u) => !ids.includes(u));
+    try {
+      const removed = result.placed['-'];
+      if (removed) {
+        for (const [ref, ids] of Object.entries(removed)) {
+          if (ref === 'pin' || ref === '*') continue;
+          if (removed['*']) delete p.sidecar.placed[ref];
+          else for (const [pin, list] of Object.entries(p.sidecar.placed[ref] ?? {})) p.sidecar.placed[ref][pin] = list.filter((u) => !ids.includes(u));
+        }
       }
+      for (const [ref, pins] of Object.entries(result.placed)) {
+        if (ref === '-') continue;
+        for (const [pin, ids] of Object.entries(pins)) ((p.sidecar.placed[ref] ??= {})[pin] ??= []).push(...ids);
+      }
+      await writeSidecar(p.info.path, p.sidecar);
+      const fresh = await this.refresh(id);
+      return { project: fresh, backup, notes: result.notes, ref: result.ref, unit: result.unit };
+    } catch (e) {
+      // The schematic write already succeeded at this point; say so and name the backup so the
+      // recovery path isn't hidden behind a bare error.
+      throw new ServiceError(`edit applied to ${p.info.path} but finishing up failed (${(e as Error).message}); a pre-edit backup is at ${backup}`, 500);
     }
-    for (const [ref, pins] of Object.entries(result.placed)) {
-      if (ref === '-') continue;
-      for (const [pin, ids] of Object.entries(pins)) ((p.sidecar.placed[ref] ??= {})[pin] ??= []).push(...ids);
-    }
-    await writeSidecar(p.info.path, p.sidecar);
-    const fresh = await this.refresh(id);
-    return { project: fresh, backup, notes: result.notes, ref: result.ref, unit: result.unit };
   }
 
   addComponent(id: string, a: { libId: string; value?: string; ref?: string; connections?: Record<string, string> }) {

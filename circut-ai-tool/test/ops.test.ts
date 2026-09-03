@@ -64,6 +64,14 @@ describe('addComponent', () => {
     expect(s.symbols.some((x) => x.libId === 'power:+5V' && x.at.y > 0)).toBe(true);
   });
 
+  test('spare-gate reuse requires a matching value; a differently-valued request falls through to a new chip', async () => {
+    const r = await addComponent(sch, design, { libId: '74xx:74LS86', value: '74HC86' }, libs);
+    expect(r.ref).not.toBe('U1');
+    const s = parseSchematic(r.text, 'PL1_1');
+    expect(s.symbols.filter((x) => x.ref === 'U1').every((x) => x.value === '74LS86')).toBe(true);
+    expect(s.symbols.some((x) => x.ref === r.ref && x.libId === '74xx:74LS86' && x.value === '74HC86')).toBe(true);
+  });
+
   test('explicit ref and unknown lib', async () => {
     const r = await addComponent(sch, design, { libId: 'Device:R', ref: 'R9', value: '1k' }, libs);
     expect(r.ref).toBe('R9');

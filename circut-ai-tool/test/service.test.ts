@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { copyFileSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { ProjectRegistry, sidecarPath } from '../server/projects.ts';
@@ -92,5 +92,52 @@ describe('Service', () => {
     expect(r.mtimeMs).toBeGreaterThan(0);
     service.close(p.info.id);
     expect(service.has(p.info.id)).toBe(false);
+  });
+});
+
+describe('Service.edit safety (backup-before-write, stale guard)', () => {
+  test('a stale write is refused, leaves the file and backups untouched, and a successful edit backs up the pre-edit content', async () => {
+    const { service, sch, work } = await makeService();
+    const p = await service.open(sch);
+    const before = readFileSync(sch, 'utf8');
+
+    // Simulate a concurrent external save (e.g. KiCad itself) after the project was opened.
+    writeFileSync(sch, before + '\n');
+    await expect(service.setValue(p.info.id, 'R1', '2k')).rejects.toThrow(/changed on disk/);
+    // The refused edit must not have touched the file at all, and must not have created a backup.
+    expect(readFileSync(sch, 'utf8')).toBe(before + '\n');
+    expect(existsSync(path.join(work, '.circuit-ai-backups'))).toBe(false);
+
+    // Restore the original bytes and let the service catch up, then perform a real edit.
+    writeFileSync(sch, before);
+    await service.refresh(p.info.id);
+    const out = await service.setValue(p.info.id, 'R1', '2k');
+    // The backup must hold the PRE-edit content, not the post-edit content.
+    expect(readFileSync(out.backup, 'utf8')).toBe(before);
+    expect(readFileSync(sch, 'utf8')).not.toBe(before);
+  });
+
+  test('a concurrent on-disk change made while an operation is running is refused, not silently discarded', async () => {
+    const { service, sch } = await makeService();
+    const p = await service.open(sch);
+    const before = readFileSync(sch, 'utf8');
+    await expect(
+      service.edit(p.info.id, async (proj) => {
+        // Simulate a concurrent save landing while this op is still "working" (e.g. a
+        // multi-await library fetch) -- before this op's own result gets written back.
+        writeFileSync(sch, before + '\nconcurrent-change');
+        return { text: proj.schematic.text + '\n', placed: {}, notes: [] };
+      }),
+    ).rejects.toThrow(/changed on disk/);
+    // The concurrent write must survive: the op's result must not have overwritten it.
+    expect(readFileSync(sch, 'utf8')).toBe(before + '\nconcurrent-change');
+  });
+
+  test('backup filenames stay distinct under a burst of same-second edits', async () => {
+    const { service, sch, work } = await makeService();
+    const p = await service.open(sch);
+    for (let i = 0; i < 6; i++) await service.setValue(p.info.id, 'R1', `${i}k`);
+    const backups = readdirSync(path.join(work, '.circuit-ai-backups')).filter((f) => f.endsWith('.kicad_sch'));
+    expect(backups.length).toBe(6);
   });
 });

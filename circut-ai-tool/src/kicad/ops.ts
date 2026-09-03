@@ -117,7 +117,11 @@ export async function addComponent(sch: Schematic, design: Design, a: { libId: s
   const pinsFor = (u: number) => pinsOfUnit(lib, u).map((p) => p.number);
   if (!a.ref && lib.unitCount > 1 && !lib.power) {
     const byRef = new Map<string, Set<number>>();
-    for (const s of cur.symbols) if (s.libId === a.libId || (s.value === value && s.libId.endsWith(`:${lib.name}`))) byRef.set(s.ref, new Set([...(byRef.get(s.ref) ?? []), s.unit]));
+    // Reuse a spare unit only of a chip that already carries the value being requested (or any
+    // value, if the caller didn't ask for a specific one) -- otherwise a request for a
+    // differently-valued part (e.g. 74HC86 vs. an existing 74LS86) could land on the same
+    // physical reference with contradictory Value properties across its units.
+    for (const s of cur.symbols) if (s.libId === a.libId && (a.value === undefined || s.value === a.value)) byRef.set(s.ref, new Set([...(byRef.get(s.ref) ?? []), s.unit]));
     for (const [r, used] of byRef) {
       const free = gateUnits.find((u) => !used.has(u));
       if (free) {
