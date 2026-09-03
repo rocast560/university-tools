@@ -33,15 +33,19 @@ export function createSaver(file: string, delayMs = 250): { save(ws: Workspace):
     }
   };
 
+  const enqueue = (): Promise<void> => {
+    writing = writing.then(write, write);
+    return writing;
+  };
+
   return {
     save(ws) {
       pending = ws;
-      if (!timer) timer = setTimeout(() => { writing = write(); }, delayMs);
+      if (!timer) timer = setTimeout(() => { void enqueue(); }, delayMs);
     },
     async flush() {
       if (timer) { clearTimeout(timer); timer = null; }
-      await writing;
-      await write();
+      await enqueue();
     },
   };
 }

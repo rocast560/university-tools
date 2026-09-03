@@ -22,3 +22,19 @@ test('save then load round trips; missing or corrupt files load as null', async 
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('a save that lands while a write is in flight is not lost', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'chemws-'));
+  const file = path.join(dir, 'workspace.json');
+  try {
+    const saver = createSaver(file, 5);
+    const ws = createInitialWorkspace();
+    saver.save({ ...ws, version: 5 });
+    await new Promise((r) => setTimeout(r, 8));
+    saver.save({ ...ws, version: 6 });
+    await saver.flush();
+    expect((await loadWorkspace(file))?.version).toBe(6);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

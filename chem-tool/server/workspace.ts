@@ -90,7 +90,9 @@ export class WorkspaceStore {
     const result = await this.apply(command);
     this.ws = { ...this.ws, version: this.ws.version + 1 };
     this.onChange?.(this.ws);
-    for (const fn of this.listeners) fn(this.ws, actor);
+    for (const fn of this.listeners) {
+      try { fn(this.ws, actor); } catch (err) { console.error('workspace listener failed:', err); }
+    }
     return result;
   }
 

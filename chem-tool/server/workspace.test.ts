@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import { createResolver } from '../src/chem/resolve';
 import { CommandError, WorkspaceStore, createInitialWorkspace, mergeView } from './workspace';
 import { DEFAULT_VIEW } from '../src/chem/types';
@@ -87,6 +87,17 @@ describe('WorkspaceStore', () => {
     expect(store.focused().name).toBe('Water');
     const missing = await store.dispatch({ type: 'focus', speciesId: 'nope' }, 'api').catch((e) => e);
     expect(missing.status).toBe(404);
+  });
+  test('a throwing listener does not stop other listeners or fail the command', async () => {
+    const { store } = makeStore();
+    const seen: number[] = [];
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    store.subscribe(() => { throw new Error('bad listener'); });
+    store.subscribe((ws) => seen.push(ws.version));
+    await expect(store.dispatch({ type: 'set_view', view: { spin: true } }, 'api')).resolves.toBeTruthy();
+    expect(seen).toEqual([2]);
+    expect(errorSpy).toHaveBeenCalledOnce();
+    errorSpy.mockRestore();
   });
 });
 
