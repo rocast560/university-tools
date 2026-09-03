@@ -36,6 +36,22 @@ describe('REST', () => {
     expect(stale.status).toBe(409);
     const invalid = await app.request('/api/command', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type: 'nope' }) });
     expect(invalid.status).toBe(400);
+    const malformed = await app.request('/api/command', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{oops' });
+    expect(malformed.status).toBe(400);
+    expect((await malformed.json()).error).toBe('Invalid JSON body');
+  });
+  test('a foreign Origin is rejected; loopback and header-less callers are not', async () => {
+    const { app, store } = make();
+    const evil = { origin: 'https://evil.example' };
+    expect((await app.request('/api/health', { headers: evil })).status).toBe(403);
+    expect((await app.request('/mcp', { method: 'POST', headers: evil })).status).toBe(403);
+    const write = await app.request('/api/command', { method: 'POST', headers: { ...evil, 'content-type': 'application/json' }, body: JSON.stringify({ type: 'load', query: 'benzene' }) });
+    expect(write.status).toBe(403);
+    expect(store.focused().name).toBe('Water');
+    for (const origin of ['http://127.0.0.1:8140', 'http://localhost:8140', 'http://localhost:5173']) {
+      expect((await app.request('/api/health', { headers: { origin } })).status).toBe(200);
+    }
+    expect((await app.request('/api/health')).status).toBe(200);
   });
   test('species files and snapshot', async () => {
     const { app, store } = make();
@@ -58,5 +74,6 @@ describe('REST', () => {
     expect((await app.request('/api/formula?q=Xx')).status).toBe(400);
     const c = await (await app.request('/api/connect')).json();
     expect(c.claudeCode).toBe('claude mcp add --transport http chemtool http://127.0.0.1:8140/mcp');
+    expect(c.openapi).toBeUndefined();
   });
 });

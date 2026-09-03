@@ -2,7 +2,6 @@
 // so tests can build the app under Node.
 
 import { Hono } from 'hono';
-import { cors } from 'hono/cors';
 import type { UpgradeWebSocket } from 'hono/ws';
 import type { Resolver } from '../src/chem/resolve';
 import { registerApi } from './api';
@@ -24,9 +23,30 @@ export interface AppDeps {
   onWindowMessage?: (msg: Record<string, unknown>, client: WindowClient) => void;
 }
 
+const VITE_DEV_PORT = 5173;
+
+/** Loopback origins a browser may use: the server itself, and the Vite dev server, which proxies
+ *  /api and /ws while forwarding its own Origin header. */
+export function allowedOrigins(deps: AppDeps): string[] {
+  const port = deps.port ?? 8140;
+  const hosts = new Set(['127.0.0.1', 'localhost', deps.host ?? '127.0.0.1']);
+  return [...hosts].flatMap((h) => [`http://${h}:${port}`, `http://${h}:${VITE_DEV_PORT}`]);
+}
+
 export function createApp(deps: AppDeps): { app: Hono; ws: WsRegistry | null } {
   const app = new Hono();
-  app.use('*', cors());
+
+  // No CORS: the client is same-origin. Instead reject any request carrying a foreign Origin, which
+  // stops both cross-origin reads and cross-origin writes (a simple POST needs no preflight), and
+  // satisfies the MCP spec's Origin check for Streamable HTTP on localhost (DNS rebinding). Requests
+  // with no Origin — curl, Claude Code, any non-browser MCP client — are allowed through.
+  const origins = allowedOrigins(deps);
+  app.use('*', async (c, next) => {
+    const origin = c.req.header('origin');
+    if (origin && !origins.includes(origin)) return c.json({ error: 'Forbidden origin' }, 403);
+    await next();
+  });
+
   registerApi(app, deps);
   mountMcp(app, deps);
   const ws = deps.upgradeWebSocket ? registerWs(app, deps, deps.upgradeWebSocket) : null;

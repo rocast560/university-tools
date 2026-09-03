@@ -9,7 +9,6 @@ export default defineConfig({
     proxy: {
       '/api': 'http://127.0.0.1:8140',
       '/mcp': 'http://127.0.0.1:8140',
-      '/openapi.json': 'http://127.0.0.1:8140',
       '/ws': { target: 'ws://127.0.0.1:8140', ws: true },
     },
   },

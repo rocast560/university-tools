@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-interface ConnectInfo { mcpUrl: string; claudeCode: string; openapi: string; window: string }
+interface ConnectInfo { mcpUrl: string; claudeCode: string; window: string }
 
 function Snippet({ label, value }: { label: string; value: string }) {
   const [copied, setCopied] = useState(false);
@@ -26,7 +26,6 @@ export function ConnectDialog({ open, onClose }: { open: boolean; onClose: () =>
           <>
             <Snippet label="Claude Code (run once in any terminal)" value={info.claudeCode} />
             <Snippet label="MCP endpoint (Streamable HTTP)" value={info.mcpUrl} />
-            <Snippet label="OpenAPI document" value={info.openapi} />
             <p className="muted small">Claude Desktop and ChatGPT connections arrive with the desktop build.</p>
           </>
         )}

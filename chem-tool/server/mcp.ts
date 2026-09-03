@@ -11,7 +11,7 @@ import { renderSnapshotSvg } from '../src/chem/render3d';
 import type { Scene, Species, ViewState } from '../src/chem/types';
 import { connectInfo } from './api';
 import type { AppDeps } from './app';
-import { EditOpSchema } from './schemas';
+import { Bounded, EditOpSchema, MAX_OPS } from './schemas';
 import { CommandError, describe } from './workspace';
 
 type Content = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string };
@@ -77,7 +77,7 @@ export function createMcpServer(deps: AppDeps): McpServer {
   server.registerTool('lookup_chemical', {
     title: 'Look up a chemical',
     description: 'Resolve a name, formula, SMILES or CAS number to a compound. By default loads it into the ChemTool window and returns info, the numbered atom list (use these numbers in edit_molecule and set_view) and a 2D drawing. Set load=false to only read.',
-    inputSchema: { query: z.string().min(1), load: z.boolean().default(true), newScene: z.boolean().default(false).describe('Open a new scene tab instead of replacing the current molecule.') },
+    inputSchema: { query: Bounded.query, load: z.boolean().default(true), newScene: z.boolean().default(false).describe('Open a new scene tab instead of replacing the current molecule.') },
   }, (args) => run(async () => {
     if (!args.load) {
       const r = await deps.resolver.resolve(args.query);
@@ -91,7 +91,7 @@ export function createMcpServer(deps: AppDeps): McpServer {
 
   server.registerTool('search_chemicals', {
     title: 'Search the library', description: 'Autocomplete-style search over the offline library by name, alias or formula. Does not change the window.',
-    inputSchema: { query: z.string().min(1), limit: z.number().int().min(1).max(50).default(10) },
+    inputSchema: { query: Bounded.query, limit: z.number().int().min(1).max(50).default(10) },
   }, (args) => run(async () => {
     const hits = search(args.query, args.limit).map((e) => ({ name: e.name, formula: e.formula, category: e.category }));
     return { content: [text(hits.length ? hits.map((h) => `${h.name} (${h.formula}) - ${h.category}`).join('\n') : 'No matches'), json(hits)] };
@@ -109,7 +109,7 @@ export function createMcpServer(deps: AppDeps): McpServer {
 
   server.registerTool('set_molecule', {
     title: 'Replace the molecule', description: 'Replace the focused molecule from a SMILES string, a molfile, or a name/formula query. Returns the new numbered atom list and a 2D drawing.',
-    inputSchema: { smiles: z.string().optional(), molfile: z.string().optional(), query: z.string().optional(), name: z.string().optional().describe('Display name for the new structure.') },
+    inputSchema: { smiles: Bounded.smiles.optional(), molfile: Bounded.molfile.optional(), query: Bounded.query.optional(), name: Bounded.title.optional().describe('Display name for the new structure.') },
   }, (args) => run(async () => {
     const result = args.query
       ? await store.dispatch({ type: 'load', query: args.query }, 'mcp')
@@ -150,7 +150,7 @@ export function createMcpServer(deps: AppDeps): McpServer {
 
   server.registerTool('formula_info', {
     title: 'Formula info', description: 'Molar mass, Hill formula and mass percent composition of a formula. Pure calculation; does not change the window.',
-    inputSchema: { formula: z.string().min(1) },
+    inputSchema: { formula: z.string().min(1).max(500) },
   }, (args) => run(async () => {
     const p = parseFormula(args.formula);
     const info = { hill: hillFormula(p.counts, p.charge), charge: p.charge, molarMass: Math.round(molarMass(p.counts) * 1000) / 1000, composition: composition(p.counts) };
@@ -159,7 +159,7 @@ export function createMcpServer(deps: AppDeps): McpServer {
 
   server.registerTool('new_scene', {
     title: 'New scene', description: 'Open a new scene tab, optionally loading a compound into it. The new scene becomes active.',
-    inputSchema: { title: z.string().optional(), query: z.string().optional() },
+    inputSchema: { title: Bounded.title.optional(), query: Bounded.query.optional() },
   }, (args) => run(async () => {
     const result = await store.dispatch({ type: 'new_scene', title: args.title, query: args.query }, 'mcp');
     return { content: [text(result.message), json({ ...stateJson(), speciesId: result.speciesId })] };
@@ -179,7 +179,7 @@ export function createMcpServer(deps: AppDeps): McpServer {
   server.registerTool('edit_molecule', {
     title: 'Edit the molecule',
     description: 'Apply atom-level edits to the focused molecule. Atom numbers come from the most recent result (call get_current to re-read them). Ops: add_atom {element, bondTo, order?}, remove_atom {index}, set_element {index, element}, set_charge {index, charge}, add_bond {a, b, order?}, remove_bond {a, b}, set_bond_order {a, b, order}, attach_group {index, group}, replace_group {index, group} where index is a hydrogen or a leaf atom. Named groups: H OH NH2 CH3 C2H5 COOH CHO CN NO2 SO3H OCH3 SH F Cl Br I phenyl, or any SMILES fragment. Hydrogens are re-saturated automatically. A rejected edit leaves the molecule unchanged.',
-    inputSchema: { ops: z.array(EditOpSchema).min(1), name: z.string().optional().describe('Display name for the result.') },
+    inputSchema: { ops: z.array(EditOpSchema).min(1).max(MAX_OPS), name: Bounded.title.optional().describe('Display name for the result.') },
   }, (args) => run(async () => {
     const result = await store.dispatch({ type: 'edit', ops: args.ops, name: args.name }, 'mcp');
     const scene = store.scene(result.sceneId);

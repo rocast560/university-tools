@@ -11,12 +11,21 @@ import type { AppDeps } from './app';
 import { CommandSchema } from './schemas';
 import { CommandError } from './workspace';
 
-export function connectInfo(deps: AppDeps): { mcpUrl: string; claudeCode: string; openapi: string; window: string } {
+export function connectInfo(deps: AppDeps): { mcpUrl: string; claudeCode: string; window: string } {
   const base = `http://${deps.host ?? '127.0.0.1'}:${deps.port ?? 8140}`;
-  return { mcpUrl: `${base}/mcp`, claudeCode: `claude mcp add --transport http chemtool ${base}/mcp`, openapi: `${base}/openapi.json`, window: base };
+  return { mcpUrl: `${base}/mcp`, claudeCode: `claude mcp add --transport http chemtool ${base}/mcp`, window: base };
 }
 
 const png = (bytes: Uint8Array) => new Response(new Uint8Array(bytes), { headers: { 'content-type': 'image/png' } });
+
+/** Caller-supplied number, clamped; anything unparseable falls back. */
+function bounded(raw: string | undefined, fallback: number, min: number, max: number): number {
+  const n = Number(raw ?? fallback);
+  return Number.isFinite(n) ? Math.min(Math.max(n, min), max) : fallback;
+}
+
+const MIN_PX = 50;
+const MAX_PX = 4000;
 
 export function registerApi(app: Hono, deps: AppDeps): void {
   const api = new Hono();
@@ -33,7 +42,7 @@ export function registerApi(app: Hono, deps: AppDeps): void {
   api.get('/health', (c) => c.json({ ok: true, version: deps.store.get().version, port: deps.port ?? null }));
 
   api.get('/search', (c) => {
-    const hits = search(c.req.query('q') ?? '', Number(c.req.query('limit') ?? 20));
+    const hits = search(c.req.query('q') ?? '', bounded(c.req.query('limit'), 20, 1, 100));
     return c.json(hits.map((e) => ({ name: e.name, formula: e.formula, category: e.category, smiles: e.smiles })));
   });
 
@@ -46,7 +55,9 @@ export function registerApi(app: Hono, deps: AppDeps): void {
   api.get('/workspace', (c) => c.json(deps.store.get()));
 
   api.post('/command', async (c) => {
-    const cmd = CommandSchema.parse(await c.req.json());
+    let body: unknown;
+    try { body = await c.req.json(); } catch { throw new CommandError(400, 'Invalid JSON body'); }
+    const cmd = CommandSchema.parse(body);
     const result = await deps.store.dispatch(cmd, 'api');
     return c.json({ result, workspace: deps.store.get() });
   });
@@ -58,7 +69,7 @@ export function registerApi(app: Hono, deps: AppDeps): void {
     const svg = c.req.query('numbered') === '1' ? species.svg2dNumbered : species.svg2d;
     switch (m[2]) {
       case 'svg': return new Response(svg, { headers: { 'content-type': 'image/svg+xml' } });
-      case 'png': return png(await svgToPng(svg, Number(c.req.query('w') ?? 800)));
+      case 'png': return png(await svgToPng(svg, bounded(c.req.query('w'), 800, MIN_PX, MAX_PX)));
       case 'mol': return new Response(species.molfile3d, { headers: { 'content-type': 'chemical/x-mdl-molfile' } });
       default: return new Response(`${species.molfile3d}\n> <NAME>\n${species.name}\n\n$$$$\n`, { headers: { 'content-type': 'chemical/x-mdl-sdfile' } });
     }
@@ -67,14 +78,15 @@ export function registerApi(app: Hono, deps: AppDeps): void {
   api.get('/snapshot.png', async (c) => {
     const scene = deps.store.scene(c.req.query('scene') || undefined);
     const species = deps.store.focused(scene.id);
-    const width = Number(c.req.query('w') ?? 640);
+    const width = bounded(c.req.query('w'), 640, MIN_PX, MAX_PX);
+    const height = bounded(c.req.query('h'), Math.round(width * 0.75), MIN_PX, MAX_PX);
     if (deps.snapshots) {
-      const live = await deps.snapshots.request(scene.id, width, Number(c.req.query('h') ?? Math.round(width * 0.75)));
+      const live = await deps.snapshots.request(scene.id, width, height);
       if (live) return png(live);
     }
     const [rx, ry, rz] = scene.view.camera.rotation;
     const svg = renderSnapshotSvg(species.atoms, species.bonds, {
-      width, height: Number(c.req.query('h') ?? Math.round(width * 0.75)), style: scene.view.style,
+      width, height, style: scene.view.style,
       showHydrogens: scene.view.showHydrogens, highlight: scene.view.highlight, rotation: [20 + rx, 30 + ry, rz],
     });
     return png(await svgToPng(svg, width));
