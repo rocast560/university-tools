@@ -17,7 +17,7 @@ export function registerStatic(app: Hono, root: string): void {
     const requested = decodeURIComponent(new URL(c.req.url).pathname);
     const p = requested.endsWith('/') ? requested + 'index.html' : requested;
     const file = path.resolve(base, '.' + p);
-    if (!file.startsWith(base)) return c.text('Forbidden', 403);
+    if (file !== base && !file.startsWith(base + path.sep)) return c.text('Forbidden', 403);
     const wantsPage = !path.extname(requested);
     const ext = path.extname(file);
     try {
