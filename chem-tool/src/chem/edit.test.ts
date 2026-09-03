@@ -53,7 +53,7 @@ describe('applyEdits', () => {
     expect(() => edit('C', [{ op: 'attach_group', index: 1, group: 'XYZ' }])).toThrow(EditError);
     expect(() => edit('CCO', [{ op: 'replace_group', index: 2, group: 'OH' }])).toThrow(/exactly one heavy neighbour/);
     expect(() => edit('CC', [{ op: 'add_bond', a: 1, b: 2 }])).toThrow(/already bonded/);
-    expect(() => edit('CC', [{ op: 'remove_bond', a: 1, b: 5 }])).toThrow(/No bond/);
+    expect(() => edit('CC', [{ op: 'remove_bond', a: 1, b: 6 }])).toThrow(/No bond/);
     expect(() => edit('C', [])).toThrow(/No edit/);
   });
 });
