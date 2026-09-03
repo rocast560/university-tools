@@ -430,7 +430,8 @@ class Engine {
         for (const [p, h] of Object.entries(holes)) this.claimPin(ref, p, h, comp.pins.get(p)?.net);
         this.registerPlaced(ref, fp, comp, holes);
       } catch (e) {
-        this.unplaced.push({ ref, reason: (e as Error).message });
+        if (!(e instanceof LayoutError)) throw e;
+        this.unplaced.push({ ref, reason: e.message });
       }
     }
   }
@@ -453,7 +454,8 @@ class Engine {
             progress = true;
           }
         } catch (e) {
-          this.unplaced.push({ ref, reason: (e as Error).message });
+          if (!(e instanceof LayoutError)) throw e;
+          this.unplaced.push({ ref, reason: e.message });
           drop(ref);
           progress = true;
         }
@@ -463,7 +465,8 @@ class Engine {
       try {
         this.tryPlaceTwoLead(ref, true);
       } catch (e) {
-        this.unplaced.push({ ref, reason: (e as Error).message });
+        if (!(e instanceof LayoutError)) throw e;
+        this.unplaced.push({ ref, reason: e.message });
       }
     }
   }
