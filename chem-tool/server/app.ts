@@ -6,6 +6,7 @@ import { cors } from 'hono/cors';
 import type { UpgradeWebSocket } from 'hono/ws';
 import type { Resolver } from '../src/chem/resolve';
 import { registerApi } from './api';
+import { mountMcp } from './mcp';
 import { registerStatic } from './static';
 import { registerWs, type WindowClient, type WsRegistry } from './ws';
 import type { WorkspaceStore } from './workspace';
@@ -25,6 +26,7 @@ export function createApp(deps: AppDeps): { app: Hono; ws: WsRegistry | null } {
   const app = new Hono();
   app.use('*', cors());
   registerApi(app, deps);
+  mountMcp(app, deps);
   const ws = deps.upgradeWebSocket ? registerWs(app, deps, deps.upgradeWebSocket) : null;
   if (deps.staticDir) registerStatic(app, deps.staticDir);
   return { app, ws };
