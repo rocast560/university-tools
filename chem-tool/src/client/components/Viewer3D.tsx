@@ -1,16 +1,29 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Species, ViewState } from '../../chem/types';
 import { setView } from '../commands';
+import { activeScene } from '../selectors';
+import { useStore } from '../store';
 import type { Viewer3DApi } from '../viewer3d';
 import { extraHandlers, sendRaw } from '../ws';
 
 /** Set by the mounted viewer; used by the live snapshot responder (phase 2). */
 export let snapshotProvider: (() => string | null) | null = null;
 
+async function respondToSnapshot(msg: Record<string, unknown>): Promise<void> {
+  const answer = (pngBase64: string | null) => sendRaw({ type: 'snapshot_response', id: msg.id, pngBase64 });
+  // The canvas only ever shows the active scene, so any other scene must fall back to the renderer.
+  if (typeof msg.sceneId === 'string' && activeScene(useStore.getState().workspace)?.id !== msg.sceneId) return answer(null);
+  // A preceding state frame has only scheduled a React render at this point. Wait two frames — one
+  // to flush that render, one for the paint after it — so a set_view snapshot shows the new view.
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  let url: string | null;
+  try { url = snapshotProvider?.() ?? null; } catch { url = null; }
+  answer(url ? url.split(',')[1] : null);
+}
+
 extraHandlers.push((msg) => {
   if (msg.type !== 'snapshot_request') return;
-  const url = snapshotProvider?.() ?? null;
-  sendRaw({ type: 'snapshot_response', id: msg.id, pngBase64: url ? url.split(',')[1] : null });
+  void respondToSnapshot(msg);
 });
 
 const STYLES: ViewState['style'][] = ['ballstick', 'stick', 'spacefill', 'wireframe'];

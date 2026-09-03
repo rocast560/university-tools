@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { load, redo, undo } from './commands';
+import { load, redo, switchScene, undo } from './commands';
 import { ConnectDialog } from './components/ConnectDialog';
 import { SceneTabs } from './components/SceneTabs';
 import { SearchBar } from './components/SearchBar';
@@ -23,8 +23,13 @@ export default function App() {
   useEffect(() => {
     if (!workspace || handledUrl.current) return;
     handledUrl.current = true;
-    const q = new URLSearchParams(location.search).get('q');
-    if (q) { load(q).catch(() => {}); history.replaceState(null, '', location.pathname); }
+    const params = new URLSearchParams(location.search);
+    const q = params.get('q');
+    const sceneId = params.get('scene');
+    if (q) load(q).catch(() => {});
+    else if (sceneId) switchScene(sceneId).catch(() => {});
+    else return;
+    history.replaceState(null, '', location.pathname);
   }, [workspace]);
 
   useEffect(() => {
