@@ -1,0 +1,64 @@
+import { describe, it, expect, afterEach } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
+import { createEventBus } from './events';
+import { createSettingsStore } from './settings';
+import { createWorkspaceService } from './service';
+import { createCompiler, parseDiagnostics, resolveTypstCli } from './compile';
+import { tmpDir, rmDir, put, TYPST_CLI } from './test-util';
+
+const dirs: string[] = [];
+afterEach(() => { for (const d of dirs.splice(0)) rmDir(d); });
+const have = fs.existsSync(TYPST_CLI);
+
+describe('parseDiagnostics', () => {
+  it('parses the short format and relativises the path', () => {
+    const root = 'C:\\ws';
+    const out = parseDiagnostics('\\\\?\\C:\\ws\\main.typ:3:7: error: file not found (searched at x)\nwarning: unused\n', root);
+    expect(out).toEqual([
+      { severity: 'error', message: 'file not found (searched at x)', file: 'main.typ', line: 3, col: 7 },
+      { severity: 'warning', message: 'unused', file: null, line: null, col: null },
+    ]);
+  });
+});
+
+describe('resolveTypstCli', () => {
+  it('prefers the configured path, then settings, then PATH', () => {
+    expect(resolveTypstCli('C:\\nope\\typst.exe', null)).not.toBe('C:\\nope\\typst.exe');
+    if (have) expect(resolveTypstCli(TYPST_CLI, null)).toBe(TYPST_CLI);
+  });
+});
+
+describe.skipIf(!have)('createCompiler', () => {
+  function setup() {
+    const dataDir = tmpDir(); dirs.push(dataDir);
+    const settings = createSettingsStore(dataDir);
+    const service = createWorkspaceService({ settings, bus: createEventBus(), watcher: null, dataDir, workspacesDir: path.join(dataDir, 'workspaces'), template: '' });
+    const compile = createCompiler({ settings, service, typstCli: TYPST_CLI });
+    return { service, compile, dataDir };
+  }
+  it('reports diagnostics and compiles a good document', async () => {
+    const { service, compile } = setup();
+    const w = service.create({ name: 'A', group: null, source: '#set page(width: 8cm)\n= Hi\n#image("/assets/missing.png")\n' });
+    const bad = await compile.compile(w.id, undefined);
+    expect(bad.ok).toBe(false);
+    expect(bad.diagnostics[0]).toMatchObject({ severity: 'error', file: 'main.typ', line: 3 });
+    fs.writeFileSync(path.join(w.path, 'main.typ'), '= Hi\nHello');
+    expect((await compile.compile(w.id, undefined)).ok).toBe(true);
+  });
+  it('exports a PDF with redactions baked, to bytes or to a path', async () => {
+    const { service, compile, dataDir } = setup();
+    const w = service.create({ name: 'B', group: null, source: '#image("/assets/shot.png", width: 5cm)' });
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+    put(w.path, 'assets/shot.png', png);
+    service.patchAsset(w.id, 'assets/shot.png', { blurs: [{ x: 0, y: 0, w: 1, h: 1 }] }, null);
+    const out = await compile.exportPdf(w.id, undefined, undefined);
+    expect(out.baked).toBe(1);
+    expect(Buffer.from(out.bytes!.subarray(0, 4)).toString()).toBe('%PDF');
+    expect(fs.existsSync(path.join(w.path, 'assets', 'shot.png'))).toBe(true); // original untouched
+    const to = path.join(dataDir, 'out.pdf');
+    const saved = await compile.exportPdf(w.id, undefined, to);
+    expect(saved.path).toBe(to);
+    expect(fs.statSync(to).size).toBeGreaterThan(100);
+  });
+});
