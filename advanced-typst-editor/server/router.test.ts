@@ -90,6 +90,27 @@ describe('router', () => {
     await reader.cancel();
   });
 
+  it('decodes percent-encoded path segments', async () => {
+    const { call } = app();
+    const created = await (await call('POST', '/api/workspaces', { name: 'E' })).json() as { workspace: { id: string } };
+    const id = created.workspace.id;
+
+    const put = await call('PUT', `/api/workspaces/${id}/files/docs/my%20note.typ`, new TextEncoder().encode('= Space'));
+    expect(put.status).toBe(200);
+    const got = await call('GET', `/api/workspaces/${id}/files/docs/my%20note.typ`);
+    expect(got.status).toBe(200);
+    expect(await got.text()).toBe('= Space');
+    const detail = await (await call('GET', `/api/workspaces/${id}`)).json() as { files: Array<{ path: string }> };
+    expect(detail.files.map((f) => f.path)).toContain('docs/my note.typ');
+
+    const up = await call('POST', `/api/workspaces/${id}/assets?filename=shot.png&folder=Auth%20Bypass&kind=image`, new Uint8Array(PNG));
+    expect(up.status).toBe(201);
+    const renamed = await call('PATCH', `/api/workspaces/${id}/assets/assets/Auth%20Bypass/shot.png`, { stem: 'proof' });
+    expect(renamed.status).toBe(200);
+    const { asset } = await renamed.json() as { asset: { id: string } };
+    expect(asset.id).toBe('assets/Auth Bypass/proof.png');
+  });
+
   it('configures, runs, lists and browses backups', async () => {
     const { call } = app();
     const dest = tmpDir(); dirs.push(dest);

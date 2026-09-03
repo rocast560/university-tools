@@ -80,7 +80,16 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
 
   async function route(req: Request, url: URL): Promise<Response> {
     const method = req.method.toUpperCase();
-    const seg = url.pathname.split('/').filter(Boolean); // ['api', 'workspaces', id, ...]
+    // ['api', 'workspaces', id, ...]; the client (encodeURIComponent per segment) and the
+    // browser's own URL parsing both leave percent-escapes in url.pathname, so every
+    // segment -- and anything sliced/joined from it, like `rest` below -- must be decoded
+    // before it reaches the service.
+    let seg: string[];
+    try {
+      seg = url.pathname.split('/').filter(Boolean).map((s) => decodeURIComponent(s));
+    } catch {
+      return json(400, { error: 'bad path encoding' });
+    }
     const origin = req.headers.get('x-client-id');
 
     if (seg[1] === 'health' && seg.length === 2) return json(200, { ok: true, version: '0.1.0' });
