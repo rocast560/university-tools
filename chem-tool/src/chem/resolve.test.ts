@@ -8,7 +8,7 @@ const aspirin: PubChemCompound = { cid: 2244, formula: 'C9H8O4', weight: 180.16,
 function stub(byName: Record<string, PubChemCompound[]> = {}, byFormula: Record<string, PubChemCompound[]> = {}) {
   return {
     calls: [] as string[],
-    async byName(n: string) { this.calls.push('name:' + n); return byName[n] ?? []; },
+    async byName(n: string) { this.calls.push('name:' + n); return byName[n.toLowerCase()] ?? []; },
     async byFormula(f: string) { this.calls.push('formula:' + f); return byFormula[f] ?? []; },
   };
 }
