@@ -4,8 +4,8 @@ import { SceneTabs } from './components/SceneTabs';
 import { SearchBar } from './components/SearchBar';
 import { SidePanel } from './components/SidePanel';
 import { StatusBar } from './components/StatusBar';
-import { Structure2D } from './components/Structure2D';
 import { Toast } from './components/Toast';
+import { Viewer3D } from './components/Viewer3D';
 import { activeScene, focusedSpecies } from './selectors';
 import { useStore } from './store';
 import { connect } from './ws';
@@ -35,9 +35,7 @@ export default function App() {
         <StatusBar />
       </header>
       <main className="main">
-        <div className="viewer-placeholder">
-          <Structure2D species={species} large />
-        </div>
+        <Viewer3D species={species} view={scene.view} />
       </main>
       <aside className="side">
         <SidePanel scene={scene} species={species} />
