@@ -11,6 +11,7 @@ import { renderSnapshotSvg } from '../src/chem/render3d';
 import type { Scene, Species, ViewState } from '../src/chem/types';
 import { connectInfo } from './api';
 import type { AppDeps } from './app';
+import { EditOpSchema } from './schemas';
 import { CommandError, describe } from './workspace';
 
 type Content = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string };
@@ -170,6 +171,51 @@ export function createMcpServer(deps: AppDeps): McpServer {
     const result = await store.dispatch({ type: 'switch_scene', sceneId: args.sceneId }, 'mcp');
     return { content: [text(result.message), json(stateJson())] };
   }));
+
+  server.registerTool('edit_molecule', {
+    title: 'Edit the molecule',
+    description: 'Apply atom-level edits to the focused molecule. Atom numbers come from the most recent result (call get_current to re-read them). Ops: add_atom {element, bondTo, order?}, remove_atom {index}, set_element {index, element}, set_charge {index, charge}, add_bond {a, b, order?}, remove_bond {a, b}, set_bond_order {a, b, order}, attach_group {index, group}, replace_group {index, group} where index is a hydrogen or a leaf atom. Named groups: H OH NH2 CH3 C2H5 COOH CHO CN NO2 SO3H OCH3 SH F Cl Br I phenyl, or any SMILES fragment. Hydrogens are re-saturated automatically. A rejected edit leaves the molecule unchanged.',
+    inputSchema: { ops: z.array(EditOpSchema).min(1), name: z.string().optional().describe('Display name for the result.') },
+  }, (args) => run(async () => {
+    const result = await store.dispatch({ type: 'edit', ops: args.ops, name: args.name }, 'mcp');
+    const scene = store.scene(result.sceneId);
+    const species = store.focused(scene.id);
+    return { content: [text(`${result.message}\n${speciesText(species, deps, scene)}`), json({ ...stateJson(), speciesId: species.id }), await image(species.svg2dNumbered, 480)] };
+  }));
+
+  server.registerTool('set_view', {
+    title: 'Change the 3D view',
+    description: 'Style, labels, highlighted atoms, spin, hydrogens, dipole arrow, camera preset, or a relative rotation. Returns a 3D image of the result.',
+    inputSchema: {
+      style: z.enum(['ballstick', 'stick', 'spacefill', 'wireframe']).optional(),
+      labels: z.enum(['none', 'element', 'index']).optional(),
+      highlight: z.array(z.number().int().min(1)).optional().describe('Atom numbers to highlight; [] clears.'),
+      spin: z.boolean().optional(),
+      showHydrogens: z.boolean().optional(),
+      showDipole: z.boolean().optional(),
+      preset: z.enum(['fit', 'front', 'top', 'side']).optional(),
+      rotate: z.object({ axis: z.enum(['x', 'y', 'z']), degrees: z.number() }).optional().describe('Rotate relative to the current view.'),
+      width: widthArg,
+    },
+  }, (args) => run(async () => {
+    const scene = store.activeScene();
+    const { preset, rotate, width, ...fields } = args;
+    const rotation: [number, number, number] = [...scene.view.camera.rotation];
+    if (rotate) rotation[{ x: 0, y: 1, z: 2 }[rotate.axis]] += rotate.degrees;
+    const camera = preset || rotate ? { preset: preset ?? scene.view.camera.preset, rotation } : undefined;
+    await store.dispatch({ type: 'set_view', view: { ...fields, ...(camera ? { camera } : {}) } }, 'mcp');
+    const species = store.focused(scene.id);
+    const bytes = await render3dPng(deps, store.activeScene(), species, width);
+    return { content: [text(`View updated: ${JSON.stringify(store.activeScene().view)}`), { type: 'image', data: Buffer.from(bytes).toString('base64'), mimeType: 'image/png' }] };
+  }));
+
+  for (const kind of ['undo', 'redo'] as const) {
+    server.registerTool(kind, { title: kind === 'undo' ? 'Undo' : 'Redo', description: `${kind === 'undo' ? 'Undo' : 'Redo'} the last structural change in the active scene. View changes are not part of history.`, inputSchema: {} }, () => run(async () => {
+      const result = await store.dispatch({ type: kind }, 'mcp');
+      const species = store.focused(result.sceneId);
+      return { content: [text(`${result.message}\n${speciesText(species, deps, store.scene(result.sceneId))}`), json({ ...stateJson(), speciesId: species.id })] };
+    }));
+  }
 
   return server;
 }
