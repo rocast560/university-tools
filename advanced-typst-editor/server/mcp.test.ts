@@ -11,15 +11,15 @@ import { tmpDir, rmDir } from './test-util';
 const dirs: string[] = [];
 afterEach(() => { for (const d of dirs.splice(0)) rmDir(d); });
 
-function setup() {
+function setup(now?: () => number) {
   const dataDir = tmpDir(); dirs.push(dataDir);
   const bus = createEventBus();
   const settings = createSettingsStore(dataDir);
   const workspacesDir = path.join(dataDir, 'workspaces');
   const service = createWorkspaceService({ settings, bus, watcher: null, dataDir, workspacesDir, template: '= T' });
-  const mcp = createMcp({ service, compile: createCompiler({ settings, service, typstCli: null }), backup: createBackup({ settings, service, bus, dataDir, workspacesDir, version: '0.1.0' }), settings, bus, token: null });
+  const mcp = createMcp({ service, compile: createCompiler({ settings, service, typstCli: null }), backup: createBackup({ settings, service, bus, dataDir, workspacesDir, version: '0.1.0' }), settings, bus, token: null, now });
   const post = (body: unknown, session?: string) => mcp.handle(new Request('http://127.0.0.1:8090/mcp', { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...(session ? { 'mcp-session-id': session } : {}) }, body: JSON.stringify(body) }));
-  return { mcp, post };
+  return { mcp, post, bus };
 }
 async function bodyJson(res: Response): Promise<Record<string, unknown>> {
   const text = await res.text();
@@ -47,6 +47,37 @@ describe('MCP over Streamable HTTP', () => {
     const del = await mcp.handle(new Request('http://127.0.0.1:8090/mcp', { method: 'DELETE', headers: { 'mcp-session-id': session } }));
     expect(del.status).toBeLessThan(300);
     expect(mcp.status().clients).toEqual([]);
+    mcp.close();
+  });
+
+  it('closes the GET stream on cancel, marking the client disconnected, and sweep reaps + publishes for a stale session', async () => {
+    const clock = { t: Date.now() };
+    const { mcp, post, bus } = setup(() => clock.t);
+    const init = await post({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'claude-code', version: '9.9' } } });
+    const session = init.headers.get('mcp-session-id')!;
+    await post({ jsonrpc: '2.0', method: 'notifications/initialized' }, session);
+
+    const streamRes = await mcp.handle(new Request('http://127.0.0.1:8090/mcp', { method: 'GET', headers: { accept: 'text/event-stream', 'mcp-session-id': session } }));
+    const reader = streamRes.body!.getReader();
+    expect(mcp.status().clients[0]?.connected).toBe(true);
+
+    await reader.cancel();
+    await new Promise((r) => setTimeout(r, 20));
+    clock.t += 61_000;
+    expect(mcp.status().clients[0]?.connected).toBe(false);
+
+    let mcpEvents = 0;
+    const unsubscribe = bus.subscribe((ev) => { if (ev.type === 'mcp.clients') mcpEvents += 1; });
+    clock.t += 31 * 60_000; // past SESSION_TTL_MS since the stream closed above
+    await mcp.handle(new Request('http://127.0.0.1:8090/mcp', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 99, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'other-client', version: '1.0' } } }),
+    }));
+    unsubscribe();
+
+    expect(mcpEvents).toBeGreaterThan(0);
+    expect(mcp.status().clients.some((c) => c.name === 'claude-code')).toBe(false);
     mcp.close();
   });
 });

@@ -75,6 +75,17 @@ describe('MCP tools', () => {
     expect(ws.slots).toHaveLength(1);
   });
 
+  it("add_font probes the family using the source file's own extension, not a filename override", async () => {
+    const d = setup();
+    const w = await call(d, 'create_workspace', { name: 'R' }) as { id: string };
+    const fontPath = 'C:/Users/rober/Desktop/typst-editor/recovered-from-docker/fonts/DejaVuSansMono.ttf';
+    // filename claims a different (but still allowed) font extension; R11 says
+    // the probe must use the extension of the real source file (`path`'s
+    // basename), not this override, or a typst-CLI probe would misdetect it.
+    const added = await call(d, 'add_font', { workspace_id: w.id, path: fontPath, filename: 'weird-name.woff2' }) as { id: string; fontFamily: string | null };
+    expect(added).toMatchObject({ id: 'fonts/weird-name.woff2', fontFamily: 'DejaVu Sans Mono' });
+  });
+
   it('backup tools and compile', async () => {
     const d = setup();
     const dest = tmpDir(); dirs.push(dest);

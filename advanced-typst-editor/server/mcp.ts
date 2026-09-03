@@ -42,6 +42,13 @@ export function createMcp(deps: McpDeps): McpApi & { close(): void } {
     if (info) { session.clientName = info.name; session.clientVersion = info.version ?? null; }
   };
 
+  /** Mark a session's standalone/GET stream as gone and publish, idempotently. */
+  const closeStream = (session: Session) => {
+    if (!session.streamOpen) return;
+    session.streamOpen = false;
+    publish();
+  };
+
   const buildServer = (): McpServer => {
     const server = new McpServer(SERVER_INFO);
     for (const t of TOOLS) {
@@ -71,30 +78,56 @@ export function createMcp(deps: McpDeps): McpApi & { close(): void } {
       },
       onsessionclosed: (id) => { sessions.delete(id); publish(); },
     });
+    // Belt-and-braces: however a transport ends up closed (TTL sweep, a
+    // protocol-level failure inside the SDK), the standalone stream it was
+    // holding open is gone too.
+    session.transport.onclose = () => closeStream(session);
     await server.connect(session.transport);
     return session;
   };
 
-  const sweep = () => { for (const [id, s] of sessions) if (!s.streamOpen && now() - s.lastSeenAt > SESSION_TTL_MS) { sessions.delete(id); void s.transport.close(); } };
+  const sweep = () => {
+    let removed = false;
+    for (const [id, s] of sessions) {
+      if (!s.streamOpen && now() - s.lastSeenAt > SESSION_TTL_MS) {
+        sessions.delete(id);
+        void s.transport.close();
+        removed = true;
+      }
+    }
+    if (removed) publish();
+  };
 
   return {
     status,
     async handle(req) {
       sweep();
       const sid = req.headers.get('mcp-session-id');
-      let session = sid ? sessions.get(sid) : undefined;
-      if (!session) {
+      let found = sid ? sessions.get(sid) : undefined;
+      if (!found) {
         if (req.method !== 'POST') return new Response(JSON.stringify({ jsonrpc: '2.0', error: { code: -32001, message: 'unknown session' }, id: null }), { status: 404, headers: { 'content-type': 'application/json' } });
-        session = await newSession();
+        found = await newSession();
       }
+      const session = found;
       session.lastSeenAt = now();
       if (req.method === 'GET') {
         session.streamOpen = true;
         publish();
         const res = await session.transport.handleRequest(req);
-        // The stream ends when the client goes away; the transport resolves the body then.
-        void (res.body ? res.body : null);
-        return res;
+        // R4: refresh client info on every handled request, GET included,
+        // before the stream-wrapping below returns.
+        refreshClientInfo(session);
+        if (!res.body) { closeStream(session); return res; }
+        // The transport's body resolves as soon as the SSE stream opens, not
+        // when it ends -- `streamOpen` has to be cleared from the stream's
+        // own lifecycle (normal completion or the client cancelling), or it
+        // would stick forever and `sweep()` (which requires `!streamOpen`)
+        // could never reap the session.
+        const ts = new TransformStream<Uint8Array, Uint8Array>({
+          flush() { closeStream(session); },
+          cancel() { closeStream(session); },
+        });
+        return new Response(res.body.pipeThrough(ts), { status: res.status, headers: res.headers });
       }
       const res = await session.transport.handleRequest(req);
       // R4: the transport may have just processed initialize -- refresh the

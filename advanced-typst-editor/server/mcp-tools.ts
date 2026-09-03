@@ -102,7 +102,11 @@ export const TOOLS: ToolDef[] = [
   { name: 'add_font', description: 'Add a font file (ttf, otf, woff, woff2, ttc) to fonts/. The family name is read from the file when possible; pass family for woff/woff2.', schema: { workspace_id: WS, path: z.string().optional(), data_base64: z.string().optional(), filename: z.string().optional(), family: z.string().optional() }, run: async (a, d) => {
     const { bytes, name } = bytesFrom(a);
     const filename = (a.filename as string | undefined) ?? name;
-    const family = (a.family as string | undefined) ?? (await fontFamilyViaTypst(d.compile.available(), bytes, extensionOf(filename))) ?? fontFamily(bytes);
+    // R11: the extension has to come from the source file's own name (the
+    // real basename for a `path` upload), not a caller-supplied `filename`
+    // override, since that's what the bytes actually are.
+    const ext = extensionOf(name) || extensionOf(filename);
+    const family = (a.family as string | undefined) ?? (await fontFamilyViaTypst(d.compile.available(), bytes, ext)) ?? fontFamily(bytes);
     return d.service.addAsset(a.workspace_id as string, { kind: 'font', filename, bytes, folder: null, family }, MCP_ORIGIN);
   } },
   { name: 'rename_asset', description: 'Rename an asset (extension kept) and rewrite every reference in every .typ file.', schema: { workspace_id: WS, asset_id: z.string(), stem: z.string().describe('New name without extension.') }, run: (a, d) => d.service.renameAsset(a.workspace_id as string, a.asset_id as string, a.stem as string, MCP_ORIGIN) },
