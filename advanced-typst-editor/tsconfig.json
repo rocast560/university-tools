@@ -18,7 +18,8 @@
     "noUncheckedIndexedAccess": true,
     "ignoreDeprecations": "6.0",
     "baseUrl": ".",
-    "paths": { "@/*": ["./src/*"] }
+    "paths": { "@/*": ["./src/*"] },
+    "types": ["node", "vite/client"]
   },
   "include": ["src", "vite-env.d.ts"]
 }
