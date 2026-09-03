@@ -1,5 +1,6 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { load } from './commands';
+import { ConnectDialog } from './components/ConnectDialog';
 import { SceneTabs } from './components/SceneTabs';
 import { SearchBar } from './components/SearchBar';
 import { SidePanel } from './components/SidePanel';
@@ -15,6 +16,7 @@ export default function App() {
   const scene = activeScene(workspace);
   const species = focusedSpecies(scene);
   const handledUrl = useRef(false);
+  const [connectOpen, setConnectOpen] = useState(new URLSearchParams(location.search).get('connect') === '1');
 
   useEffect(() => { connect(); }, []);
 
@@ -32,6 +34,7 @@ export default function App() {
       <header className="topbar">
         <SearchBar />
         <SceneTabs />
+        <button className="tab" onClick={() => setConnectOpen(true)}>Connect</button>
         <StatusBar />
       </header>
       <main className="main">
@@ -40,6 +43,7 @@ export default function App() {
       <aside className="side">
         <SidePanel scene={scene} species={species} />
       </aside>
+      <ConnectDialog open={connectOpen} onClose={() => setConnectOpen(false)} />
       <Toast />
     </div>
   );
