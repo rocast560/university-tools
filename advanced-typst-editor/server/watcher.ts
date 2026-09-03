@@ -11,21 +11,22 @@ export interface Watcher {
 }
 
 interface Entry { root: string; handle: fs.FSWatcher | null; pending: Set<string>; timer: ReturnType<typeof setTimeout> | null }
+/** `at`: when we marked the write. `mtime`: the resulting mtime once we've seen
+ * the first echo for it (ms, rounded); null until then. */
+interface OwnMark { at: number; mtime: number | null }
 
 const IGNORED = /(^|\/)(\.git|node_modules|\.[^/]*|.*\.tmp)(\/|$)/;
+
+const ownKey = (id: string, rel: string): string => `${id}\0${rel.replace(/\\/g, '/')}`;
 
 export function createWatcher(deps: { bus: EventBus; now?: () => number; debounceMs?: number; ownWriteWindowMs?: number }): Watcher {
   const now = deps.now ?? (() => Date.now());
   const debounceMs = deps.debounceMs ?? 200;
   const windowMs = deps.ownWriteWindowMs ?? 1500;
   const entries = new Map<string, Entry>();
-  // `${id}\0${rel}` -> { at: marked at, timer: settle timer clearing the mark }.
-  // A single own write can surface as more than one raw fs event (e.g. a
-  // separate notification for content vs. metadata on Windows); `settleMs`
-  // absorbs a short burst of such duplicates without leaving the mark alive
-  // long enough to swallow a later, genuine edit to the same path.
-  const own = new Map<string, { at: number; timer: ReturnType<typeof setTimeout> }>();
-  const settleMs = Math.min(debounceMs, windowMs);
+  // `${id}\0${rel}` -> mark. All expiry is driven by `now()` alone (never by a
+  // timer), so an injected fake clock and the map agree on what's expired.
+  const own = new Map<string, OwnMark>();
 
   const flush = (id: string) => {
     const e = entries.get(id);
@@ -48,19 +49,30 @@ export function createWatcher(deps: { bus: EventBus; now?: () => number; debounc
     if (!e || !filename) return;
     const rel = String(filename).replace(/\\/g, '/');
     if (IGNORED.test(rel)) return;
-    const key = `${id}\0${rel}`;
+    const key = ownKey(id, rel);
     const mark = own.get(key);
     if (mark !== undefined) {
-      clearTimeout(mark.timer);
-      if (now() - mark.at < windowMs) {
-        // Our own write echoing back. Keep the mark alive for a brief settle
-        // window in case the same write surfaces a second raw fs event, but
-        // let it expire quickly so a later genuine edit to this path is not
-        // mistaken for another echo.
-        mark.timer = setTimeout(() => own.delete(key), settleMs);
-        return;
+      if (now() - mark.at >= windowMs) {
+        own.delete(key); // stale mark past its window; treat this event as real
+      } else {
+        let st: fs.Stats | null;
+        try { st = fs.statSync(path.join(e.root, ...rel.split('/'))); } catch { st = null; }
+        if (st === null) {
+          own.delete(key); // file is gone; that's a real change (e.g. a delete)
+        } else {
+          const mtime = Math.round(st.mtimeMs);
+          if (mark.mtime === null) {
+            // First event after our write: this is the echo. Remember the
+            // resulting mtime so a duplicate raw fs notification for the same
+            // write (content vs. metadata, common on Windows) is recognised
+            // and suppressed too, without needing a settle timer.
+            mark.mtime = mtime;
+            return;
+          }
+          if (mtime === mark.mtime) return; // duplicate echo of the same write
+          own.delete(key); // the file changed again after our write; real change
+        }
       }
-      own.delete(key); // stale mark past its window; treat this event as real
     }
     e.pending.add(rel);
     if (e.timer) clearTimeout(e.timer);
@@ -87,16 +99,14 @@ export function createWatcher(deps: { bus: EventBus; now?: () => number; debounc
       entries.delete(id);
     },
     markOwnWrite(id, rel) {
-      const key = `${id}\0${rel.replace(/\\/g, '/')}`;
-      const existing = own.get(key);
-      if (existing) clearTimeout(existing.timer);
-      // Also cover the temp file writeAtomic creates next to it.
-      own.set(key, { at: now(), timer: setTimeout(() => own.delete(key), windowMs) });
-      if (own.size > 5000) for (const [k, m] of own) if (now() - m.at > windowMs) { clearTimeout(m.timer); own.delete(k); }
+      // Also covers the temp file writeAtomic creates next to it: the rename
+      // back to `rel` is the event this mark matches.
+      own.set(ownKey(id, rel), { at: now(), mtime: null });
+      if (own.size > 5000) for (const [k, m] of own) if (now() - m.at > windowMs) own.delete(k);
     },
     close() {
       for (const id of [...entries.keys()]) this.unwatch(id);
-      for (const [k, m] of own) { clearTimeout(m.timer); own.delete(k); }
+      own.clear();
     },
   };
 }
