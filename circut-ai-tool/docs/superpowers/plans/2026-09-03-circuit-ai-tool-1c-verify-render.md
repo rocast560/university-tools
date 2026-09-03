@@ -1474,7 +1474,7 @@ describe('buildLayoutDoc', () => {
   });
   test('the truth table is withheld when the wiring has errors', () => {
     const broken = { ...emptySidecar() };
-    broken.pinned.R1 = { '1': { col: 1, row: 'a' }, '2': { col: 2, row: 'a' } };
+    broken.pinned.R1 = { '1': { col: 1, row: 'a' }, '2': { col: 1, row: 'a' } };
     const doc2 = buildLayoutDoc(d, broken);
     if (doc2.checks.some((c) => c.level === 'error')) {
       expect(doc2.sim.truthTable).toBeNull();
