@@ -120,7 +120,7 @@ export const DIST_DIR = path.join(PROJECT_ROOT, 'dist');
 // a changed file always re-exports.
 
 import { execFile } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -163,12 +163,15 @@ export function createKicadCli(opts: { exe: string; cacheDir: string }): KicadCl
     } catch {
       /* not cached */
     }
-    const tmp = path.join(tmpdir(), `circuit-${process.pid}-${Date.now()}${ext}`);
-    await produce(tmp);
-    const text = await readFile(tmp, 'utf8');
-    await writeFile(key, text);
-    await rm(tmp, { force: true });
-    return text;
+    const tmp = path.join(tmpdir(), `circuit-${process.pid}-${randomUUID()}${ext}`);
+    try {
+      await produce(tmp);
+      const text = await readFile(tmp, 'utf8');
+      await writeFile(key, text);
+      return text;
+    } finally {
+      await rm(tmp, { force: true });
+    }
   }
 
   return {
@@ -185,10 +188,13 @@ export function createKicadCli(opts: { exe: string; cacheDir: string }): KicadCl
       cached(sch, '.svg', async (out) => {
         const dir = `${out}-dir`;
         await mkdir(dir, { recursive: true });
-        await exec(['sch', 'export', 'svg', '--no-background-color', '-o', dir, sch]);
-        const produced = path.join(dir, `${path.basename(sch, '.kicad_sch')}.svg`);
-        await writeFile(out, await readFile(produced));
-        await rm(dir, { recursive: true, force: true });
+        try {
+          await exec(['sch', 'export', 'svg', '--no-background-color', '-o', dir, sch]);
+          const produced = path.join(dir, `${path.basename(sch, '.kicad_sch')}.svg`);
+          await writeFile(out, await readFile(produced));
+        } finally {
+          await rm(dir, { recursive: true, force: true });
+        }
       }),
     erc: async (sch) => JSON.parse(await cached(sch, '.erc.json', async (out) => void (await exec(['sch', 'erc', '--format', 'json', '--units', 'mm', '--severity-all', '-o', out, sch])))),
   };
