@@ -91,4 +91,14 @@ describe('REST API', () => {
     expect(side.version).toBe(1);
     expect(side.pinned).toEqual({});
   });
+
+  test('edit routes validate input', async () => {
+    const { json, sch } = await setup();
+    const { id } = await (await json('/api/projects/open', { path: sch })).json();
+    const bad = await json(`/api/projects/${id}/edit/connect`, { ref: 'R1' });
+    expect(bad.status).toBe(400);
+    expect((await bad.json()).error).toMatch(/pin/);
+    const nope = await json(`/api/projects/${id}/edit/value`, { ref: 'R99', value: '1' });
+    expect(nope.status).toBe(400);
+  });
 });

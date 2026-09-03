@@ -3,7 +3,7 @@
 
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
-import { PART_ALIASES } from '../src/parts/aliases.ts';
+import { PART_ALIASES, resolveAlias } from '../src/parts/aliases.ts';
 import { renderSvg, type Highlight } from '../src/render/index.ts';
 import { DARK, LIGHT } from '../src/render/theme.ts';
 import { summarize } from '../src/pipeline.ts';
@@ -101,6 +101,33 @@ export function createApi(service: Service, events: Events<ProjectEvent>): Hono 
   });
   api.post('/projects/:id/layout/reset', async (c) => c.json((await service.resetLayout(c.req.param('id'))).doc));
   api.post('/projects/:id/erc', async (c) => c.json(await service.erc(c.req.param('id'))));
+  const editResult = (out: Awaited<ReturnType<Service['setValue']>>) => ({ ok: true, ref: out.ref, unit: out.unit, backup: out.backup, notes: out.notes, checks: out.project.doc.checks, summary: summaryOf(out.project) });
+  api.post('/projects/:id/edit/add', async (c) => {
+    const b = (await c.req.json()) as { part?: string; libId?: string; value?: string; ref?: string; connections?: Record<string, string> };
+    const libId = b.libId ?? (b.part ? resolveAlias(b.part)?.libId : undefined) ?? (b.part?.includes(':') ? b.part : undefined);
+    if (!libId) throw new ServiceError(`unknown part "${b.part ?? ''}"; use a name from list_supported_parts (GET /api/parts) or a KiCad lib_id like Device:R`);
+    return c.json(editResult(await service.addComponent(c.req.param('id'), { libId, value: b.value ?? resolveAlias(b.part ?? '')?.defaultValue, ref: b.ref, connections: b.connections })));
+  });
+  api.post('/projects/:id/edit/connect', async (c) => {
+    const b = (await c.req.json()) as { ref?: string; pin?: string; net?: string };
+    if (!b.ref || !b.pin || !b.net) throw new ServiceError('body must be {"ref": "R1", "pin": "1", "net": "A"}');
+    return c.json(editResult(await service.connect(c.req.param('id'), b.ref, String(b.pin), b.net)));
+  });
+  api.post('/projects/:id/edit/disconnect', async (c) => {
+    const b = (await c.req.json()) as { ref?: string; pin?: string };
+    if (!b.ref || !b.pin) throw new ServiceError('body must be {"ref": "R1", "pin": "1"}');
+    return c.json(editResult(await service.disconnect(c.req.param('id'), b.ref, String(b.pin))));
+  });
+  api.post('/projects/:id/edit/remove', async (c) => {
+    const b = (await c.req.json()) as { ref?: string };
+    if (!b.ref) throw new ServiceError('body must be {"ref": "R1"}');
+    return c.json(editResult(await service.removeComponent(c.req.param('id'), b.ref)));
+  });
+  api.post('/projects/:id/edit/value', async (c) => {
+    const b = (await c.req.json()) as { ref?: string; value?: string };
+    if (!b.ref || b.value === undefined) throw new ServiceError('body must be {"ref": "R1", "value": "10k"}');
+    return c.json(editResult(await service.setValue(c.req.param('id'), b.ref, String(b.value))));
+  });
   api.get('/connect', (c) => c.json(buildConnectInfo()));
   api.get('/parts', (c) => c.json(PART_ALIASES));
   api.get('/events', (c) =>

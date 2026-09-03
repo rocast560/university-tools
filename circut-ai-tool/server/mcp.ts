@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { holeName, parseHole } from '../src/layout/board.ts';
 import type { Hole } from '../src/layout/types.ts';
 import { displayName, isUnconnected } from '../src/netlist.ts';
-import { PART_ALIASES } from '../src/parts/aliases.ts';
+import { PART_ALIASES, resolveAlias } from '../src/parts/aliases.ts';
 import { summarize } from '../src/pipeline.ts';
 import { renderSvg } from '../src/render/index.ts';
 import { summaryOf } from './api.ts';
@@ -190,6 +190,37 @@ export function createMcpServer(service: Service): McpServer {
     const erc = (await service.erc(p.info.id)) as { sheets?: { violations?: { severity: string; description: string }[] }[] };
     const violations = (erc.sheets ?? []).flatMap((s) => s.violations ?? []);
     return { content: [text(violations.length ? violations.map((v) => `${v.severity}: ${v.description}`).join('\n') : 'ERC: no violations')], structuredContent: erc as Record<string, unknown> };
+  })());
+
+  const editText = (out: Awaited<ReturnType<Service['setValue']>>) => `${out.notes.join('\n')}\nBackup: ${out.backup}\n${checksText(out.project)}`;
+  const editStructured = (out: Awaited<ReturnType<Service['setValue']>>) => ({ ok: true, ref: out.ref, unit: out.unit, backup: out.backup, notes: out.notes, checks: out.project.doc.checks });
+
+  server.registerTool('add_component', { title: 'Add a component', description: 'Add a part to the schematic (and therefore the breadboard). "part" is a name from list_supported_parts ("LED", "10k" is not a part: give value separately) or a KiCad lib_id ("Device:R"). Optional connections map pin numbers to net names; power nets get a power symbol, other nets a label. For 74xx gates a spare gate of an existing chip is reused when possible.', inputSchema: { project, part: z.string().describe('Alias like "resistor", "LED", "74LS00", or lib_id like "Device:R"'), value: z.string().optional().describe('Value shown, e.g. "10k", "100n", "74LS00"'), ref: z.string().optional().describe('Reference to use; default: next free (R5, U4, ...)'), connections: z.record(z.string(), z.string()).optional().describe('pin number -> net name, e.g. {"1": "A", "2": "+5V"}') } }, ({ project: id, part, value, ref, connections }) => guard(async () => {
+    const alias = resolveAlias(part);
+    const libId = alias?.libId ?? (part.includes(':') ? part : null);
+    if (!libId) return fail(`unknown part "${part}"; call list_supported_parts for names, or give a KiCad lib_id like Device:R`);
+    const out = await service.addComponent((await open(id)).info.id, { libId, value: value ?? alias?.defaultValue, ref, connections });
+    return { content: [text(editText(out))], structuredContent: editStructured(out) };
+  })());
+
+  server.registerTool('connect', { title: 'Connect a pin to a net', description: 'Join a pin to a net by placing a label (or a power symbol for +5V, GND and the like) on the pin in the schematic. Use an existing net name to join it, or a new name to start a net.', inputSchema: { project, ref: z.string(), pin: z.string().describe('Pin number as printed on the package, e.g. "3"'), net: z.string().describe('Net name, e.g. "A", "Y1", "+5V", "GND", or a new name') } }, ({ project: id, ref, pin, net }) => guard(async () => {
+    const out = await service.connect((await open(id)).info.id, ref, pin, net);
+    return { content: [text(editText(out))], structuredContent: editStructured(out) };
+  })());
+
+  server.registerTool('disconnect', { title: 'Disconnect a pin', description: 'Remove the labels or power symbols this tool placed on a pin. Wires and labels drawn by hand in KiCad are left alone and reported.', inputSchema: { project, ref: z.string(), pin: z.string() } }, ({ project: id, ref, pin }) => guard(async () => {
+    const out = await service.disconnect((await open(id)).info.id, ref, pin);
+    return { content: [text(editText(out))], structuredContent: editStructured(out) };
+  })());
+
+  server.registerTool('remove_component', { title: 'Remove a component', description: 'Delete every unit of a component and the labels this tool placed on it.', inputSchema: { project, ref: z.string() } }, ({ project: id, ref }) => guard(async () => {
+    const out = await service.removeComponent((await open(id)).info.id, ref);
+    return { content: [text(editText(out))], structuredContent: editStructured(out) };
+  })());
+
+  server.registerTool('set_value', { title: 'Set a value', description: 'Change the Value field of a component (all units), e.g. R1 to "2k2" or U2 to "74HC04".', inputSchema: { project, ref: z.string(), value: z.string() } }, ({ project: id, ref, value }) => guard(async () => {
+    const out = await service.setValue((await open(id)).info.id, ref, value);
+    return { content: [text(editText(out))], structuredContent: editStructured(out) };
   })());
 
   return server;

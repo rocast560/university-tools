@@ -1,11 +1,25 @@
 import { describe, expect, test } from 'bun:test';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { KICAD_CLI, KICAD_SYMBOL_DIR } from '../server/config.ts';
 import { createMcpServer } from '../server/mcp.ts';
+import { realService } from './edit-integration.test.ts';
 import { makeService } from './service.test.ts';
 
 async function connect() {
   const { service, sch } = await makeService();
+  const server = createMcpServer(service);
+  const [a, b] = InMemoryTransport.createLinkedPair();
+  await server.connect(a);
+  const client = new Client({ name: 'test', version: '0' });
+  await client.connect(b);
+  return { client, sch };
+}
+
+async function connectReal() {
+  const { service, sch } = await realService();
   const server = createMcpServer(service);
   const [a, b] = InMemoryTransport.createLinkedPair();
   await server.connect(a);
@@ -72,4 +86,26 @@ describe('MCP tools', () => {
     const parts = (await client.callTool({ name: 'list_supported_parts', arguments: {} })) as Result;
     expect(parts.content[0].text).toContain('74LS00');
   });
+});
+
+describe('MCP edit tools', () => {
+  const have = existsSync(KICAD_CLI) && existsSync(path.join(KICAD_SYMBOL_DIR, 'Device.kicad_sym'));
+  test('edit tools are listed and refuse unknown parts', async () => {
+    const { client, sch } = await connect();
+    const tools = (await client.listTools()).tools.map((t) => t.name);
+    for (const t of ['add_component', 'connect', 'disconnect', 'remove_component', 'set_value']) expect(tools).toContain(t);
+    const id = ((await client.callTool({ name: 'open_schematic', arguments: { path: sch } })) as Result).structuredContent!.id as string;
+    const bad = (await client.callTool({ name: 'add_component', arguments: { project: id, part: 'flux capacitor' } })) as Result;
+    expect(bad.isError).toBe(true);
+    expect(bad.content[0].text).toMatch(/list_supported_parts/);
+  });
+  test.skipIf(!have)('set_value through the real pipeline', async () => {
+    const { client, sch } = await connectReal();
+    const id = ((await client.callTool({ name: 'open_schematic', arguments: { path: sch } })) as Result).structuredContent!.id as string;
+    const r = (await client.callTool({ name: 'set_value', arguments: { project: id, ref: 'R1', value: '2k2' } })) as Result;
+    expect(r.isError).toBeFalsy();
+    expect(r.content[0].text).toMatch(/R1 value set to 2k2/);
+    expect(r.content[0].text).toMatch(/File > Revert/);
+    expect(r.structuredContent!.backup).toMatch(/\.circuit-ai-backups/);
+  }, 60000);
 });

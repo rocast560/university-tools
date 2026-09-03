@@ -12,7 +12,7 @@ import { FIXTURES } from './smoke.test.ts';
 
 const have = existsSync(KICAD_CLI) && existsSync(path.join(KICAD_SYMBOL_DIR, 'Device.kicad_sym'));
 
-async function realService() {
+export async function realService() {
   const work = mkdtempSync(path.join(tmpdir(), 'edit-'));
   const sch = path.join(work, 'PL1_1.kicad_sch');
   copyFileSync(path.join(FIXTURES, 'PL1_1.kicad_sch'), sch);
