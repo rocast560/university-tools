@@ -6,6 +6,7 @@ import type { SettingsStore } from './settings';
 import type { WorkspaceService } from './service';
 import { serveStatic } from './static';
 import { MAX_ASSET_BYTES } from './assets';
+import { fontFamily } from './fonts';
 
 /** Filled in by later tasks; null => the route answers 503. */
 export interface BackupApi {
@@ -129,7 +130,8 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
       if (seg[3] === 'assets') {
         if (seg.length === 4 && method === 'POST') {
           const kind = url.searchParams.get('kind') === 'font' ? 'font' : 'image';
-          const asset = service.addAsset(id, { kind, filename: url.searchParams.get('filename') ?? 'asset', bytes: await readBody(req), folder: url.searchParams.get('folder') || null, family: url.searchParams.get('family') }, origin);
+          const bytes = await readBody(req);
+          const asset = service.addAsset(id, { kind, filename: url.searchParams.get('filename') ?? 'asset', bytes, folder: url.searchParams.get('folder') || null, family: url.searchParams.get('family') ?? (kind === 'font' ? fontFamily(bytes) : null) }, origin);
           return json(201, { asset });
         }
         if (rest && method === 'PATCH') {

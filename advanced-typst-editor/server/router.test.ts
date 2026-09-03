@@ -1,10 +1,11 @@
 import { describe, it, expect, afterEach } from 'vitest';
+import fs from 'node:fs';
 import path from 'node:path';
 import { createEventBus } from './events';
 import { createSettingsStore } from './settings';
 import { createWorkspaceService } from './service';
 import { createHandler } from './router';
-import { tmpDir, rmDir } from './test-util';
+import { tmpDir, rmDir, OLD } from './test-util';
 
 const dirs: string[] = [];
 afterEach(() => { for (const d of dirs.splice(0)) rmDir(d); });
@@ -50,6 +51,13 @@ describe('router', () => {
     expect(((await patched.json()) as { asset: { crop: unknown } }).asset.crop).toEqual({ x: 0, y: 0, w: 1, h: 0.5 });
     const renamed = await call('PATCH', `/api/workspaces/${id}/assets/assets/f1/shot.png`, { stem: 'better' });
     expect(((await renamed.json()) as { asset: { id: string } }).asset.id).toBe('assets/f1/better.png');
+
+    const fontUp = await call('POST', `/api/workspaces/${id}/assets?filename=DejaVuSansMono.ttf&kind=font`, fs.readFileSync(path.join(OLD, 'fonts', 'DejaVuSansMono.ttf')));
+    expect(fontUp.status).toBe(201);
+    const { asset: fontAsset } = await fontUp.json() as { asset: { id: string; fontFamily: string } };
+    expect(fontAsset.fontFamily).toBe('DejaVu Sans Mono');
+    await call('DELETE', `/api/workspaces/${id}/assets/${fontAsset.id}`);
+
     const detail = await (await call('GET', `/api/workspaces/${id}`)).json() as { assets: unknown[]; folders: Array<{ id: string }>; meta: unknown };
     expect(detail.assets).toHaveLength(1);
     expect(detail.folders.map((f) => f.id)).toEqual(['f1']);
