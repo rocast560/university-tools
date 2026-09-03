@@ -40,6 +40,8 @@ export function createBackup(deps: BackupDeps): Backup {
 
   let running = false;
   let rerun = false;
+  let rerunSnapshot = false;
+  let inFlight: Promise<void> | null = null;
   let quietTimer: ReturnType<typeof setTimeout> | null = null;
   let deadline: number | null = null;
   let tickTimer: ReturnType<typeof setInterval> | null = null;
@@ -63,47 +65,71 @@ export function createBackup(deps: BackupDeps): Backup {
     return d;
   };
 
-  const doMirror = (its: MirrorItem[]) => {
+  const doMirror = (its: MirrorItem[]): string[] => {
     const plan = planMirror(its);
     let files = 0;
+    const errors: string[] = [];
     for (const d of cfg().destinations) {
       if (!d.mirror) continue;
-      files += runMirror(d.path, plan, { now, log }).written;
+      try {
+        files += runMirror(d.path, plan, { now, log }).written;
+      } catch (err) {
+        errors.push(`${d.path}: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
     lastMirrorFiles = files;
+    return errors;
   };
-  const doSnapshot = (its: MirrorItem[]) => {
+  const doSnapshot = (its: MirrorItem[]): string[] => {
     const c = cfg();
     let any = false;
+    const errors: string[] = [];
     for (const d of c.destinations) {
       if (!d.snapshots) continue;
-      writeSnapshot(d.path, its, { now: now(), version: deps.version, destinationId: d.id });
-      pruneSnapshots(d.path, c.keepSnapshots);
-      any = true;
+      try {
+        writeSnapshot(d.path, its, { now: now(), version: deps.version, destinationId: d.id });
+        pruneSnapshots(d.path, c.keepSnapshots);
+        any = true;
+      } catch (err) {
+        errors.push(`${d.path}: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
     if (any) { lastSnapshotAt = now(); lastSnapshotDigest = stateDigest(its); }
+    return errors;
   };
 
-  const runOnce = async (opts: { snapshot: boolean }) => {
-    if (running) { rerun = true; return; }
-    running = true;
-    try {
-      do {
-        rerun = false;
-        const its = items();
-        doMirror(its);
-        const due = lastSnapshotAt === null || now() - lastSnapshotAt >= cfg().snapshotIntervalMin * 60_000;
-        if (opts.snapshot || (due && stateDigest(its) !== lastSnapshotDigest)) doSnapshot(its);
-        lastRunAt = now();
-        lastError = null;
-      } while (rerun);
-    } catch (err) {
-      lastError = err instanceof Error ? err.message : String(err);
-      log('run failed:', lastError);
-    } finally {
-      running = false;
-      publish();
+  const runOnce = async (opts: { snapshot: boolean }): Promise<void> => {
+    if (running) {
+      rerun = true;
+      rerunSnapshot ||= opts.snapshot;
+      await inFlight;
+      return;
     }
+    running = true;
+    let snapshotWanted = opts.snapshot;
+    inFlight = (async () => {
+      try {
+        do {
+          rerun = false;
+          const its = items();
+          const errors = doMirror(its);
+          const due = lastSnapshotAt === null || now() - lastSnapshotAt >= cfg().snapshotIntervalMin * 60_000;
+          if (snapshotWanted || (due && stateDigest(its) !== lastSnapshotDigest)) errors.push(...doSnapshot(its));
+          lastRunAt = now();
+          lastError = errors.length ? errors.join('; ') : null;
+          snapshotWanted = rerunSnapshot;
+          rerunSnapshot = false;
+        } while (rerun);
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : String(err);
+        log('run failed:', lastError);
+      } finally {
+        running = false;
+        publish();
+        inFlight = null;
+      }
+    })();
+    await inFlight;
   };
 
   const schedule = () => {

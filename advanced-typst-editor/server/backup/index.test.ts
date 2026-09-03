@@ -77,6 +77,39 @@ describe('backup', () => {
     expect(backup.listSnapshots(id)).toHaveLength(2);
   });
 
+  it('isolates a failing destination so the others still mirror and snapshot', async () => {
+    const { backup, service } = setup();
+    const dest1 = tmpDir(); dirs.push(dest1);
+    const dest2 = tmpDir(); dirs.push(dest2);
+    const cfgd = backup.configure({
+      destinations: [
+        { path: dest1, mirror: true, snapshots: true },
+        { path: dest2, mirror: true, snapshots: true },
+      ],
+    });
+    put(dest1, 'photo.jpg', 'x'); // make dest1 non-claimable after configure
+    const w = service.create({ name: 'Rep', group: null, source: '= one' });
+    const s = await backup.run();
+    expect(fs.readFileSync(path.join(dest2, w.name, 'main.typ'), 'utf8')).toBe('= one');
+    expect(backup.listSnapshots(cfgd.destinations[1]!.id)).toHaveLength(1);
+    expect(s.lastError).toContain(path.resolve(dest1));
+    expect(s.lastError).toContain('already has files');
+    expect(s.lastSnapshotAt).not.toBeNull();
+  });
+
+  it('coalesces a schedule() that arrives during an in-flight run()', async () => {
+    const { backup, service } = setup();
+    const dest = tmpDir(); dirs.push(dest);
+    backup.configure({ destinations: [{ path: dest, mirror: true, snapshots: true }] });
+    service.create({ name: 'A', group: null, source: '= a' });
+    const p = backup.run();
+    backup.schedule();
+    await p;
+    await sleep(150); // let the debounced pass armed by schedule() also settle
+    expect(backup.state().running).toBe(false);
+    expect(backup.state().lastSnapshotAt).not.toBeNull();
+  });
+
   it('restores through a destination and reports the count', async () => {
     const { backup, service, dataDir } = setup();
     const dest = tmpDir(); dirs.push(dest);
