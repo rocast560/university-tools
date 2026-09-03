@@ -5,6 +5,7 @@ import { unzipSync, zipSync, type Zippable } from 'fflate';
 import type { SnapshotInfo } from '../../src/types';
 import { ensureDir, safeDirName, stamp, uniqueDirName } from '../fsx';
 import { HttpError } from '../http';
+import { normalizeRel } from '../paths';
 import type { SettingsStore } from '../settings';
 import { planMirror, SNAPSHOTS_DIR, type MirrorItem } from './mirror';
 
@@ -106,9 +107,15 @@ export async function restoreSnapshot(deps: { zipPath: string; dataDir: string; 
   if (!manRaw) throw new HttpError(400, 'snapshot has no manifest.json');
   const manifest = JSON.parse(new TextDecoder().decode(manRaw)) as Manifest;
   if (manifest.app !== 'typst-studio') throw new HttpError(400, 'not a Typst Studio snapshot');
-  for (const w of manifest.workspaces) for (const f of w.files) {
-    const bytes = entries[`${w.dir}/${f.path}`];
-    if (!bytes || sha256(bytes) !== f.sha256) throw new HttpError(400, `checksum mismatch for ${w.dir}/${f.path}; the snapshot is damaged`);
+  for (const w of manifest.workspaces) {
+    const nd = normalizeRel(w.dir);
+    if (!nd || nd !== w.dir) throw new HttpError(400, `unsafe path in snapshot manifest: ${w.dir}`);
+    for (const f of w.files) {
+      const nf = normalizeRel(f.path);
+      if (!nf || nf !== f.path) throw new HttpError(400, `unsafe path in snapshot manifest: ${f.path}`);
+      const bytes = entries[`${w.dir}/${f.path}`];
+      if (!bytes || sha256(bytes) !== f.sha256) throw new HttpError(400, `checksum mismatch for ${w.dir}/${f.path}; the snapshot is damaged`);
+    }
   }
   const t = stamp(deps.now());
   ensureDir(deps.workspacesDir);
@@ -116,19 +123,22 @@ export async function restoreSnapshot(deps: { zipPath: string; dataDir: string; 
   fs.cpSync(deps.workspacesDir, pre, { recursive: true });
   let restoredRoot: string | null = null;
   let restored = 0;
+  const used = new Set<string>();
   for (const w of manifest.workspaces) {
     const base = safeDirName(w.name);
     let target: string;
     if (w.library) {
-      const existing = deps.settings.listWorkspaces().find((e) => e.library && e.name === w.name);
+      const existing = deps.settings.listWorkspaces().find((e) => e.library && e.name === w.name && !used.has(e.path.toLowerCase()));
       target = existing?.path ?? path.join(deps.workspacesDir, uniqueDirName(deps.workspacesDir, base));
     } else {
       restoredRoot ??= path.join(deps.workspacesDir, `restored-${t}`);
       target = path.join(restoredRoot, uniqueDirName(restoredRoot, base));
     }
+    used.add(target.toLowerCase());
     ensureDir(target);
     for (const f of w.files) {
       const abs = path.join(target, ...f.path.split('/'));
+      if (!abs.startsWith(target + path.sep)) throw new HttpError(400, `unsafe path in snapshot manifest: ${f.path}`);
       ensureDir(path.dirname(abs));
       fs.writeFileSync(abs, entries[`${w.dir}/${f.path}`]!);
     }

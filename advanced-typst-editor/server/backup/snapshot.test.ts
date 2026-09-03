@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { unzipSync } from 'fflate';
@@ -11,11 +12,15 @@ import { buildSnapshot, listSnapshots, pruneSnapshots, restoreSnapshot, snapshot
 const dirs: string[] = [];
 afterEach(() => { for (const d of dirs.splice(0)) rmDir(d); });
 
-function item(name: string, group: string | null, files: Record<string, string>, library = true): MirrorItem {
+function itemWithId(id: string, name: string, group: string | null, files: Record<string, string>, library = true): MirrorItem {
   const root = tmpDir(); dirs.push(root);
   for (const [rel, text] of Object.entries(files)) put(root, rel, text);
-  const entry: WorkspaceEntry = { id: name, name, group, path: root, library, createdAt: 1, openedAt: 1 };
+  const entry: WorkspaceEntry = { id, name, group, path: root, library, createdAt: 1, openedAt: 1 };
   return { entry, files: openWorkspace(root).listFiles() };
+}
+
+function item(name: string, group: string | null, files: Record<string, string>, library = true): MirrorItem {
+  return itemWithId(name, name, group, files, library);
 }
 
 describe('snapshots', () => {
@@ -79,5 +84,45 @@ describe('snapshots', () => {
     const { zipSync } = await import('fflate');
     fs.writeFileSync(zipPath, zipSync(raw));
     await expect(restoreSnapshot({ zipPath, dataDir, workspacesDir: path.join(dataDir, 'workspaces'), settings: createSettingsStore(dataDir), now: () => 1 })).rejects.toThrow(/checksum/);
+  });
+
+  it('refuses a manifest with an unsafe path (zip-slip)', async () => {
+    const dest = tmpDir(); dirs.push(dest);
+    const dataDir = tmpDir(); dirs.push(dataDir);
+    const workspacesDir = path.join(dataDir, 'workspaces');
+    const settings = createSettingsStore(dataDir);
+    const evilBytes = new TextEncoder().encode('evil');
+    const evilSha = crypto.createHash('sha256').update(evilBytes).digest('hex');
+    const manifest = {
+      app: 'typst-studio',
+      version: '0.1.0',
+      createdAt: 1,
+      workspaces: [{ id: 'A', name: 'A', group: null, library: true, dir: 'A', files: [{ path: '../../evil.txt', size: evilBytes.length, sha256: evilSha }] }],
+    };
+    const { zipSync } = await import('fflate');
+    const zip = zipSync({
+      'manifest.json': new TextEncoder().encode(JSON.stringify(manifest)),
+      'A/../../evil.txt': evilBytes,
+    });
+    const zipPath = path.join(dest, 'zip-slip.zip');
+    fs.writeFileSync(zipPath, zip);
+    await expect(restoreSnapshot({ zipPath, dataDir, workspacesDir, settings, now: () => 5 })).rejects.toThrow(/unsafe path/);
+    expect(fs.readdirSync(dataDir).some((n) => n.startsWith('pre-restore-'))).toBe(false);
+    expect(fs.existsSync(path.join(workspacesDir, '..', '..', 'evil.txt'))).toBe(false);
+  });
+
+  it('gives two same-named library workspaces distinct restored folders', async () => {
+    const dest = tmpDir(); dirs.push(dest);
+    const dataDir = tmpDir(); dirs.push(dataDir);
+    const workspacesDir = path.join(dataDir, 'workspaces');
+    const settings = createSettingsStore(dataDir);
+    const foo1 = itemWithId('foo-1', 'Foo', null, { 'main.typ': 'first' });
+    const foo2 = itemWithId('foo-2', 'Foo', null, { 'main.typ': 'second' });
+    const info = writeSnapshot(dest, [foo1, foo2], { now: 2000, version: '0.1.0', destinationId: 'd1' });
+    const r = await restoreSnapshot({ zipPath: path.join(dest, 'snapshots', info.name), dataDir, workspacesDir, settings, now: () => 3000 });
+    expect(r.restored).toBe(2);
+    expect(fs.readFileSync(path.join(workspacesDir, 'Foo', 'main.typ'), 'utf8')).toBe('first');
+    expect(fs.readFileSync(path.join(workspacesDir, 'Foo (2)', 'main.typ'), 'utf8')).toBe('second');
+    expect(settings.listWorkspaces().filter((w) => w.name === 'Foo')).toHaveLength(2);
   });
 });
