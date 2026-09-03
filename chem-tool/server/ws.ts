@@ -2,15 +2,18 @@
 // Client -> server: hello, command, snapshot_response (phase 2).
 
 import type { Hono } from 'hono';
-import type { UpgradeWebSocket, WSContext } from 'hono/ws';
+import type { UpgradeWebSocket } from 'hono/ws';
 import type { SceneSnapshot, Workspace } from '../src/chem/types';
 import type { AppDeps } from './app';
 import { CommandSchema } from './schemas';
 import { CommandError } from './workspace';
 
+/** Anything we can push a frame to: a Hono WSContext or Bun's native ServerWebSocket. */
+interface Sendable { send(data: string): void }
+
 export interface WindowClient { windowId: string }
 export interface WsRegistry {
-  clients: Map<WSContext, WindowClient>;
+  clients: Map<unknown, WindowClient>;
   broadcast(msg: unknown): void;
 }
 
@@ -34,24 +37,29 @@ export function toBroadcastWorkspace(ws: Workspace): Workspace {
 }
 
 export function registerWs(app: Hono, deps: AppDeps, upgradeWebSocket: UpgradeWebSocket): WsRegistry {
-  const clients = new Map<WSContext, WindowClient>();
-  const send = (ws: WSContext, msg: unknown) => { try { ws.send(JSON.stringify(msg)); } catch { /* socket gone */ } };
+  // Keyed by `ws.raw` (the native socket), NOT by the WSContext wrapper: Hono's Bun adapter builds a
+  // brand-new WSContext instance for every callback, so onOpen/onMessage/onClose each receive a
+  // different object for the same connection. Keying by the wrapper makes every lookup miss, which
+  // silently drops `hello` and every `command`. `ws.raw` is the only identity stable across a
+  // connection's lifetime — do not "simplify" this back to keying by `ws`.
+  const clients = new Map<unknown, WindowClient>();
+  const send = (target: Sendable, msg: unknown) => { try { target.send(JSON.stringify(msg)); } catch { /* socket gone */ } };
   const registry: WsRegistry = {
     clients,
-    broadcast(msg) { for (const ws of clients.keys()) send(ws, msg); },
+    broadcast(msg) { for (const raw of clients.keys()) send(raw as Sendable, msg); },
   };
 
   deps.store.subscribe((workspace, actor) => registry.broadcast({ type: 'state', workspace: toBroadcastWorkspace(workspace), actor, version: workspace.version }));
 
   app.get('/ws', upgradeWebSocket(() => ({
     onOpen(_evt, ws) {
-      clients.set(ws, { windowId: '' });
+      clients.set(ws.raw, { windowId: '' });
       const workspace = deps.store.get();
       send(ws, { type: 'state', workspace: toBroadcastWorkspace(workspace), actor: 'system', version: workspace.version });
-      setTimeout(() => { if (clients.get(ws)?.windowId === '') ws.close(); }, 10_000);
+      setTimeout(() => { if (clients.get(ws.raw)?.windowId === '') ws.close(); }, 10_000);
     },
     async onMessage(evt, ws) {
-      const client = clients.get(ws);
+      const client = clients.get(ws.raw);
       if (!client) return;
       let msg: { type?: string; id?: string; windowId?: string; command?: unknown; pngBase64?: string };
       try { msg = JSON.parse(String(evt.data)); } catch { return send(ws, { type: 'error', message: 'Invalid JSON' }); }
@@ -70,7 +78,7 @@ export function registerWs(app: Hono, deps: AppDeps, upgradeWebSocket: UpgradeWe
       }
       deps.onWindowMessage?.(msg, client);
     },
-    onClose(_evt, ws) { clients.delete(ws); },
+    onClose(_evt, ws) { clients.delete(ws.raw); },
   })));
 
   return registry;

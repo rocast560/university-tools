@@ -17,7 +17,7 @@ const resolver = createResolver({ pubchem: new PubChem({ cacheDir: path.join(con
 const store = new WorkspaceStore((await loadWorkspace(file)) ?? createInitialWorkspace(), resolver, saver.save);
 
 let registry: WsRegistry | null = null;
-const snapshots = new SnapshotBroker(() => registry ? [...registry.clients.keys()].map((ws) => ({ send: (m: unknown) => { try { ws.send(JSON.stringify(m)); } catch { /* gone */ } } })) : []);
+const snapshots = new SnapshotBroker(() => registry ? [...registry.clients.keys()].map((raw) => ({ send: (m: unknown) => { try { (raw as { send(data: string): void }).send(JSON.stringify(m)); } catch { /* gone */ } } })) : []);
 const { app, ws } = createApp({
   store, resolver, staticDir: config.staticDir, upgradeWebSocket, host: config.host, port: config.port, snapshots,
   onWindowMessage: (msg) => { if (msg.type === 'snapshot_response') snapshots.resolve(String(msg.id), typeof msg.pngBase64 === 'string' ? msg.pngBase64 : null); },
