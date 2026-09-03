@@ -5,6 +5,8 @@ import { createEventBus } from './events';
 import { createSettingsStore } from './settings';
 import { createWorkspaceService } from './service';
 import { createHandler } from './router';
+import { createBackup } from './backup/index';
+import { browse } from './fs-browse';
 import { tmpDir, rmDir, OLD } from './test-util';
 
 const dirs: string[] = [];
@@ -17,7 +19,8 @@ function app(token: string | null = null) {
   const bus = createEventBus();
   const settings = createSettingsStore(dataDir);
   const service = createWorkspaceService({ settings, bus, watcher: null, dataDir, workspacesDir: path.join(dataDir, 'workspaces'), template: '= T\n' });
-  const handler = createHandler({ settings, service, bus, token, staticDir: null, dataDir, backup: null, compile: null, mcp: null, browse: null });
+  const backup = createBackup({ settings, service, bus, dataDir, workspacesDir: path.join(dataDir, 'workspaces'), version: '0.1.0', quietMs: 50 });
+  const handler = createHandler({ settings, service, bus, token, staticDir: null, dataDir, backup, compile: null, mcp: null, browse });
   const call = (method: string, url: string, body?: unknown, headers: Record<string, string> = {}) =>
     handler(new Request(`http://127.0.0.1:8090${url}`, {
       method,
@@ -64,7 +67,7 @@ describe('router', () => {
     expect((await call('DELETE', `/api/workspaces/${id}/asset-folders?path=f1`)).status).toBe(200);
     expect((await call('DELETE', `/api/workspaces/${id}/assets/assets/better.png`)).status).toBe(200);
     expect((await call('GET', '/api/workspaces/nope')).status).toBe(404);
-    expect((await call('GET', '/api/backup')).status).toBe(503);
+    expect((await call('GET', '/api/backup')).status).toBe(200);
   });
 
   it('requires the bearer token when one is set, except for health', async () => {
@@ -85,5 +88,19 @@ describe('router', () => {
     const next = new TextDecoder().decode((await reader.read()).value);
     expect(next).toContain('workspaces.changed');
     await reader.cancel();
+  });
+
+  it('configures, runs, lists and browses backups', async () => {
+    const { call } = app();
+    const dest = tmpDir(); dirs.push(dest);
+    const cfg = await call('PATCH', '/api/backup', { destinations: [{ path: dest, mirror: true, snapshots: true }] });
+    expect(cfg.status).toBe(200);
+    await call('POST', '/api/workspaces', { name: 'R' });
+    const ran = await (await call('POST', '/api/backup/run')).json() as { backup: { destinations: Array<{ id: string }>; lastSnapshotAt: number } };
+    expect(ran.backup.lastSnapshotAt).toBeTruthy();
+    const snaps = await (await call('GET', `/api/backup/snapshots?destination=${ran.backup.destinations[0]!.id}`)).json() as { snapshots: unknown[] };
+    expect(snaps.snapshots).toHaveLength(1);
+    const browse = await (await call('GET', `/api/fs/browse?path=${encodeURIComponent(dest)}`)).json() as { entries: Array<{ name: string }> };
+    expect(browse.entries.map((e) => e.name)).toContain('snapshots');
   });
 });
