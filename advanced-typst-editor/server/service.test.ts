@@ -83,4 +83,45 @@ describe('workspace service', () => {
     expect(d.folders.map((f) => f.id)).toEqual(['shots']);
     expect(d.files.map((f) => f.path).sort()).toEqual(['assets/shots/x.png', 'main.typ']);
   });
+
+  it('detail() returns a freshly bumped openedAt, not the stale pre-patch value', () => {
+    const dataDir = tmpDir(); dirs.push(dataDir);
+    const bus = createEventBus();
+    let clock = 1000;
+    const settings = createSettingsStore(dataDir, { now: () => clock });
+    const svc = createWorkspaceService({ settings, bus, watcher: null, dataDir, workspacesDir: path.join(dataDir, 'workspaces'), template: '= T\n', now: () => clock });
+    const w = svc.create({ name: 'A', group: null, source: undefined });
+    expect(w.openedAt).toBe(1000);
+    clock = 2000;
+    const d = svc.detail(w.id);
+    expect(d.entry.openedAt).toBe(2000);
+    expect(d.entry.openedAt).toBeGreaterThanOrEqual(w.createdAt);
+  });
+
+  it('a no-op rename (or a case-only change) keeps the same folder', () => {
+    const { svc, dataDir } = setup();
+    const w = svc.create({ name: 'A', group: null, source: undefined });
+    const r1 = svc.rename(w.id, 'A');
+    expect(r1.path).toBe(w.path);
+    expect(fs.existsSync(path.join(dataDir, 'workspaces', 'A (2)'))).toBe(false);
+    const r2 = svc.rename(w.id, 'a');
+    expect(r2.path).toBe(w.path);
+    expect(r2.name).toBe('a');
+  });
+
+  it('R9: an already-registered path returns its entry even past the entry-count limit', () => {
+    const { svc } = setup();
+    const ext = tmpDir(); dirs.push(ext);
+    put(ext, 'main.typ', '= Ext');
+    const w = svc.openFolder(ext, undefined);
+    for (let i = 0; i < 5001; i++) fs.writeFileSync(path.join(ext, `f${i}.txt`), '');
+    expect(svc.openFolder(ext, 'x').id).toBe(w.id);
+  });
+
+  it('refuses a new folder with more than 5,000 entries', () => {
+    const { svc } = setup();
+    const big = tmpDir(); dirs.push(big);
+    for (let i = 0; i < 5001; i++) fs.writeFileSync(path.join(big, `f${i}.txt`), '');
+    expect(() => svc.openFolder(big, undefined)).toThrow(/5000/);
+  });
 });

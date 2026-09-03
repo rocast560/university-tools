@@ -85,8 +85,8 @@ export function createWorkspaceService(deps: ServiceDeps): WorkspaceService {
       const e = entry(id);
       if (!isDir(e.path)) throw new HttpError(409, `workspace folder is missing: ${e.path}`);
       const ws = openWorkspace(e.path, { now });
-      settings.patchWorkspace(id, { openedAt: now() });
-      return { entry: e, files: ws.listFiles(), meta: ws.readMeta(), assets: ws.listAssets(), folders: ws.listFolders() };
+      const patched = settings.patchWorkspace(id, { openedAt: now() }) ?? e;
+      return { entry: patched, files: ws.listFiles(), meta: ws.readMeta(), assets: ws.listAssets(), folders: ws.listFolders() };
     },
     create({ name, group, source }) {
       const clean = name.trim() || 'Untitled report';
@@ -102,6 +102,10 @@ export function createWorkspaceService(deps: ServiceDeps): WorkspaceService {
       if (path.parse(p).root === p) throw new HttpError(400, 'a drive root cannot be a workspace');
       const rd = path.resolve(deps.dataDir);
       if (p === rd || rd.startsWith(p + path.sep)) throw new HttpError(400, 'the app data folder cannot be a workspace');
+      // R9: an already-registered path always returns its entry; the entry walk below
+      // guards new registrations only, so a known workspace is never blocked by it.
+      const existing = settings.findByPath(p);
+      if (existing) return existing;
       let count = 0;
       const stack = [p];
       while (stack.length && count <= MAX_ENTRIES) {
@@ -113,8 +117,6 @@ export function createWorkspaceService(deps: ServiceDeps): WorkspaceService {
         }
       }
       if (count > MAX_ENTRIES) throw new HttpError(400, `that folder holds more than ${MAX_ENTRIES} entries; pick the report's own folder`);
-      const existing = settings.findByPath(p);
-      if (existing) return existing;
       const inLibrary = p.startsWith(path.resolve(deps.workspacesDir) + path.sep);
       return register({ path: p, name: name?.trim() || path.basename(p), group: null, library: inLibrary });
     },
@@ -123,7 +125,10 @@ export function createWorkspaceService(deps: ServiceDeps): WorkspaceService {
       const clean = name.trim();
       if (!clean) throw new HttpError(400, 'name cannot be empty');
       let newPath = e.path;
-      if (e.library && isDir(e.path)) {
+      // R10: a no-op rename (or a case-only change on Windows) must not move the
+      // folder -- uniqueDirName would otherwise see the folder itself as a
+      // collision and rename it to "<name> (2)". Only the display name changes.
+      if (e.library && isDir(e.path) && safeDirName(clean).toLowerCase() !== path.basename(e.path).toLowerCase()) {
         const parent = path.dirname(e.path);
         const target = path.join(parent, uniqueDirName(parent, safeDirName(clean)));
         if (target !== e.path) {
