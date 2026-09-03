@@ -134,11 +134,18 @@ const MAX_ZOOM = 3;
 export const TypstPreview = memo(function TypstPreview({
   source,
   revision = 0,
+  mainPath = '/main.typ',
   onRevealSource,
   onRevealImage,
 }: {
   source: string;
   revision?: number;
+  /**
+   * Where `source` is mounted in the compiler's virtual filesystem: the
+   * workspace-relative path of the file open in the editor, so a document
+   * that `#include`s its neighbours resolves them from the right directory.
+   */
+  mainPath?: string;
   /**
    * Click-to-source. Receives ordered candidates (best guess first, then
    * neighbouring runs); the handler takes the first that resolves.
@@ -165,7 +172,7 @@ export const TypstPreview = memo(function TypstPreview({
     const id = ++runId.current;
     setCompiling(true);
     const timer = setTimeout(() => {
-      void compileTypstSvg(source, { coalesce: true })
+      void compileTypstSvg(source, { coalesce: true }, mainPath)
         .then((res) => {
           if (id !== runId.current) return;
           // A superseded compile did no work and carries no diagnostics:
@@ -188,7 +195,7 @@ export const TypstPreview = memo(function TypstPreview({
     }, DEBOUNCE_MS);
 
     return () => clearTimeout(timer);
-  }, [source, revision]);
+  }, [source, revision, mainPath]);
 
   const errors = diagnostics.filter((d) => d.severity === 'error');
 

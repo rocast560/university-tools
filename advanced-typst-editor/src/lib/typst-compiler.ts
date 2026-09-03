@@ -58,7 +58,10 @@ export interface TypstShadowFile {
   bytes: Uint8Array;
 }
 
-// Stable virtual path for the document inside the compiler's in-memory FS.
+// Default virtual path for the document inside the compiler's in-memory FS.
+// Callers pass their own when the file being edited isn't main.typ: every
+// other .typ in the workspace is mounted as a shadow file, so any of them can
+// be compiled as the main one.
 const MAIN_PATH = '/main.typ';
 
 // typst.ts's `format` discriminator (see CompileFormatEnum).
@@ -245,10 +248,15 @@ export async function getFontInfo(bytes: Uint8Array): Promise<{ family: string }
  * no SVG and `diagnostics` carries the errors (with source ranges). The
  * promise rejects only on an unexpected/internal failure (e.g. the wasm
  * couldn't be loaded at all).
+ *
+ * `mainPath` is where `source` is mounted and which file the compiler is
+ * pointed at, so a document that `#include`s its neighbours resolves them
+ * relative to the right place.
  */
 export function compileTypstSvg(
   source: string,
   opts: { coalesce?: boolean } = {},
+  mainPath: string = MAIN_PATH,
 ): Promise<TypstSvgResult> {
   // Coalesce superseded previews. The preview already debounces typing, but a
   // document that takes longer to compile than the debounce window will still
@@ -266,10 +274,10 @@ export function compileTypstSvg(
     syncShadowFiles(compiler);
     // Map the latest source, then reset + compile (matches typst.ts's own
     // ordering in TypstSnippet.vector()).
-    compiler.addSource(MAIN_PATH, source);
+    compiler.addSource(mainPath, source);
     await compiler.reset();
     const res = await compiler.compile({
-      mainFilePath: MAIN_PATH,
+      mainFilePath: mainPath,
       format: FORMAT_VECTOR,
       diagnostics: 'full',
     });
@@ -288,17 +296,17 @@ export function compileTypstSvg(
  * Compile Typst source to PDF bytes, fully locally. Throws (rejects) with a
  * readable message if the document has compile errors.
  *
- * Compiles the same `/main.typ` as the preview so relative paths (notably
+ * Compiles the same `mainPath` as the preview so relative paths (notably
  * `#image("/assets/…")`) resolve identically in both.
  */
-export function compileTypstPdf(source: string): Promise<Uint8Array> {
+export function compileTypstPdf(source: string, mainPath: string = MAIN_PATH): Promise<Uint8Array> {
   return enqueue(async () => {
     const { compiler } = await getInstance();
     syncShadowFiles(compiler);
-    compiler.addSource(MAIN_PATH, source);
+    compiler.addSource(mainPath, source);
     await compiler.reset();
     const res = await compiler.compile({
-      mainFilePath: MAIN_PATH,
+      mainFilePath: mainPath,
       format: FORMAT_PDF,
       diagnostics: 'full',
     });
