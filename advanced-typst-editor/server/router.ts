@@ -95,6 +95,17 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
     if (seg[1] === 'health' && seg.length === 2) return json(200, { ok: true, version: '0.1.0' });
     if (seg[1] === 'events' && seg.length === 2 && method === 'GET') return openEventStream(deps.bus);
 
+    if (seg[1] === 'groups') {
+      if (seg.length === 2) {
+        if (method === 'GET') return json(200, { groups: service.listGroups() });
+        if (method === 'POST') return json(201, { groups: service.createGroup(requireString(await readJsonObject(req), 'name')) });
+      }
+      if (seg.length === 3) {
+        if (method === 'PATCH') return json(200, { groups: service.renameGroup(seg[2]!, requireString(await readJsonObject(req), 'name')) });
+        if (method === 'DELETE') return json(200, { groups: service.deleteGroup(seg[2]!) });
+      }
+    }
+
     if (seg[1] === 'workspaces') {
       if (seg.length === 2) {
         if (method === 'GET') return json(200, { workspaces: service.list() });

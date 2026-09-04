@@ -10,4 +10,10 @@ describe('groupWorkspaces', () => {
     expect(out[0]!.items.map((i) => i.name)).toEqual(['d', 'a']);
     expect(out[1]!.items.map((i) => i.name)).toEqual(['e', 'c']);
   });
+
+  it('includes an empty known group (created but no members yet)', () => {
+    const out = groupWorkspaces([w('a', 'A')], ['A', 'Empty']);
+    expect(out.map((g) => g.group)).toEqual(['A', 'Empty']);
+    expect(out.find((g) => g.group === 'Empty')!.items).toEqual([]);
+  });
 });

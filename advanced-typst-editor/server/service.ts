@@ -31,6 +31,10 @@ export interface WorkspaceService {
   rename(id: string, name: string): WorkspaceEntry;
   setGroup(id: string, group: string | null): WorkspaceEntry;
   remove(id: string): void;
+  listGroups(): string[];
+  createGroup(name: string): string[];
+  renameGroup(oldName: string, newName: string): string[];
+  deleteGroup(name: string): string[];
   /** Register every library folder not yet known and start watching everything that exists. */
   boot(): void;
   // writes: all emit workspace.changed with `origin`
@@ -171,6 +175,29 @@ export function createWorkspaceService(deps: ServiceDeps): WorkspaceService {
     setGroup(id, group) {
       entry(id);
       const out = settings.patchWorkspace(id, { group: group?.trim() || null })!;
+      registryChanged();
+      return out;
+    },
+    listGroups: () => settings.listGroups(),
+    createGroup(name) {
+      const clean = name.trim();
+      if (!clean) throw new HttpError(400, 'group name cannot be empty');
+      if (settings.listGroups().includes(clean)) throw new HttpError(409, `a group named "${clean}" already exists`);
+      const out = settings.addGroup(clean);
+      registryChanged();
+      return out;
+    },
+    renameGroup(oldName, newName) {
+      const clean = newName.trim();
+      if (!clean) throw new HttpError(400, 'group name cannot be empty');
+      if (!settings.listGroups().includes(oldName)) throw new HttpError(404, `no group named "${oldName}"`);
+      if (clean !== oldName && settings.listGroups().includes(clean)) throw new HttpError(409, `a group named "${clean}" already exists`);
+      const out = settings.renameGroup(oldName, clean);
+      registryChanged();
+      return out;
+    },
+    deleteGroup(name) {
+      const out = settings.removeGroup(name);
       registryChanged();
       return out;
     },

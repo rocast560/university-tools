@@ -7,6 +7,7 @@ export interface ChangeNotice { id: ID; paths: string[]; origin: string | null; 
 
 export interface AppState {
   workspaces: WorkspaceStatus[];
+  groups: string[];
   activeWorkspaceId: ID | null;
   detail: WorkspaceDetail | null;
   typstAssets: TypstAsset[];
@@ -26,6 +27,10 @@ export interface AppState {
   renameWorkspace(id: ID, name: string): Promise<void>;
   setWorkspaceGroup(id: ID, group: string | null): Promise<void>;
   removeWorkspace(id: ID): Promise<void>;
+  loadGroups(): Promise<void>;
+  createGroup(name: string): Promise<void>;
+  renameGroup(name: string, newName: string): Promise<void>;
+  deleteGroup(name: string): Promise<void>;
 
   // BTCT-compatible asset slice
   loadTypstAssets(): Promise<void>;
@@ -60,7 +65,7 @@ export const useAppStore = create<AppState>((set, get) => {
     try { applyDetail(await api.getWorkspace(id)); } catch { /* missing: the sidebar shows it */ }
   };
   return {
-    workspaces: [], activeWorkspaceId: null, detail: null, typstAssets: [], assetFolders: [],
+    workspaces: [], groups: [], activeWorkspaceId: null, detail: null, typstAssets: [], assetFolders: [],
     redaction: { style: 'gaussian', strength: 1 }, typstCli: null, backup: null, mcp: null, online: false, lastChange: null, settingsOpen: false,
 
     async loadWorkspaces() { set({ workspaces: await api.listWorkspaces() }); },
@@ -79,6 +84,10 @@ export const useAppStore = create<AppState>((set, get) => {
     async renameWorkspace(id, name) { await api.patchWorkspace(id, { name }); await get().loadWorkspaces(); if (get().activeWorkspaceId === id) await reloadDetail(); },
     async setWorkspaceGroup(id, group) { await api.patchWorkspace(id, { group }); await get().loadWorkspaces(); },
     async removeWorkspace(id) { await api.deleteWorkspace(id); if (get().activeWorkspaceId === id) await get().selectWorkspace(null); await get().loadWorkspaces(); },
+    async loadGroups() { set({ groups: await api.listGroups() }); },
+    async createGroup(name) { set({ groups: await api.createGroup(name) }); },
+    async renameGroup(name, newName) { set({ groups: await api.renameGroup(name, newName) }); await get().loadWorkspaces(); },
+    async deleteGroup(name) { set({ groups: await api.deleteGroup(name) }); await get().loadWorkspaces(); },
 
     loadTypstAssets: reloadDetail,
     async addTypstAsset(file, kind, folderId) {
@@ -109,7 +118,7 @@ export const useAppStore = create<AppState>((set, get) => {
     setOnline: (online) => set({ online }),
     handleEvent(ev) {
       switch (ev.type) {
-        case 'workspaces.changed': void get().loadWorkspaces(); break;
+        case 'workspaces.changed': void get().loadWorkspaces(); void get().loadGroups(); break;
         case 'backup.state': set({ backup: ev.state }); break;
         case 'mcp.clients': set((s) => ({ mcp: { endpoint: s.mcp?.endpoint ?? '/mcp', authRequired: s.mcp?.authRequired ?? false, clients: ev.clients } })); break;
         case 'workspace.changed':

@@ -42,6 +42,10 @@ const assetUrl = (id: string, a: string) => `${wsUrl(id)}/assets/${a.split('/').
 export const api = {
   health: () => req<{ ok: boolean }>('GET', '/api/health'),
   listWorkspaces: () => req<{ workspaces: WorkspaceStatus[] }>('GET', '/api/workspaces').then((r) => r.workspaces),
+  listGroups: () => req<{ groups: string[] }>('GET', '/api/groups').then((r) => r.groups),
+  createGroup: (name: string) => req<{ groups: string[] }>('POST', '/api/groups', { name }).then((r) => r.groups),
+  renameGroup: (name: string, newName: string) => req<{ groups: string[] }>('PATCH', `/api/groups/${enc(name)}`, { name: newName }).then((r) => r.groups),
+  deleteGroup: (name: string) => req<{ groups: string[] }>('DELETE', `/api/groups/${enc(name)}`).then((r) => r.groups),
   createWorkspace: (input: { name: string; group?: string | null; source?: string }) => req<{ workspace: WorkspaceEntry }>('POST', '/api/workspaces', input).then((r) => r.workspace),
   openFolder: (path: string, name?: string) => req<{ workspace: WorkspaceEntry }>('POST', '/api/workspaces/open', { path, name }).then((r) => r.workspace),
   patchWorkspace: (id: string, patch: { name?: string; group?: string | null }) => req<{ workspace: WorkspaceEntry }>('PATCH', wsUrl(id), patch).then((r) => r.workspace),

@@ -128,6 +128,25 @@ describe('router', () => {
     expect(asset.id).toBe('assets/Auth Bypass/proof.png');
   });
 
+  it('lists, creates, renames and deletes sidebar groups', async () => {
+    const { call } = app();
+    expect(await (await call('GET', '/api/groups')).json()).toEqual({ groups: [] });
+    const created = await call('POST', '/api/groups', { name: 'CPTC' });
+    expect(created.status).toBe(201);
+    expect(await created.json()).toEqual({ groups: ['CPTC'] });
+    expect((await call('POST', '/api/groups', { name: 'CPTC' })).status).toBe(409);
+    expect((await call('POST', '/api/groups', { name: '  ' })).status).toBe(400);
+
+    const renamed = await call('PATCH', '/api/groups/CPTC', { name: 'CPTC 2026' });
+    expect(renamed.status).toBe(200);
+    expect(await renamed.json()).toEqual({ groups: ['CPTC 2026'] });
+    expect((await call('PATCH', '/api/groups/nope', { name: 'X' })).status).toBe(404);
+
+    const deleted = await call('DELETE', `/api/groups/${encodeURIComponent('CPTC 2026')}`);
+    expect(deleted.status).toBe(200);
+    expect(await deleted.json()).toEqual({ groups: [] });
+  });
+
   it('configures, runs, lists and browses backups', async () => {
     const { call } = app();
     const dest = tmpDir(); dirs.push(dest);

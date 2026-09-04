@@ -41,6 +41,27 @@ describe('settings store', () => {
     expect(s.scanLibrary(lib)).toEqual([]);
   });
 
+  it('creates, renames and removes groups, keeping member workspaces in sync', () => {
+    const d = tmpDir(); dirs.push(d);
+    const s = createSettingsStore(d, { now: () => 5 });
+    expect(s.addGroup('CPTC')).toEqual(['CPTC']);
+    expect(s.addGroup('ECE')).toEqual(['CPTC', 'ECE']);
+    expect(s.listGroups()).toEqual(['CPTC', 'ECE']);
+    const w = s.addWorkspace({ path: path.join(d, 'ws', 'A'), name: 'A', group: 'CPTC', library: true });
+    expect(s.renameGroup('CPTC', 'CPTC 2026')).toEqual(['CPTC 2026', 'ECE']);
+    expect(s.getWorkspace(w.id)?.group).toBe('CPTC 2026');
+    expect(s.removeGroup('CPTC 2026')).toEqual(['ECE']);
+    expect(s.getWorkspace(w.id)?.group).toBeNull();
+  });
+
+  it('groups survive with no members, and adding an existing name is a no-op', () => {
+    const d = tmpDir(); dirs.push(d);
+    const s = createSettingsStore(d);
+    s.addGroup('Empty');
+    expect(s.addGroup('Empty')).toEqual(['Empty']);
+    expect(s.listGroups()).toEqual(['Empty']);
+  });
+
   it('clamps backup and redaction settings', () => {
     const d = tmpDir(); dirs.push(d);
     const s = createSettingsStore(d);

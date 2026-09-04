@@ -84,6 +84,7 @@ export interface RedactionDefaults { style: BlurStyle; strength: number }
 export interface Settings {
   version: 1;
   workspaces: WorkspaceEntry[];
+  groups: string[];
   backup: BackupSettings;
   typstCli: string | null;
   redaction: RedactionDefaults;

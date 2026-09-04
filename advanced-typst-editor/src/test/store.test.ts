@@ -51,3 +51,21 @@ describe('store folder actions map to API paths', () => {
     vi.useRealTimers();
   });
 });
+
+describe('store group actions', () => {
+  beforeEach(() => { useAppStore.setState({ workspaces: [], groups: [] }); });
+
+  it('loads, creates, renames and deletes groups, and reloads workspaces after a change', async () => {
+    mockFetch({ 'GET /api/groups': { groups: ['CPTC'] }, 'POST /api/groups': { groups: ['CPTC', 'ECE'] }, 'PATCH /api/groups/CPTC': { groups: ['CPTC 2026', 'ECE'] }, 'DELETE /api/groups/CPTC%202026': { groups: ['ECE'] }, 'GET /api/workspaces': { workspaces: [] } });
+    await useAppStore.getState().loadGroups();
+    expect(useAppStore.getState().groups).toEqual(['CPTC']);
+    await useAppStore.getState().createGroup('ECE');
+    expect(calls[1]).toMatchObject({ method: 'POST', body: { name: 'ECE' } });
+    expect(useAppStore.getState().groups).toEqual(['CPTC', 'ECE']);
+    await useAppStore.getState().renameGroup('CPTC', 'CPTC 2026');
+    expect(useAppStore.getState().groups).toEqual(['CPTC 2026', 'ECE']);
+    expect(calls.some((c) => c.method === 'GET' && c.url === '/api/workspaces')).toBe(true);
+    await useAppStore.getState().deleteGroup('CPTC 2026');
+    expect(useAppStore.getState().groups).toEqual(['ECE']);
+  });
+});

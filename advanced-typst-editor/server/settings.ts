@@ -7,6 +7,7 @@ import { isDir, readJson, writeAtomic } from './fsx';
 export const DEFAULT_SETTINGS: Settings = {
   version: 1,
   workspaces: [],
+  groups: [],
   backup: { destinations: [], snapshotIntervalMin: 60, keepSnapshots: 30 },
   typstCli: null,
   redaction: { style: 'gaussian', strength: 1 },
@@ -23,6 +24,13 @@ export interface SettingsStore {
   removeWorkspace(id: string): boolean;
   /** Register every folder under workspacesDir that is not yet known. Returns the new entries. */
   scanLibrary(workspacesDir: string): WorkspaceEntry[];
+  listGroups(): string[];
+  /** Adds a sidebar group if not already present (exact-string match). Idempotent. */
+  addGroup(name: string): string[];
+  /** Renames the group and every member workspace's group to match. No-op if oldName is unknown. */
+  renameGroup(oldName: string, newName: string): string[];
+  /** Removes the group and clears every member workspace's group. No-op if unknown. */
+  removeGroup(name: string): string[];
 }
 
 function samePath(a: string, b: string): boolean {
@@ -36,6 +44,7 @@ function normalise(raw: Partial<Settings>): Settings {
     workspaces: Array.isArray(raw.workspaces)
       ? raw.workspaces.filter((w): w is WorkspaceEntry => !!w && typeof w.id === 'string' && typeof w.path === 'string')
       : [],
+    groups: Array.isArray(raw.groups) ? [...new Set(raw.groups.filter((g): g is string => typeof g === 'string' && g.trim().length > 0).map((g) => g.trim()))] : [],
     backup: {
       destinations: Array.isArray(b.destinations) ? b.destinations.filter((d) => d && typeof d.path === 'string' && typeof d.id === 'string') : [],
       snapshotIntervalMin: Number.isFinite(b.snapshotIntervalMin) && b.snapshotIntervalMin >= 1 ? Math.round(b.snapshotIntervalMin) : 60,
@@ -98,6 +107,29 @@ export function createSettingsStore(dataDir: string, opts: { now?: () => number 
         added.push(store.addWorkspace({ path: abs, name: entry.name, group: null, library: true }));
       }
       return added;
+    },
+    listGroups: () => get().groups,
+    addGroup(name) {
+      const clean = name.trim();
+      update((s) => (s.groups.includes(clean) ? s : { ...s, groups: [...s.groups, clean] }));
+      return get().groups;
+    },
+    renameGroup(oldName, newName) {
+      const clean = newName.trim();
+      update((s) => (!s.groups.includes(oldName) ? s : {
+        ...s,
+        groups: s.groups.map((g) => (g === oldName ? clean : g)),
+        workspaces: s.workspaces.map((w) => (w.group === oldName ? { ...w, group: clean } : w)),
+      }));
+      return get().groups;
+    },
+    removeGroup(name) {
+      update((s) => ({
+        ...s,
+        groups: s.groups.filter((g) => g !== name),
+        workspaces: s.workspaces.map((w) => (w.group === name ? { ...w, group: null } : w)),
+      }));
+      return get().groups;
     },
   };
   return store;

@@ -11,7 +11,7 @@ export default function App() {
   useEffect(() => {
     const s = useAppStore.getState();
     void (async () => {
-      await Promise.all([s.loadWorkspaces(), s.loadSettings(), s.loadBackup(), s.loadMcp()]);
+      await Promise.all([s.loadWorkspaces(), s.loadGroups(), s.loadSettings(), s.loadBackup(), s.loadMcp()]);
       const list = useAppStore.getState().workspaces;
       let remembered: string | null = null;
       try { remembered = localStorage.getItem('tfs-active-workspace'); } catch { /* ignore */ }
