@@ -1,21 +1,40 @@
-# Secrets
+# --- Secrets -------------------------------------------------------------
 .env
-.env.local
+.env.*
+!.env.example
 *.pem
 *.key
 
-# Dependencies / environments
+# --- Dependencies / environments -----------------------------------------
 node_modules/
 .venv/
+venv/
 __pycache__/
 *.pyc
 
-# Build output and caches
+# --- Build output --------------------------------------------------------
 dist/
+build/
+target/
+*.tsbuildinfo
+
+# --- Caches / runtime state ----------------------------------------------
+.cache/
 .pytest_cache/
+.vitest/
+coverage/
 .tmp/
 *.log
 
-# OS junk
+# App runtime data (chem-tool workspaces, circuit scratch, typst studio)
+.data/
+
+# --- Tooling -------------------------------------------------------------
+.claude/
+.worktrees/
+.superpowers/
+
+# --- OS junk -------------------------------------------------------------
 .DS_Store
 Thumbs.db
+desktop.ini

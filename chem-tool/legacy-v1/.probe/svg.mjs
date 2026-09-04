@@ -1,0 +1,15 @@
+import OCL from 'openchemlib';
+OCL.Resources.registerFromNodejs();
+const m = OCL.Molecule.fromSmiles('CC(=O)Oc1ccccc1C(=O)O');
+const svg = m.toSVG(400, 300, 'x', { autoCrop: true, autoCropMargin: 8, suppressChiralText: true, suppressCIPParity: true, suppressESR: true });
+console.log(svg.replace(/\s+/g, ' ').slice(0, 1500));
+console.log('---');
+const w = OCL.Molecule.fromSmiles('O');
+console.log(w.toSVG(200,150,'w',{autoCrop:true}).replace(/\s+/g,' '));
+console.log('---charge test');
+const n = OCL.Molecule.fromSmiles('[NH4+]');
+console.log(n.toSVG(200,150,'n',{autoCrop:true}).replace(/\s+/g,' ').slice(0,600));
+console.log('--- fromMolfile roundtrip');
+const mf = m.toMolfile(); const back = OCL.Molecule.fromMolfile(mf); console.log('atoms', back.getAllAtoms(), 'molfile has 2D?', /2D/.test(mf));
+console.log('atom symbol api', m.getAtomLabel(0), m.getAtomicNo(0), 'bond api', m.getBondAtom(0,0), m.getBondAtom(1,0), m.getBondOrder(0), 'isAromaticBond', m.isAromaticBond(3));
+console.log('charge', n.getAtomCharge(0));
