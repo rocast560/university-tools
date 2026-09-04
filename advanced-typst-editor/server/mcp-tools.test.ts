@@ -7,7 +7,7 @@ import { createWorkspaceService } from './service';
 import { createCompiler } from './compile';
 import { createBackup } from './backup/index';
 import { TOOLS, callTool, type ToolDeps } from './mcp-tools';
-import { tmpDir, rmDir, put, TYPST_CLI } from './test-util';
+import { tmpDir, rmDir, TYPST_CLI } from './test-util';
 
 const dirs: string[] = [];
 afterEach(() => { for (const d of dirs.splice(0)) rmDir(d); });
@@ -26,11 +26,11 @@ function setup(): ToolDeps & { dataDir: string } {
 const call = (deps: ToolDeps, name: string, args: Record<string, unknown> = {}) => callTool(name, args, deps);
 
 describe('MCP tools', () => {
-  it('exposes exactly the 27 tools from the spec', () => {
+  it('exposes exactly the 26 tools from the spec (no open_workspace_folder: every workspace lives in the app library)', () => {
     expect(TOOLS.map((t) => t.name).sort()).toEqual([
       'add_font', 'add_slot', 'backup_status', 'clear_slot', 'compile', 'create_workspace', 'delete_asset', 'delete_workspace',
       'edit_source', 'export_pdf', 'get_source', 'get_workspace', 'list_assets', 'list_slots', 'list_snapshots', 'list_workspaces',
-      'move_asset', 'move_workspace', 'open_workspace_folder', 'place_image', 'rename_asset', 'rename_workspace', 'run_backup',
+      'move_asset', 'move_workspace', 'place_image', 'rename_asset', 'rename_workspace', 'run_backup',
       'set_slot_height', 'set_source', 'update_asset', 'upload_asset',
     ]);
     for (const t of TOOLS) expect(t.description.length).toBeGreaterThan(20);
@@ -46,10 +46,12 @@ describe('MCP tools', () => {
     expect(await call(d, 'edit_source', { workspace_id: w.id, old_string: 'hello', new_string: 'bye', replace_all: true })).toMatchObject({ replacements: 2 });
     expect(await call(d, 'rename_workspace', { workspace_id: w.id, name: 'Rep2' })).toMatchObject({ name: 'Rep2' });
     expect(await call(d, 'move_workspace', { workspace_id: w.id, group: null })).toMatchObject({ group: null });
-    const ext = tmpDir(); dirs.push(ext); put(ext, 'main.typ', '= ext');
-    expect(await call(d, 'open_workspace_folder', { path: ext })).toMatchObject({ library: false });
     expect(await call(d, 'delete_workspace', { workspace_id: w.id })).toEqual({ ok: true });
     expect(fs.existsSync(path.join(d.dataDir, 'trash'))).toBe(true);
+  });
+
+  it('has no way to register an external folder as a workspace', () => {
+    expect(TOOLS.some((t) => t.name === 'open_workspace_folder')).toBe(false);
   });
 
   it('figure slots and assets', async () => {

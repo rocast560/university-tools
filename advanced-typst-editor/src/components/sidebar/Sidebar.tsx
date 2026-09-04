@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AlertTriangle, FolderOpen, Plus, Settings, Circle } from 'lucide-react';
+import { AlertTriangle, Plus, Settings, Circle } from 'lucide-react';
 import { useAppStore } from '@/stores';
 import { groupWorkspaces } from '@/lib/workspace-groups';
 import { FolderBrowserDialog } from '@/components/ui/FolderBrowserDialog';
@@ -21,7 +21,7 @@ export function Sidebar() {
   const online = useAppStore((s) => s.online);
   const [creating, setCreating] = useState(false);
   const [draft, setDraft] = useState('');
-  const [browsing, setBrowsing] = useState<'open' | { locate: WorkspaceStatus } | null>(null);
+  const [browsing, setBrowsing] = useState<{ locate: WorkspaceStatus } | null>(null);
   const [removing, setRemoving] = useState<WorkspaceStatus | null>(null);
   const [menu, setMenu] = useState<{ ws: WorkspaceStatus; x: number; y: number } | null>(null);
 
@@ -34,7 +34,6 @@ export function Sidebar() {
         <span className="text-[11px] font-bold uppercase tracking-widest">Typst Studio</span>
         <div className="flex gap-1">
           <button type="button" title="New workspace" onClick={() => { setCreating(true); setDraft(''); }} className="rounded p-1 hover:bg-[hsl(var(--accent))]"><Plus size={14} /></button>
-          <button type="button" title="Open folder as workspace" onClick={() => setBrowsing('open')} className="rounded p-1 hover:bg-[hsl(var(--accent))]"><FolderOpen size={14} /></button>
           <button type="button" title="Settings" onClick={() => setSettingsOpen(true)} className="rounded p-1 hover:bg-[hsl(var(--accent))]"><Settings size={14} /></button>
         </div>
       </div>
@@ -56,7 +55,7 @@ export function Sidebar() {
             ))}
           </div>
         ))}
-        {workspaces.length === 0 && <div className="px-2 py-6 text-center text-xs text-[hsl(var(--muted-foreground))]">No workspaces yet. Create one or open a folder.</div>}
+        {workspaces.length === 0 && <div className="px-2 py-6 text-center text-xs text-[hsl(var(--muted-foreground))]">No workspaces yet. Create one to get started.</div>}
       </div>
       <div className="border-t border-[hsl(var(--border))] px-3 py-2 text-[10px] text-[hsl(var(--muted-foreground))]">
         <div className="flex items-center gap-2"><span className={`h-2 w-2 rounded-full ${mcpConnected ? 'bg-[hsl(var(--status-green))]' : 'bg-[hsl(var(--muted-foreground))]/40'}`} />MCP {mcpConnected ? `connected (${mcp!.clients.filter((c) => c.connected).map((c) => c.name).join(', ')})` : 'no client'}</div>
@@ -73,8 +72,7 @@ export function Sidebar() {
           </div>
         </div>
       )}
-      {browsing === 'open' && <FolderBrowserDialog title="Open a folder as a workspace" onClose={() => setBrowsing(null)} onPick={(p) => { setBrowsing(null); void openFolder(p); }} />}
-      {browsing && browsing !== 'open' && <FolderBrowserDialog title={`Locate ${browsing.locate.name}`} onClose={() => setBrowsing(null)} onPick={(p) => { const ws = browsing.locate; setBrowsing(null); void remove(ws.id).then(() => openFolder(p)); }} />}
+      {browsing && <FolderBrowserDialog title={`Locate ${browsing.locate.name}`} onClose={() => setBrowsing(null)} onPick={(p) => { const ws = browsing.locate; setBrowsing(null); void remove(ws.id).then(() => openFolder(p)); }} />}
       {removing && (
         <ConfirmDialog
           title={removing.library ? 'Move workspace to trash?' : 'Forget this workspace?'}
