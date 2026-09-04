@@ -15,11 +15,13 @@ import type { Events } from './watch.ts';
 
 const MIME: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json; charset=utf-8', '.woff2': 'font/woff2', '.map': 'application/json' };
 
-export function createApp(deps: { service: Service; events: Events<ProjectEvent>; mcp: () => McpServer }): Hono {
+export function createApp(deps: { service: Service; events: Events<ProjectEvent>; mcp: () => McpServer; kicad?: { available(): Promise<boolean> } }): Hono {
   const app = new Hono();
   app.route('/api', createApi(deps.service, deps.events));
   app.get('/openapi.json', (c) => c.json(openapiDocument()));
-  app.get('/api/health', (c) => c.json({ ok: true }));
+  // Readiness probe for the desktop shell. `kicad` lets it warn on first run:
+  // without kicad-cli the server still starts, but every project open fails.
+  app.get('/api/health', async (c) => c.json({ ok: true, kicad: deps.kicad ? await deps.kicad.available() : null }));
 
   // CORS is scoped to the MCP endpoints only: they're meant to be reached by
   // external MCP clients (a tunneled ChatGPT/claude.ai client, etc.) via
