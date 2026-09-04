@@ -1,0 +1,193 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ──────────────────────────────────────────────────────────────────────
+   Theme tokens. The whole app is built around HSL CSS variables so any
+   theme tweak ripples through every component automatically. Values
+   below are tuned to the dashboard reference design: near-black surfaces,
+   subtle borders, a bright lime primary, plus distinct status hues.
+   ────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* Light mode is unused day-to-day; keep it neutral so screenshots in
+     light environments still render. */
+  --background:        0 0% 97%;
+  --foreground:        0 0% 12%;
+  --card:              0 0% 100%;            /* white cards lift off the grey canvas */
+  --card-foreground:   0 0% 12%;
+  --popover:           0 0% 100%;
+  --popover-foreground:0 0% 12%;
+  --primary:            0 78% 52%;           /* signature red (runtime theme overrides) */
+  --primary-foreground: 0 0% 100%;
+  --secondary:         0 0% 93%;
+  --secondary-foreground: 0 0% 12%;
+  --muted:             0 0% 94%;
+  --muted-foreground:  0 0% 42%;
+  --accent:            0 0% 92%;
+  --accent-foreground: 0 0% 12%;
+  --destructive:       0 76% 56%;
+  --destructive-foreground: 0 0% 100%;
+  --border:            0 0% 88%;
+  --input:             0 0% 88%;
+  --ring:               0 78% 52%;
+
+  --status-green:      123 56% 60%;
+  --status-blue:       213 87% 60%;
+  --status-purple:     258 80% 65%;
+  --status-amber:       38 91% 55%;
+  --status-red:          0 76% 60%;
+
+  --radius:            10px;
+  --radius-pill:       9999px;
+  --radius-sm:         6px;
+  --sidebar-width:     280px;
+  --properties-width:  320px;
+
+  /* Code-block syntax colors: the GitHub Dark palette. `applyCodeAccent`
+     (src/lib/code-theme.ts) only retints --code-keyword/--code-accent per
+     account; the rest stay fixed GitHub Dark. */
+  --code-fg:       #c9d1d9; /* default text / identifiers / operators */
+  --code-accent:   #ff7b72;
+  --code-keyword:  #ff7b72; /* keyword (red)    */
+  --code-function: #d2a8ff; /* entity (purple)  */
+  --code-string:   #a5d6ff; /* string (l. blue) */
+  --code-number:   #79c0ff; /* constant (blue)  */
+  --code-type:     #ffa657; /* type (orange)    */
+  --code-operator: #c9d1d9;
+  --code-variable: #c9d1d9;
+  --code-builtin:  var(--code-fg); /* shell/PS commands; neutral by default */
+  --code-comment:  #8b949e; /* comment (gray)   */
+}
+
+.dark {
+  /* Elevation by luminance, not shadow (drop shadows are invisible on dark
+     surfaces): base → card → popover get progressively lighter. Neutral grey
+     (zero saturation), kept off pure black at the base for eye comfort. */
+  --background:        0 0% 8%;              /* base canvas: dark grey */
+  --foreground:        0 0% 96%;
+  --card:              0 0% 12%;             /* 1st elevation: cards, sidebars */
+  --card-foreground:   0 0% 96%;
+  --popover:           0 0% 15%;             /* overlay: menus, modals */
+  --popover-foreground:0 0% 96%;
+  --primary:            0 84% 60%;           /* signature red (runtime theme overrides) */
+  --primary-foreground: 0 0% 100%;
+  --secondary:         0 0% 16%;
+  --secondary-foreground: 0 0% 96%;
+  --muted:             0 0% 16%;
+  --muted-foreground:  0 0% 65%;             /* lifted for AA contrast on dark */
+  --accent:            0 0% 20%;             /* hover / nested surface */
+  --accent-foreground: 0 0% 96%;
+  --destructive:       0 76% 64%;
+  --destructive-foreground: 0 0% 100%;
+  --border:            0 0% 22%;             /* subtle but visible hairline */
+  --input:             0 0% 18%;
+  --ring:               0 84% 60%;
+
+  --status-green:      123 60% 68%;
+  --status-blue:       213 87% 66%;
+  --status-purple:     258 80% 70%;
+  --status-amber:       38 91% 60%;
+  --status-red:          0 76% 66%;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+body {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", "Helvetica Neue", Helvetica, Arial, system-ui, sans-serif;
+  font-size: 13px;
+  margin: 0;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+#root {
+  height: 100vh;
+  width: 100vw;
+}
+
+/* ──────────────────────────────────────────────────────────────────────
+   General UI polish: snappy interaction transitions, accent text selection,
+   and thin surface-matched scrollbars. Applied app-wide via the shared
+   tokens; no per-component changes.
+   ────────────────────────────────────────────────────────────────────── */
+
+/* Smooth state changes on interactive elements. Only colour/elevation props
+   are transitioned (never layout), so there's no scroll/resize jank. */
+button, a, summary,
+[role="button"], [role="tab"], [role="menuitem"], [role="option"] {
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease,
+    opacity 0.15s ease;
+}
+
+/* Text selection picks up the accent. */
+::selection {
+  background-color: hsl(var(--primary) / 0.28);
+}
+
+/* Thin, subtle scrollbars that fade into the surface. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--muted-foreground) / 0.32) transparent;
+}
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--muted-foreground) / 0.28);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: hsl(var(--muted-foreground) / 0.5);
+}
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* Respect reduced-motion preferences. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: 0.01ms !important; }
+}
+
+/* ──────────────────────────────────────────────────────────────────────
+   Rounded-corner defaults. Tailwind's rounded-* utilities already cover
+   most surfaces, but inputs/buttons without an explicit radius still get
+   a sensible default so nothing renders with square edges by accident.
+   ────────────────────────────────────────────────────────────────────── */
+
+button, input, textarea, select {
+  border-radius: var(--radius-sm);
+}
+
+/* Native disclosure of a hover/focus ring on buttons only. Text inputs
+   communicate focus through the cursor + their own container border
+   styling; a global ring on them adds a coloured halo to every search
+   bar, rename field, and dialog input that looks noisy. */
+button:focus-visible {
+  outline: 1px solid hsl(var(--ring) / 0.7);
+  outline-offset: 1px;
+}
+
+/* Typst asset folder tree nesting (TypstAssetsPanel's .atree-* classes).
+   BTCT kept this in its glass skin, scoped to html[data-ui-theme="glass"];
+   there is no theme switch here, so it applies unconditionally. Without it a
+   subfolder sits flush with a root folder and only the chevron conveys depth.
+   Geometry matches BTCT: each level indents 19px (10 margin + 9 padding). */
+.atree-kids {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-left: 10px;
+  margin-top: 2px;
+  padding-left: 9px;
+}
+.atree-kids > .atree-item { position: relative; }

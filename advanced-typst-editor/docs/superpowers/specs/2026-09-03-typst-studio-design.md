@@ -89,8 +89,9 @@ Rules:
   builds, baked into a temporary copy (see 4.5).
 - `workspace.json` is created on first crop, blur or font upload. A folder
   without one is a valid workspace.
-- The asset id used by the API and the UI is the path relative to `assets/`
-  (e.g. `findings/login.png`). Byte caches are keyed by id + mtime + size.
+- The asset id used by the API, the UI and MCP is the workspace-relative path
+  (`assets/findings/login.png`, `fonts/Inter.ttf`); the Typst path is `/` + id.
+  `workspace.json` keys are these ids. Byte caches are keyed by id + etag.
 
 `workspace.json`:
 
@@ -98,13 +99,13 @@ Rules:
 {
   "version": 1,
   "assets": {
-    "findings/login.png": {
+    "assets/findings/login.png": {
       "crop":   { "x": 0.1, "y": 0, "w": 0.8, "h": 0.28 },
       "blurs":  [ { "x": 0.4, "y": 0.2, "w": 0.2, "h": 0.05, "style": "pixelate", "strength": 1 } ],
       "width":  1920, "height": 1080
     }
   },
-  "fonts": { "Inter-Regular.ttf": { "family": "Inter" } }
+  "fonts": { "fonts/Inter-Regular.ttf": { "family": "Inter" } }
 }
 ```
 
@@ -131,8 +132,7 @@ and may extend outside 0..1; blurs stay inside 0..1).
     "keepSnapshots": 30
   },
   "typstCli": null,
-  "redaction": { "style": "gaussian", "strength": 1 },
-  "layout": { "editorWidth": 520, "assetsWidth": 300, "showEditor": true, "showAssets": true }
+  "redaction": { "style": "gaussian", "strength": 1 }
 }
 ```
 
@@ -359,6 +359,8 @@ and theme picker are not ported).
 - Store: one zustand store (`workspace-store.ts`) holding the registry, the
   active workspace, its tree and `workspace.json`, assets, backup state and
   MCP status; fed by the API and the SSE stream.
+- Pane layout persists in the browser's localStorage (WebView2 keeps it per
+  app); `pane-resize.ts` is ported unchanged.
 
 ### 5.3 New
 
@@ -372,8 +374,6 @@ and theme picker are not ported).
 - `DiskChangeBar`: shown when `workspace.changed` names the open file while the
   buffer is dirty: Reload / Keep mine. When the buffer is clean the content is
   replaced silently, preserving the caret where possible.
-- Layout persistence moves from `localStorage` to `settings.layout` so it
-  survives a WebView2 profile reset.
 
 ## 6. Launcher (`launcher/`, Tauri 2)
 
