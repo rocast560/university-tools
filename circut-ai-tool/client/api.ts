@@ -42,6 +42,13 @@ export interface ProjectLists {
   found: { path: string; name: string }[];
 }
 
+export interface TunnelStatus {
+  state: 'off' | 'downloading' | 'starting' | 'on' | 'error';
+  url: string | null;
+  message: string | null;
+  mcpUrl: string | null;
+}
+
 export interface ConnectInfo {
   appUrl: string;
   mcpUrl: string;
@@ -50,11 +57,20 @@ export interface ConnectInfo {
   stdioCommand: string;
   tools: string[];
   snippets: { id: string; title: string; how: string; language: string; code: string }[];
+  tunnel: TunnelStatus;
 }
 
 export const api = {
   list: () => call<ProjectLists>('/api/projects'),
   open: (path: string) => post<ProjectSummary>('/api/projects/open', { path }),
+  async import(file: File) {
+    const body = new FormData();
+    body.append('file', file);
+    const res = await fetch('/api/projects/import', { method: 'POST', body });
+    const data = (await res.json().catch(() => ({}))) as ProjectSummary & { error?: string };
+    if (!res.ok) throw new ApiError(data.error ?? `import failed (${res.status})`, res.status);
+    return data;
+  },
   summary: (id: string) => call<ProjectSummary>(`/api/projects/${id}`),
   layout: (id: string) => call<LayoutDoc>(`/api/projects/${id}/layout`),
   netlist: async (id: string) => {
@@ -68,6 +84,7 @@ export const api = {
   color: (id: string, net: string, color: string | null) => post<LayoutDoc>(`/api/projects/${id}/layout/colors`, { net, color }),
   reset: (id: string) => post<LayoutDoc>(`/api/projects/${id}/layout/reset`, {}),
   connect: () => call<ConnectInfo>('/api/connect'),
+  tunnel: (action: 'start' | 'stop') => post<TunnelStatus>('/api/tunnel', { action }),
   events(onEvent: (ev: { projectId: string; type: string; message?: string }) => void): () => void {
     const es = new EventSource('/api/events');
     const handler = (e: MessageEvent) => {

@@ -42,9 +42,10 @@ export async function loadProject(id: string) {
 
 async function renderHome() {
   app.replaceChildren(h(`<main class="home"><header><h1>Circuit AI Tool</h1><p class="sub">Open a KiCad schematic and get a breadboard wiring diagram, a build guide, checks and a logic simulator.</p></header>
-    <section class="open"><form id="open-form"><label>Schematic path <input name="path" placeholder="C:\\Users\\you\\Documents\\KiCad\\9.0\\projects\\lab1\\lab1.kicad_sch" required></label><button class="primary" type="submit">Open</button></form></section>
+    <section class="open"><div id="drop" class="dropzone"><b>Drop a .kicad_sch here</b><span class="muted">or</span><button class="primary" type="button" id="pick">Import…</button><input type="file" id="file" accept=".kicad_sch" hidden></div>
+      <form id="open-form"><label>Or open one in place <input name="path" placeholder="C:\\Users\\you\\Documents\\KiCad\\9.0\\projects\\lab1\\lab1.kicad_sch" required></label><button type="submit">Open</button></form></section>
     <section><h2>Recent</h2><ul id="recent" class="projects"></ul></section>
-    <section><h2>Found in your KiCad projects folder</h2><ul id="found" class="projects"></ul></section>
+    <section><h2>Library</h2><ul id="found" class="projects"></ul></section>
     <footer><a href="#/connect">Connect Claude, ChatGPT or Claude Code</a> · <a href="/openapi.json">OpenAPI</a></footer></main>`));
   const form = app.querySelector<HTMLFormElement>('#open-form')!;
   form.addEventListener('submit', async (e) => {
@@ -57,10 +58,36 @@ async function renderHome() {
       toast((err as Error).message);
     }
   });
+  const drop = app.querySelector<HTMLElement>('#drop')!;
+  const filePicker = app.querySelector<HTMLInputElement>('#file')!;
+  async function importFile(file: File) {
+    if (!file.name.toLowerCase().endsWith('.kicad_sch')) return toast('Only .kicad_sch files can be imported');
+    try {
+      toast(`Importing ${file.name}…`);
+      const s = await api.import(file);
+      location.hash = `#/p/${s.id}`;
+    } catch (err) {
+      toast((err as Error).message);
+    }
+  }
+  app.querySelector('#pick')!.addEventListener('click', () => filePicker.click());
+  filePicker.addEventListener('change', () => {
+    if (filePicker.files?.[0]) void importFile(filePicker.files[0]);
+    filePicker.value = '';
+  });
+  for (const type of ['dragenter', 'dragover']) drop.addEventListener(type, (e) => (e.preventDefault(), drop.classList.add('over')));
+  for (const type of ['dragleave', 'dragend']) drop.addEventListener(type, () => drop.classList.remove('over'));
+  drop.addEventListener('drop', (e) => {
+    e.preventDefault();
+    drop.classList.remove('over');
+    const file = (e as DragEvent).dataTransfer?.files?.[0];
+    if (file) void importFile(file);
+  });
+
   try {
     const lists = await api.list();
     app.querySelector('#recent')!.innerHTML = lists.recent.map((p) => `<li><a href="#/p/${p.id}" data-path="${esc(p.path)}"><b>${esc(p.name)}</b><span>${esc(p.path)}</span></a></li>`).join('') || '<li class="muted">nothing yet</li>';
-    app.querySelector('#found')!.innerHTML = lists.found.map((p) => `<li><a href="#/" data-open="${esc(p.path)}"><b>${esc(p.name)}</b><span>${esc(p.path)}</span></a></li>`).join('') || '<li class="muted">no .kicad_sch files found</li>';
+    app.querySelector('#found')!.innerHTML = lists.found.map((p) => `<li><a href="#/" data-open="${esc(p.path)}"><b>${esc(p.name)}</b><span>${esc(p.path)}</span></a></li>`).join('') || '<li class="muted">nothing imported yet</li>';
     app.querySelectorAll<HTMLAnchorElement>('a[data-open]').forEach((a) =>
       a.addEventListener('click', async (e) => {
         e.preventDefault();

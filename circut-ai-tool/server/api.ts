@@ -10,6 +10,7 @@ import { summarize } from '../src/pipeline.ts';
 import { buildConnectInfo } from './connect.ts';
 import { pngAvailable, renderPng } from './png.ts';
 import { ServiceError, type ProjectEvent, type Service } from './service.ts';
+import { createTunnel, type Tunnel } from './tunnel.ts';
 import type { Events } from './watch.ts';
 
 export function parseHighlight(q: string | undefined): Highlight | null {
@@ -38,7 +39,7 @@ export function summaryOf(p: ReturnType<Service['get']>) {
   };
 }
 
-export function createApi(service: Service, events: Events<ProjectEvent>): Hono {
+export function createApi(service: Service, events: Events<ProjectEvent>, tunnel: Tunnel = createTunnel()): Hono {
   const api = new Hono();
 
   api.onError((err, c) => {
@@ -52,6 +53,15 @@ export function createApi(service: Service, events: Events<ProjectEvent>): Hono 
     const body = (await c.req.json().catch(() => ({}))) as { path?: string };
     if (!body.path) throw new ServiceError('body must be {"path": "<absolute path to a .kicad_sch>"}');
     const p = await service.open(body.path);
+    return c.json(summaryOf(p));
+  });
+  // Import copies an uploaded .kicad_sch into the library (PROJECTS_DIR) and
+  // opens it, so the desktop app can own projects without a native file picker.
+  api.post('/projects/import', async (c) => {
+    const form = await c.req.formData().catch(() => null);
+    const file = form?.get('file');
+    if (!(file instanceof File)) throw new ServiceError('send multipart/form-data with a "file" field holding a .kicad_sch');
+    const p = await service.import(file.name, new Uint8Array(await file.arrayBuffer()));
     return c.json(summaryOf(p));
   });
   api.get('/projects/:id', (c) => c.json(summaryOf(service.get(c.req.param('id')))));
@@ -128,8 +138,17 @@ export function createApi(service: Service, events: Events<ProjectEvent>): Hono 
     if (!b.ref || b.value === undefined) throw new ServiceError('body must be {"ref": "R1", "value": "10k"}');
     return c.json(editResult(await service.setValue(c.req.param('id'), b.ref, String(b.value))));
   });
-  api.get('/connect', (c) => c.json(buildConnectInfo()));
+  api.get('/connect', (c) => c.json({ ...buildConnectInfo(), tunnel: tunnel.status() }));
   api.get('/parts', (c) => c.json(PART_ALIASES));
+
+  // Public access for ChatGPT and other internet-only MCP clients.
+  api.get('/tunnel', (c) => c.json(tunnel.status()));
+  api.post('/tunnel', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { action?: string };
+    if (body.action === 'start') return c.json(await tunnel.start());
+    if (body.action === 'stop') return c.json(tunnel.stop());
+    throw new ServiceError('body must be {"action": "start"} or {"action": "stop"}');
+  });
   api.get('/events', (c) =>
     streamSSE(c, async (stream) => {
       const unsub = events.subscribe((ev) => void stream.writeSSE({ event: ev.type, data: JSON.stringify(ev) }));
