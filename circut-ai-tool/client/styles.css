@@ -911,10 +911,36 @@ th.mono {
   margin-bottom: 26px;
 }
 
+.dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 28px 16px;
+  border: 1.5px dashed var(--line);
+  border-radius: var(--r-md);
+  background: var(--sunken);
+  text-align: center;
+  transition: border-color 0.18s ease, background 0.18s ease;
+}
+
+.dropzone.over {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.dropzone b {
+  font-size: 15px;
+}
+
 .home .open form {
   display: flex;
   gap: 10px;
   align-items: end;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
 }
 
 .home .open label {
@@ -1003,10 +1029,43 @@ th.mono {
 
 /* absolutely positioned so the Copy button stays <pre>'s immediate
    nextElementSibling — client/connect.ts reads previousElementSibling */
-.connect .snippet button {
+.connect .snippet button[data-copy] {
   position: absolute;
   top: 14px;
   right: 14px;
+}
+
+.tunnel-state {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 3px 9px;
+  border-radius: 999px;
+  margin-left: 8px;
+  vertical-align: middle;
+  background: var(--sunken);
+  color: var(--ink-2);
+}
+
+.tunnel-state.is-on {
+  background: var(--done);
+  color: var(--on-status);
+}
+
+.tunnel-state.is-error {
+  background: var(--err);
+  color: var(--on-status);
+}
+
+.warn-note {
+  font-size: 13px;
+  color: var(--ink-2);
+  border-left: 3px solid var(--warn);
+  padding: 6px 10px;
+  margin: 0 0 10px;
+  background: var(--sunken);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
 }
 
 /* ---------- toast ---------- */

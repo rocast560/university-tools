@@ -2,6 +2,7 @@
 // that lives next to each schematic (NAME.breadboard.json).
 
 import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { normalizeSidecar, type Sidecar } from '../src/layout/types.ts';
@@ -81,6 +82,24 @@ export async function scanProjects(dir: string, depth = 2): Promise<{ path: stri
   }
   await walk(dir, 0);
   return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Copy a schematic into the library at `dir`, as `<dir>/<stem>/<stem>.kicad_sch`.
+ * The name comes from an upload, so it is reduced to a bare safe stem; a clash
+ * gets a numeric suffix rather than overwriting an existing project.
+ */
+export async function importSchematic(dir: string, filename: string, contents: Uint8Array): Promise<string> {
+  if (!filename.toLowerCase().endsWith('.kicad_sch')) throw new Error('only .kicad_sch files can be imported');
+  const raw = path.basename(filename, path.extname(filename));
+  const stem = raw.replace(/[^A-Za-z0-9._-]/g, '_').replace(/^[._]+/, '').slice(0, 64);
+  if (!stem) throw new Error(`"${filename}" has no usable name`);
+  let name = stem;
+  for (let n = 2; existsSync(path.join(dir, name)); n++) name = `${stem}-${n}`;
+  const target = path.join(dir, name, `${name}.kicad_sch`);
+  await mkdir(path.dirname(target), { recursive: true });
+  await writeFile(target, contents);
+  return normalizePath(target);
 }
 
 export function sidecarPath(schPath: string): string {

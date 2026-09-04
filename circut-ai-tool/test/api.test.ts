@@ -1,14 +1,17 @@
 import { describe, expect, test } from 'bun:test';
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 import { createApp } from '../server/app.ts';
 import { pngAvailable } from '../server/png.ts';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { makeService } from './service.test.ts';
+import { FIXTURES } from './smoke.test.ts';
 
 async function setup() {
-  const { service, sch, events } = await makeService();
+  const { service, sch, events, work } = await makeService();
   const app = createApp({ service, events, mcp: () => new McpServer({ name: 'stub', version: '0' }) });
   const json = (path: string, body?: unknown) => app.request(path, body === undefined ? undefined : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-  return { app, sch, json, service, events };
+  return { app, sch, json, service, events, work };
 }
 
 describe('REST API', () => {
@@ -65,6 +68,51 @@ describe('REST API', () => {
     const sim = await (await json(`/api/projects/${id}/sim`, { levels: { '/A': 1, '/B': 1 } })).json();
     expect(sim.nets['/Y1']).toBe(0);
     expect((await json(`/api/projects/zzz/layout`)).status).toBe(404);
+  });
+
+  test('import copies a schematic into the library, opens it, and never overwrites', async () => {
+    const { app, work } = await setup();
+    const bytes = readFileSync(path.join(FIXTURES, 'PL1_1.kicad_sch'));
+    const send = (name: string) => {
+      const body = new FormData();
+      body.append('file', new File([bytes], name));
+      return app.request('/api/projects/import', { method: 'POST', body });
+    };
+
+    const first = await (await send('lab one!.kicad_sch')).json();
+    expect(first.name).toBe('lab_one_');
+    // sanitised name, own folder inside the library, and it really is on disk
+    expect(existsSync(path.join(work, 'lab_one_', 'lab_one_.kicad_sch'))).toBe(true);
+    // imported projects show up in the library listing
+    expect((await (await app.request('/api/projects')).json()).found.some((p: { name: string }) => p.name === 'lab_one_')).toBe(true);
+
+    // a second import of the same name is suffixed, not overwritten
+    const second = await (await send('lab one!.kicad_sch')).json();
+    expect(second.name).toBe('lab_one_-2');
+    expect(second.id).not.toBe(first.id);
+
+    const bad = await send('notes.txt');
+    expect(bad.status).toBe(400);
+    expect((await bad.json()).error).toMatch(/\.kicad_sch/);
+
+    const empty = await app.request('/api/projects/import', { method: 'POST', body: new FormData() });
+    expect(empty.status).toBe(400);
+  });
+
+  test('tunnel starts off, rejects a bad action, and is reported on the connect page', async () => {
+    const { app, json } = await setup();
+    // Creating the tunnel must not download or spawn anything; only start() does.
+    const off = await (await app.request('/api/tunnel')).json();
+    expect(off).toEqual({ state: 'off', url: null, message: null, mcpUrl: null });
+
+    const bad = await json('/api/tunnel', { action: 'explode' });
+    expect(bad.status).toBe(400);
+    expect((await bad.json()).error).toMatch(/start.*stop/);
+
+    // Stopping an idle tunnel is a no-op, not an error.
+    expect((await (await json('/api/tunnel', { action: 'stop' })).json()).state).toBe('off');
+
+    expect((await (await json('/api/connect')).json()).tunnel.state).toBe('off');
   });
 
   test('openapi, connect, parts and events', async () => {

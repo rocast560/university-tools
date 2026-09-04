@@ -14,7 +14,7 @@ import { buildLayoutDoc, type LayoutDoc } from '../src/pipeline.ts';
 import { simulate, type SimResult } from '../src/sim/index.ts';
 import type { KicadCli } from './kicad-cli.ts';
 import type { LibraryLookup } from './libraries.ts';
-import { normalizePath, projectId, readSidecar, scanProjects, writeSidecar, type ProjectInfo, type ProjectRegistry } from './projects.ts';
+import { importSchematic, normalizePath, projectId, readSidecar, scanProjects, writeSidecar, type ProjectInfo, type ProjectRegistry } from './projects.ts';
 import { watchFile, type Events } from './watch.ts';
 
 export class ServiceError extends Error {
@@ -82,6 +82,17 @@ export class Service {
 
   async list() {
     return { recent: this.deps.registry.list(), found: await scanProjects(this.deps.projectsDir, 2) };
+  }
+
+  /** Copy an uploaded schematic into the library, then open it. */
+  async import(filename: string, contents: Uint8Array): Promise<OpenProject> {
+    let file: string;
+    try {
+      file = await importSchematic(this.deps.projectsDir, filename, contents);
+    } catch (e) {
+      throw new ServiceError((e as Error).message);
+    }
+    return this.open(file);
   }
 
   async open(pathOrId: string): Promise<OpenProject> {
