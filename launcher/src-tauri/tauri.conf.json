@@ -6,8 +6,7 @@
   "build": { "frontendDist": "../ui" },
   "app": {
     "windows": [],
-    "security": { "csp": null },
-    "trayIcon": { "iconPath": "icons/icon.png", "iconAsTemplate": false, "tooltip": "University Tools" }
+    "security": { "csp": null }
   },
   "bundle": {
     "active": true,
