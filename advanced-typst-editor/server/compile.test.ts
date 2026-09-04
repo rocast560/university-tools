@@ -62,6 +62,28 @@ describe.skipIf(!have)('createCompiler', () => {
     expect(saved.path).toBe(to);
     expect(fs.statSync(to).size).toBeGreaterThan(100);
   });
+  it('renders a page preview as PNG, defaulting to page 1', async () => {
+    const { service, compile } = setup();
+    const w = service.create({ name: 'D', group: null, source: '#set page(width: 8cm, height: 6cm)\n= Page one\n#pagebreak()\n= Page two' });
+    const res = await compile.renderPreview(w.id, undefined, undefined, undefined);
+    expect(res.ok).toBe(true);
+    expect(res.page).toBe(1);
+    expect(Buffer.from(res.png!.subarray(0, 8))).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    const res2 = await compile.renderPreview(w.id, undefined, 2, undefined);
+    expect(res2.ok).toBe(true);
+    expect(res2.page).toBe(2);
+    expect(Buffer.from(res2.png!).equals(Buffer.from(res.png!))).toBe(false);
+  });
+
+  it('reports diagnostics instead of a PNG when the document has errors', async () => {
+    const { service, compile } = setup();
+    const w = service.create({ name: 'E', group: null, source: '= Bad\n#image("/assets/missing.png")\n' });
+    const res = await compile.renderPreview(w.id, undefined, undefined, undefined);
+    expect(res.ok).toBe(false);
+    expect(res.png).toBeNull();
+    expect(res.diagnostics[0]).toMatchObject({ severity: 'error' });
+  });
+
   it('rejects an export when a framed asset cannot be baked', async () => {
     const { service, compile } = setup();
     const w = service.create({ name: 'C', group: null, source: '#image("/assets/x.svg", width: 5cm)' });

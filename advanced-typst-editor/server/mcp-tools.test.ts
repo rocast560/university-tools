@@ -26,11 +26,11 @@ function setup(): ToolDeps & { dataDir: string } {
 const call = (deps: ToolDeps, name: string, args: Record<string, unknown> = {}) => callTool(name, args, deps);
 
 describe('MCP tools', () => {
-  it('exposes exactly the 26 tools from the spec (no open_workspace_folder: every workspace lives in the app library)', () => {
+  it('exposes exactly the 27 tools from the spec (no open_workspace_folder: every workspace lives in the app library)', () => {
     expect(TOOLS.map((t) => t.name).sort()).toEqual([
       'add_font', 'add_slot', 'backup_status', 'clear_slot', 'compile', 'create_workspace', 'delete_asset', 'delete_workspace',
       'edit_source', 'export_pdf', 'get_source', 'get_workspace', 'list_assets', 'list_slots', 'list_snapshots', 'list_workspaces',
-      'move_asset', 'move_workspace', 'place_image', 'rename_asset', 'rename_workspace', 'run_backup',
+      'move_asset', 'move_workspace', 'place_image', 'rename_asset', 'rename_workspace', 'render_preview', 'run_backup',
       'set_slot_height', 'set_source', 'update_asset', 'upload_asset',
     ]);
     for (const t of TOOLS) expect(t.description.length).toBeGreaterThan(20);
@@ -86,6 +86,21 @@ describe('MCP tools', () => {
     // basename), not this override, or a typst-CLI probe would misdetect it.
     const added = await call(d, 'add_font', { workspace_id: w.id, path: fontPath, filename: 'weird-name.woff2' }) as { id: string; fontFamily: string | null };
     expect(added).toMatchObject({ id: 'fonts/weird-name.woff2', fontFamily: 'DejaVu Sans Mono' });
+  });
+
+  it.skipIf(!fs.existsSync(TYPST_CLI))('render_preview returns a PNG image on success, diagnostics on failure', async () => {
+    const d = setup();
+    const w = await call(d, 'create_workspace', { name: 'R', source: '= ok' }) as { id: string };
+    const good = await call(d, 'render_preview', { workspace_id: w.id }) as { ok: boolean; page: number; image: { data: string; mimeType: string } };
+    expect(good.ok).toBe(true);
+    expect(good.page).toBe(1);
+    expect(good.image.mimeType).toBe('image/png');
+    expect(Buffer.from(good.image.data, 'base64').subarray(0, 4).toString('hex')).toBe('89504e47');
+
+    await call(d, 'set_source', { workspace_id: w.id, source: '#image("/assets/missing.png")' });
+    const bad = await call(d, 'render_preview', { workspace_id: w.id }) as { ok: boolean; diagnostics: Array<{ severity: string }> };
+    expect(bad.ok).toBe(false);
+    expect(bad.diagnostics[0]).toMatchObject({ severity: 'error' });
   });
 
   it('backup tools and compile', async () => {

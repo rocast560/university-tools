@@ -115,6 +115,11 @@ export const TOOLS: ToolDef[] = [
 
   { name: 'compile', description: 'Compile with the typst CLI and return diagnostics (errors and warnings with file, line, column). No PDF is kept.', schema: { workspace_id: WS, file: FILE }, run: (a, d) => d.compile.compile(a.workspace_id as string, a.file as string | undefined) },
   { name: 'export_pdf', description: 'Compile to a PDF at an absolute path on this machine. Crop and blur redactions are baked into the images first; the result reports how many were baked.', schema: { workspace_id: WS, to: z.string().describe('Absolute output path ending in .pdf'), file: FILE }, run: async (a, d) => { const out = await d.compile.exportPdf(a.workspace_id as string, a.file as string | undefined, a.to as string); return { path: out.path, baked: out.baked }; } },
+  { name: 'render_preview', description: 'Render one page of the workspace to a PNG image, so you can see the compiled layout instead of only error diagnostics or a PDF path on disk.', schema: { workspace_id: WS, file: FILE, page: z.number().int().min(1).optional().describe('1-indexed page to render; defaults to 1.'), ppi: z.number().int().min(36).max(600).optional().describe('Pixels per inch; defaults to 144.') }, run: async (a, d) => {
+    const res = await d.compile.renderPreview(a.workspace_id as string, a.file as string | undefined, a.page as number | undefined, a.ppi as number | undefined);
+    if (!res.ok) return { ok: false, page: res.page, diagnostics: res.diagnostics };
+    return { ok: true, page: res.page, image: { data: Buffer.from(res.png!).toString('base64'), mimeType: 'image/png' } };
+  } },
 
   { name: 'backup_status', description: 'Backup destinations, snapshot interval and retention, and how the last run went.', schema: {}, run: (_a, d) => d.backup.state() },
   { name: 'run_backup', description: 'Mirror and snapshot to every destination now.', schema: {}, run: (_a, d) => d.backup.run() },

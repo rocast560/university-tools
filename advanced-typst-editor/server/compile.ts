@@ -94,6 +94,26 @@ export function createCompiler(deps: { settings: SettingsStore; service: Workspa
       try { return await compileAt(ws.root, entryFile(file), path.join(tmp, 'out.pdf')); }
       finally { fs.rmSync(tmp, { recursive: true, force: true }); }
     },
+    async renderPreview(workspaceId, file, page, ppi) {
+      const ws = deps.service.fs(workspaceId);
+      const f = entryFile(file);
+      const p = page && page >= 1 ? Math.floor(page) : 1;
+      const dpi = ppi && ppi >= 36 ? Math.floor(ppi) : 144;
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tfs-preview-'));
+      try {
+        const fontDir = path.join(ws.root, 'fonts');
+        const args = ['compile', '--root', ws.root, '--ignore-system-fonts', '--diagnostic-format', 'short', '--pages', String(p), '--ppi', String(dpi)];
+        if (fs.existsSync(fontDir)) args.push('--font-path', fontDir);
+        const outPng = path.join(tmp, 'preview.png');
+        args.push(path.join(ws.root, ...f.split('/')), outPng);
+        const { code, stderr } = await run(requireCli(), args, ws.root);
+        const diagnostics = parseDiagnostics(stderr, ws.root);
+        const ok = code === 0 && !diagnostics.some((d) => d.severity === 'error') && fs.existsSync(outPng);
+        return ok ? { ok: true, diagnostics, png: new Uint8Array(fs.readFileSync(outPng)), page: p } : { ok: false, diagnostics, png: null, page: p };
+      } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+      }
+    },
     async exportPdf(workspaceId, file, to) {
       const ws = deps.service.fs(workspaceId);
       const f = entryFile(file);

@@ -17,6 +17,24 @@ interface Session { id: string; server: McpServer; transport: WebStandardStreama
 
 export interface McpDeps { service: WorkspaceService; compile: CompileApi; backup: Backup; settings: SettingsStore; bus: EventBus; token: string | null; now?: () => number }
 
+type ImageContent = { type: 'image'; data: string; mimeType: string };
+type TextContent = { type: 'text'; text: string };
+
+function hasImage(out: unknown): out is { image: { data: string; mimeType: string } } {
+  if (!out || typeof out !== 'object' || !('image' in out)) return false;
+  const img = (out as { image: unknown }).image;
+  return !!img && typeof img === 'object' && typeof (img as { data: unknown }).data === 'string' && typeof (img as { mimeType: unknown }).mimeType === 'string';
+}
+
+/** A tool result carrying `{ image: { data, mimeType } }` becomes a real MCP image block (plus any other fields as text); everything else stays the plain JSON-text wrapping every other tool already used. */
+function toContent(out: unknown): Array<ImageContent | TextContent> {
+  if (!hasImage(out)) return [{ type: 'text', text: JSON.stringify(out ?? null, null, 2) }];
+  const { image, ...rest } = out as { image: { data: string; mimeType: string } } & Record<string, unknown>;
+  const content: Array<ImageContent | TextContent> = [{ type: 'image', data: image.data, mimeType: image.mimeType }];
+  if (Object.keys(rest).length) content.push({ type: 'text', text: JSON.stringify(rest, null, 2) });
+  return content;
+}
+
 export function createMcp(deps: McpDeps): McpApi & { close(): void } {
   const now = deps.now ?? (() => Date.now());
   const sessions = new Map<string, Session>();
@@ -55,7 +73,7 @@ export function createMcp(deps: McpDeps): McpApi & { close(): void } {
       server.registerTool(t.name, { description: t.description, inputSchema: t.schema }, async (args) => {
         try {
           const out = await t.run((args ?? {}) as Record<string, unknown>, toolDeps);
-          return { content: [{ type: 'text', text: JSON.stringify(out ?? null, null, 2) }] };
+          return { content: toContent(out) };
         } catch (e) {
           const msg = e instanceof HttpError ? e.message : e instanceof Error ? e.message : String(e);
           return { content: [{ type: 'text', text: `Error: ${msg}` }], isError: true };

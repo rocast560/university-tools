@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import type { BackupState, DirListing, McpStatus, SnapshotInfo, CompileResult } from '../src/types';
+import type { BackupState, DirListing, McpStatus, SnapshotInfo, CompileResult, Diagnostic } from '../src/types';
 import type { EventBus } from './events';
 import { HttpError, json, optionalString, readJsonObject, requireString } from './http';
 import type { SettingsStore } from './settings';
@@ -20,6 +20,7 @@ export interface CompileApi {
   available(): string | null;
   compile(workspaceId: string, file: string | undefined): Promise<CompileResult>;
   exportPdf(workspaceId: string, file: string | undefined, to: string | undefined): Promise<{ path: string | null; bytes: Uint8Array | null; baked: number }>;
+  renderPreview(workspaceId: string, file: string | undefined, page: number | undefined, ppi: number | undefined): Promise<{ ok: boolean; diagnostics: Diagnostic[]; png: Uint8Array | null; page: number }>;
 }
 export interface McpApi {
   handle(req: Request): Promise<Response>;
