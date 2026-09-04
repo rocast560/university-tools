@@ -440,7 +440,7 @@ describe('parseSchematic', () => {
 
   test('symbol instances carry reference, value, unit, rotation and pin uuids', () => {
     const u2 = sch.symbols.filter((s) => s.ref === 'U2');
-    expect(u2.map((s) => s.unit).sort()).toEqual([1, 2, 3]);
+    expect(u2.map((s) => s.unit).sort()).toEqual([3, 4, 7]);
     expect(u2[0].value).toBe('74LS04');
     const sw = sch.symbols.find((s) => s.ref === 'SW1')!;
     expect(sw.rot).toBe(90);

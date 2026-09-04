@@ -298,9 +298,14 @@ export function runChecks(design: Design, res: EngineResult): Check[] {
     else if (sinks.length) add('led-polarity', 'info', `${part.id} lights when ${sinks[0].ref} pin ${sinks[0].pin.num} is low`, [part.id]);
     else if (sources.length) add('led-polarity', 'info', `${part.id} lights when ${sources[0].ref} pin ${sources[0].pin.num} is high`, [part.id]);
     else add('led-polarity', 'info', `${part.id}: cathode on ${displayName(kNet)}, anode on ${displayName(aNet)}`, [part.id]);
-    const series = res.parts.find((r) => r.style === 'R' && r.id !== part.id && (r.nets.includes(kNet) || r.nets.includes(aNet)) && !(r.nets.includes(kNet) && r.nets.includes(aNet)));
+    const series = res.parts.find((r) => {
+      if (r.style !== 'R' || r.id === part.id) return false;
+      const sharesK = r.nets.includes(kNet) && !powerKind(kNet);
+      const sharesA = r.nets.includes(aNet) && !powerKind(aNet);
+      return sharesK !== sharesA;
+    });
     if (!series) {
-      if (!(kKind === '+' || aKind === 'gnd')) add('led-current', 'warning', `${part.id} has no series resistor on either side`, [part.id]);
+      add('led-current', 'warning', `${part.id} has no series resistor on either side`, [part.id]);
       continue;
     }
     const ohms = parseOhms(series.value);
@@ -1398,10 +1403,10 @@ export function renderSvg(res: EngineResult, opts: RenderOptions = {}): string {
   const size = svgSize(res.board);
   const layers = [
     drawBoard(res, t),
-    el('g', { class: 'packages' }, res.packages.map((p) => drawPackage(p, res, t, sim, hl?.wire !== undefined ? () => undefined : dim)).join('')),
+    el('g', { class: 'packages' }, res.packages.map((p) => drawPackage(p, res, t, sim, hl?.wire !== undefined || hl?.net !== undefined ? () => undefined : dim)).join('')),
     el('g', { class: 'parts' }, res.parts.map((p) => drawPart(p, res, t, sim, dimPart)).join('')),
     el('g', { class: 'wires' }, res.wires.map((w, i) => drawWire(w, i, res.nets[w.net]?.color ?? t.text, t, dim([w.net], [], i))).join('')),
-    drawSupply(res, t, dim),
+    drawSupply(res, t, hl?.wire !== undefined ? () => undefined : dim),
   ];
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${size.viewBox}" width="${size.width}" height="${size.height}" font-family="ui-monospace, Consolas, monospace">${layers.join('')}</svg>`;
 }
@@ -1469,7 +1474,7 @@ describe('buildLayoutDoc', () => {
   });
   test('the truth table is withheld when the wiring has errors', () => {
     const broken = { ...emptySidecar() };
-    broken.pinned.R1 = { '1': { col: 1, row: 'a' }, '2': { col: 2, row: 'a' } };
+    broken.pinned.R1 = { '1': { col: 1, row: 'a' }, '2': { col: 1, row: 'a' } };
     const doc2 = buildLayoutDoc(d, broken);
     if (doc2.checks.some((c) => c.level === 'error')) {
       expect(doc2.sim.truthTable).toBeNull();

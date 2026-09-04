@@ -120,7 +120,7 @@ export const DIST_DIR = path.join(PROJECT_ROOT, 'dist');
 // a changed file always re-exports.
 
 import { execFile } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -163,12 +163,15 @@ export function createKicadCli(opts: { exe: string; cacheDir: string }): KicadCl
     } catch {
       /* not cached */
     }
-    const tmp = path.join(tmpdir(), `circuit-${process.pid}-${Date.now()}${ext}`);
-    await produce(tmp);
-    const text = await readFile(tmp, 'utf8');
-    await writeFile(key, text);
-    await rm(tmp, { force: true });
-    return text;
+    const tmp = path.join(tmpdir(), `circuit-${process.pid}-${randomUUID()}${ext}`);
+    try {
+      await produce(tmp);
+      const text = await readFile(tmp, 'utf8');
+      await writeFile(key, text);
+      return text;
+    } finally {
+      await rm(tmp, { force: true });
+    }
   }
 
   return {
@@ -185,10 +188,13 @@ export function createKicadCli(opts: { exe: string; cacheDir: string }): KicadCl
       cached(sch, '.svg', async (out) => {
         const dir = `${out}-dir`;
         await mkdir(dir, { recursive: true });
-        await exec(['sch', 'export', 'svg', '--no-background-color', '-o', dir, sch]);
-        const produced = path.join(dir, `${path.basename(sch, '.kicad_sch')}.svg`);
-        await writeFile(out, await readFile(produced));
-        await rm(dir, { recursive: true, force: true });
+        try {
+          await exec(['sch', 'export', 'svg', '--no-background-color', '-o', dir, sch]);
+          const produced = path.join(dir, `${path.basename(sch, '.kicad_sch')}.svg`);
+          await writeFile(out, await readFile(produced));
+        } finally {
+          await rm(dir, { recursive: true, force: true });
+        }
       }),
     erc: async (sch) => JSON.parse(await cached(sch, '.erc.json', async (out) => void (await exec(['sch', 'erc', '--format', 'json', '--units', 'mm', '--severity-all', '-o', out, sch])))),
   };
@@ -572,13 +578,13 @@ describe('Service', () => {
   test('movePart persists to the sidecar and the layout follows', async () => {
     const { service, sch } = await makeService();
     const p = await service.open(sch);
-    const r1 = p.doc.pinHoles.R1;
-    const target = { '1': { col: r1['1'].col + 3, row: r1['1'].row }, '2': { col: r1['2'].col + 3, row: r1['2'].row } };
-    const moved = await service.movePart(p.info.id, 'R1', target);
-    expect(moved.doc.pinHoles.R1).toEqual(target);
-    expect(JSON.parse(readFileSync(sidecarPath(sch), 'utf8')).pinned.R1).toEqual(target);
-    await expect(service.movePart(p.info.id, 'R1', { '1': { col: 1, row: 'a' } })).rejects.toThrow(/pin 2/);
-    await expect(service.movePart(p.info.id, 'R1', { '1': p.doc.pinHoles.U1['1'], '2': p.doc.pinHoles.U1['2'] })).rejects.toThrow(/dropped|taken/);
+    const d2 = p.doc.pinHoles.D2;
+    const target = { '1': { col: d2['1'].col + 3, row: d2['1'].row }, '2': { col: d2['2'].col + 3, row: d2['2'].row } };
+    const moved = await service.movePart(p.info.id, 'D2', target);
+    expect(moved.doc.pinHoles.D2).toEqual(target);
+    expect(JSON.parse(readFileSync(sidecarPath(sch), 'utf8')).pinned.D2).toEqual(target);
+    await expect(service.movePart(p.info.id, 'D2', { '1': { col: 1, row: 'a' } })).rejects.toThrow(/pin 2/);
+    await expect(service.movePart(p.info.id, 'D2', { '1': p.doc.pinHoles.U1['1'], '2': p.doc.pinHoles.U1['2'] })).rejects.toThrow(/dropped|taken/);
     const reset = await service.resetLayout(p.info.id);
     expect(reset.sidecar.pinned).toEqual({});
   });
@@ -920,11 +926,11 @@ describe('REST API', () => {
     const { json, sch } = await setup();
     const { id } = await (await json('/api/projects/open', { path: sch })).json();
     const before = await (await json(`/api/projects/${id}/layout`)).json();
-    const r1 = before.pinHoles.R1;
-    const holes = { '1': { col: r1['1'].col + 3, row: r1['1'].row }, '2': { col: r1['2'].col + 3, row: r1['2'].row } };
-    const moved = await (await json(`/api/projects/${id}/layout/move`, { ref: 'R1', holes })).json();
-    expect(moved.pinHoles.R1).toEqual(holes);
-    const bad = await json(`/api/projects/${id}/layout/move`, { ref: 'R1', holes: { '1': { col: 1, row: 'a' } } });
+    const d2 = before.pinHoles.D2;
+    const holes = { '1': { col: d2['1'].col + 3, row: d2['1'].row }, '2': { col: d2['2'].col + 3, row: d2['2'].row } };
+    const moved = await (await json(`/api/projects/${id}/layout/move`, { ref: 'D2', holes })).json();
+    expect(moved.pinHoles.D2).toEqual(holes);
+    const bad = await json(`/api/projects/${id}/layout/move`, { ref: 'D2', holes: { '1': { col: 1, row: 'a' } } });
     expect(bad.status).toBe(400);
     expect((await bad.json()).error).toMatch(/pin 2/);
     const opts = await (await json(`/api/projects/${id}/layout/options`, { dipSwitchPositions: 4 })).json();
