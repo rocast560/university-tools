@@ -3,7 +3,7 @@ import { layout } from '../src/layout/engine.ts';
 import { emptySidecar } from '../src/layout/types.ts';
 import { makeDesign, parseNetlist } from '../src/netlist.ts';
 import { renderSvg, svgSize } from '../src/render/index.ts';
-import { DARK } from '../src/render/theme.ts';
+import { DARK, LIGHT } from '../src/render/theme.ts';
 import { readFixture } from './smoke.test.ts';
 
 const d = parseNetlist(readFixture('PL1_1.net'));
@@ -33,11 +33,27 @@ describe('renderSvg', () => {
     const w = renderSvg(res, { highlight: { wire: 0 } });
     expect((w.match(/opacity="0\.18"/g) ?? []).length).toBe(res.wires.length - 1 + res.parts.length);
   });
-  test('sim state lights LEDs and dark theme changes the board colour', () => {
+  test('sim state lights LEDs', () => {
     const lit = renderSvg(res, { sim: { leds: { D1: true, D2: false }, segments: {}, switches: {} } });
     expect(lit).toContain('data-led="on"');
     expect(lit).toContain('data-led="off"');
-    expect(renderSvg(res, { theme: DARK })).toContain(DARK.board);
+  });
+  test('the board is theme independent: dark renders exactly like light', () => {
+    // The renderer draws the supply leads and their +5V / GND labels in the
+    // margin OUTSIDE the board rect, so a dark board palette puts dark ink on
+    // the page itself. The client mounts the SVG in a constant light well
+    // (--well in client/styles.css) instead, so the two palettes must stay
+    // equal. This fails the moment a divergent DARK field comes back.
+    const light = renderSvg(res, { theme: LIGHT });
+    expect(renderSvg(res, { theme: DARK })).toBe(light);
+    expect(renderSvg(res)).toBe(light);
+    expect(light).toContain(LIGHT.board);
+    const { name: lightName, ...lightColours } = LIGHT;
+    const { name: darkName, ...darkColours } = DARK;
+    expect(darkColours).toEqual(lightColours);
+    expect(lightName).toBe('light');
+    expect(darkName).toBe('dark');
+    expect(DARK.dim).toBe(0.18);
   });
   test('all footprints render', () => {
     const d2 = makeDesign({

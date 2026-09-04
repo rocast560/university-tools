@@ -1,5 +1,11 @@
-// Concrete colours for the renderer. The client picks LIGHT or DARK from the
-// page theme; the server always renders LIGHT for PNG output.
+// Concrete colours for the renderer.
+//
+// The breadboard is a physical object: it does not follow the page theme. Both
+// palettes are identical, so the board looks the same in light and dark mode.
+// The client mounts the SVG in a constant light well (--well in
+// client/styles.css) because the supply leads and their +5V/GND labels are
+// drawn in the margin OUTSIDE the board rect, where dark ink on a dark card
+// would be invisible.
 
 export interface Theme {
   name: 'light' | 'dark';
@@ -49,18 +55,7 @@ export const LIGHT: Theme = {
   dim: 0.18,
 };
 
-export const DARK: Theme = {
-  ...LIGHT,
-  name: 'dark',
-  board: '#2A2D34',
-  boardStroke: '#3B3F48',
-  gutter: '#23262C',
-  hole: '#8A8F98',
-  text: '#E7E5DF',
-  textMuted: '#A3A8B3',
-  chip: '#15171B',
-  body: '#C9B27A',
-  bodyText: '#15171B',
-  ledOff: '#4A4F59',
-  notch: '#2A2D34',
-};
+// Deliberately identical to LIGHT apart from the name: see the note above.
+// `?theme=dark` (server/api.ts) and the DARK import in client/board.ts are
+// therefore inert, but are kept so the API and its OpenAPI enum still work.
+export const DARK: Theme = { ...LIGHT, name: 'dark' };

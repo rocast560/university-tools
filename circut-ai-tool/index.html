@@ -4,7 +4,25 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#f2efe8" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0e1014" media="(prefers-color-scheme: dark)" />
     <title>Circuit AI Tool</title>
+    <script>
+      // Set data-theme before the stylesheet loads so a dark-mode reload never
+      // flashes the light palette. Mirrors initialTheme() in client/state.ts:
+      // same storage key, same values, same prefers-color-scheme fallback.
+      // render() in client/main.ts re-asserts it on every state change.
+      (function () {
+        var t = 'light';
+        try {
+          var saved = localStorage.getItem('theme');
+          t = saved === 'light' || saved === 'dark' ? saved : matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        } catch (e) {
+          /* storage or matchMedia blocked */
+        }
+        document.documentElement.dataset.theme = t;
+      })();
+    </script>
     <link rel="stylesheet" href="/client/styles.css" />
   </head>
   <body>

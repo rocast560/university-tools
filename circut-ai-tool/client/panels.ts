@@ -16,10 +16,10 @@ function guide(p: ProjectState): string {
   let phase = '';
   const items = p.doc.steps
     .map((s) => {
-      const head = s.phase !== phase ? `<div class="phase">${s.phase}</div>` : '';
+      const head = s.phase !== phase ? `<li class="phase">${esc(s.phase)}</li>` : '';
       phase = s.phase;
       const label = esc(s.label).replace(/\b([a-j]\d{1,2})\b/g, '<code>$1</code>');
-      return `${head}<li class="${p.done.has(s.n) ? 'done' : ''} ${p.activeStep === s.n ? 'active' : ''}" data-step="${s.n}"><input type="checkbox" data-done="${s.n}" ${p.done.has(s.n) ? 'checked' : ''}><b>${s.n}.</b><span>${label}</span></li>`;
+      return `${head}<li class="${p.done.has(s.n) ? 'done' : ''} ${p.activeStep === s.n ? 'active' : ''}" data-step="${s.n}"><input type="checkbox" data-done="${s.n}" aria-label="Step ${s.n} done" ${p.done.has(s.n) ? 'checked' : ''}><b>${s.n}.</b><span>${label}</span></li>`;
     })
     .join('');
   return `<div class="panel"><h2>Build guide</h2><div class="progress"><i style="width:${total ? (100 * done) / total : 0}%"></i></div><p class="muted">${done} of ${total} steps. Click a step to highlight it on the board.</p><ol class="steps">${items}</ol></div>`;
@@ -65,11 +65,31 @@ export function renderPanels(panels: HTMLElement, toolbar: HTMLElement, legend: 
   const p = s.project;
   if (!p) return;
   const body = { guide, parts, pinouts, checks, truth, options }[p.panel](p);
-  panels.innerHTML = `<div class="tabs">${TABS.map(([id, label]) => `<button data-tab="${id}" class="${p.panel === id ? 'active' : ''}">${label}${id === 'checks' && p.doc.checks.some((c) => c.level === 'error') ? ' ⚠' : ''}</button>`).join('')}</div>${body}`;
-  toolbar.innerHTML = `<button data-action="fit">Fit</button><button data-action="print">Print</button><a href="/api/projects/${p.id}/board.svg" download="${esc(p.name)}-breadboard.svg">SVG</a><a href="/api/projects/${p.id}/board.png" download="${esc(p.name)}-breadboard.png">PNG</a><a href="/api/projects/${p.id}/schematic.svg" target="_blank">Schematic</a><span>${esc(p.doc.board.kind)} board, ${p.doc.wires.length} wires, ${p.doc.checks.filter((c) => c.level === 'error').length} errors</span>${p.activeStep !== null ? '<button data-action="clear-step">Clear highlight</button>' : ''}`;
+  // The tab bar is built once and kept: replacing it on every state change
+  // killed the active-pill transition and reset the panel's scroll position.
+  const warn = p.doc.checks.some((c) => c.level === 'error');
+  let tabs = panels.querySelector<HTMLElement>('.tabs');
+  if (!tabs) {
+    panels.innerHTML = `<div class="tabs" role="tablist">${TABS.map(([id, label]) => `<button type="button" role="tab" data-tab="${id}">${label}<span class="tabwarn" hidden>⚠</span></button>`).join('')}</div><div class="panelbody"></div>`;
+    tabs = panels.querySelector<HTMLElement>('.tabs')!;
+  }
+  for (const b of tabs.querySelectorAll<HTMLButtonElement>('[data-tab]')) {
+    const on = b.dataset.tab === p.panel;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-selected', String(on));
+    if (b.dataset.tab === 'checks') b.querySelector('.tabwarn')!.toggleAttribute('hidden', !warn);
+  }
+  panels.querySelector<HTMLElement>('.panelbody')!.innerHTML = body;
+
+  const errs = p.doc.checks.filter((c) => c.level === 'error').length;
+  toolbar.innerHTML =
+    `<div class="tgroup"><button type="button" class="btn" data-action="fit">Fit</button><button type="button" class="btn" data-action="print">Print</button></div>` +
+    `<div class="tgroup"><a class="btn" href="/api/projects/${p.id}/board.svg" download="${esc(p.name)}-breadboard.svg">SVG</a><a class="btn" href="/api/projects/${p.id}/board.png" download="${esc(p.name)}-breadboard.png">PNG</a><a class="btn" href="/api/projects/${p.id}/schematic.svg" target="_blank" rel="noopener">Schematic</a></div>` +
+    (p.activeStep !== null ? '<button type="button" class="btn ghost" data-action="clear-step">Clear highlight</button>' : '') +
+    `<span class="statuschip"><b>${esc(p.doc.board.kind)} board</b><i class="dot"></i>${p.doc.wires.length} wires<i class="dot"></i><em class="errs ${errs ? 'is-bad' : 'is-ok'}">${errs} ${errs === 1 ? 'error' : 'errors'}</em></span>`;
   legend.innerHTML = Object.entries(p.doc.nets)
     .sort(([, a], [, b]) => (a.power ? 0 : 1) - (b.power ? 0 : 1) || a.name.localeCompare(b.name))
-    .map(([net, info]) => `<span data-legend="${esc(net)}" title="click to recolour"><i style="background:${info.color}"></i>${esc(info.name)}</span>`)
+    .map(([net, info]) => `<span data-legend="${esc(net)}" title="click to recolour"><i style="background:${esc(info.color)}"></i><span>${esc(info.name)}</span></span>`)
     .join('');
 
   panels.onclick = async (e) => {

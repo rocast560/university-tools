@@ -42,7 +42,7 @@ export async function loadProject(id: string) {
 
 async function renderHome() {
   app.replaceChildren(h(`<main class="home"><header><h1>Circuit AI Tool</h1><p class="sub">Open a KiCad schematic and get a breadboard wiring diagram, a build guide, checks and a logic simulator.</p></header>
-    <section class="open"><form id="open-form"><label>Schematic path <input name="path" placeholder="C:\\Users\\you\\Documents\\KiCad\\9.0\\projects\\lab1\\lab1.kicad_sch" required></label><button type="submit">Open</button></form></section>
+    <section class="open"><form id="open-form"><label>Schematic path <input name="path" placeholder="C:\\Users\\you\\Documents\\KiCad\\9.0\\projects\\lab1\\lab1.kicad_sch" required></label><button class="primary" type="submit">Open</button></form></section>
     <section><h2>Recent</h2><ul id="recent" class="projects"></ul></section>
     <section><h2>Found in your KiCad projects folder</h2><ul id="found" class="projects"></ul></section>
     <footer><a href="#/connect">Connect Claude, ChatGPT or Claude Code</a> · <a href="/openapi.json">OpenAPI</a></footer></main>`));
@@ -99,7 +99,7 @@ function renderProject(s: AppState) {
   if (!app.querySelector('.project[data-id="' + p.id + '"]')) {
     boardUnmount?.();
     app.replaceChildren(h(`<main class="project" data-id="${p.id}">
-      <header><a href="#/" class="back">← projects</a><h1>${esc(p.name)}</h1><span class="path">${esc(p.path)}</span><div class="spacer"></div><a href="#/connect">Connect</a><button id="theme">${s.theme === 'dark' ? 'Light' : 'Dark'}</button></header>
+      <header class="appbar"><a href="#/" class="back">← Projects</a><h1>${esc(p.name)}</h1><span class="path" title="${esc(p.path)}">${esc(p.path)}</span><div class="spacer"></div><a class="btn ghost" href="#/connect">Connect</a><button type="button" id="theme">${s.theme === 'dark' ? 'Light' : 'Dark'}</button></header>
       <div class="layout"><section class="boardcol"><div class="board-card"><div id="board"></div><div id="toolbar" class="toolbar"></div><div id="legend" class="legend"></div></div></section><aside id="panels" class="panels"></aside></div></main>`));
     boardUnmount = mountBoard(app.querySelector('#board')!);
     app.querySelector('#theme')!.addEventListener('click', () => {
