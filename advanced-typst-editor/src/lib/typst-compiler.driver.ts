@@ -161,9 +161,11 @@ export function createTypstDriver(): TypstDriver {
       await fb.init({ getModule: () => compilerWasmUrl });
       const info: any = await fb.getFontInfo(bytes);
       if (!info) return null;
+      // typst.ts returns `{ info: [ { family, variant, … } ], conditions }`; read the first entry.
+      const face: any = Array.isArray(info?.info) ? info.info[0] : info;
       // The wasm returns a struct whose family field has varied across
       // versions; accept the known spellings rather than pinning to one.
-      const family = info.family ?? info.family_name ?? info.familyName ?? null;
+      const family = face?.family ?? face?.family_name ?? face?.familyName ?? null;
       return family ? { family: String(family) } : null;
     },
   };
