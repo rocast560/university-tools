@@ -59,8 +59,11 @@ export function createKicadCli(opts: { exe: string; cacheDir: string }): KicadCl
 
   return {
     async available() {
+      // A bare command name (the Linux default) is looked up on PATH the way execFile will.
+      const resolved = path.basename(exe) === exe ? Bun.which(exe) : exe;
+      if (!resolved) return false;
       try {
-        await access(exe);
+        await access(resolved);
         return true;
       } catch {
         return false;

@@ -16,6 +16,13 @@ describe('createKicadCli', () => {
     await expect(cli.netlist(sch)).rejects.toThrow(/KICAD_CLI/);
   });
 
+  test('a bare command name is resolved through PATH', async () => {
+    const cacheDir = mkdtempSync(path.join(tmpdir(), 'kc-'));
+    // `bun` is always on PATH while the tests run under bun.
+    expect(await createKicadCli({ exe: 'bun', cacheDir }).available()).toBe(true);
+    expect(await createKicadCli({ exe: 'no-such-command-for-circuit-tests', cacheDir }).available()).toBe(false);
+  });
+
   const have = existsSync(KICAD_CLI);
   test.skipIf(!have)('exports a netlist through the real kicad-cli and caches it by content hash', async () => {
     const cacheDir = mkdtempSync(path.join(tmpdir(), 'kc-'));
