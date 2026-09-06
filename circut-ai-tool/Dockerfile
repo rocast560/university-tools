@@ -23,6 +23,8 @@ RUN bun -e "const r = await fetch('https://github.com/cloudflare/cloudflared/rel
  && /usr/local/bin/cloudflared --version
 # The base image gives its user passwordless sudo; a web server does not need it.
 # Both steps are conditional so a future base image without sudo still builds.
+# (Purging the sudo package outright was tried and rejected: apt/dpkg refuses to
+# remove it because it is the last configured way to reach root, even non-interactively.)
 RUN if id -nG kicad | grep -qw sudo; then gpasswd -d kicad sudo; fi \
  && if [ -f /etc/sudoers ]; then sed -i '/NOPASSWD/d' /etc/sudoers; fi
 RUN mkdir -p /app /data /projects && chown kicad:kicad /app /data /projects
@@ -49,11 +51,11 @@ ENV NODE_ENV=production \
 VOLUME /data
 EXPOSE 8765
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD bun -e "fetch('http://127.0.0.1:8765/api/health').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+  CMD bun -e "fetch('http://127.0.0.1:' + (process.env.CIRCUIT_PORT ?? 8765) + '/api/health').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
 CMD ["bun", "server/index.ts"]
 
 # ---- test: typecheck + full suite against the real kicad-cli ------------------
-# Not part of the default build:  docker build --target test -t circuit-ai-tool:test .
+# The suite runs only with --target test:  docker build --target test -t circuit-ai-tool:test .
 FROM runtime AS test
 COPY --chown=kicad:kicad --from=client /app/node_modules ./node_modules
 COPY --chown=kicad:kicad client ./client
@@ -61,3 +63,6 @@ COPY --chown=kicad:kicad scripts ./scripts
 COPY --chown=kicad:kicad test ./test
 COPY --chown=kicad:kicad index.html vite.config.ts ./
 RUN bun run typecheck && bun test
+
+# ---- final: default target, so a bare `docker build .` gives the runtime image, not the test image ----
+FROM runtime AS final

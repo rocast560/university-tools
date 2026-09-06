@@ -53,11 +53,13 @@ export function watchFile(file: string, onChange: () => void, opts: number | Wat
 
   if (pollMs > 0) {
     // One stat per interval; "missing" is a state too, so a delete-and-recreate
-    // (KiCad's save strategy) counts as a change on both transitions.
+    // (KiCad's save strategy) counts as a change on both transitions. ctimeMs is
+    // included so a same-size save within the same mtime tick (1s granularity on
+    // some bind mounts) still changes the key.
     const snapshot = (): string => {
       try {
         const s = statSync(file);
-        return `${s.mtimeMs}:${s.size}`;
+        return `${s.mtimeMs}:${s.ctimeMs}:${s.size}`;
       } catch {
         return 'missing';
       }

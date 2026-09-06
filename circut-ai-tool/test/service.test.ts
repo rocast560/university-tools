@@ -54,6 +54,7 @@ describe('Service', () => {
     expect(p.info.name).toBe('PL1_1');
     expect(p.info.path).toBe(normalizePath(path.join(work, 'PL1_1.kicad_sch')));
     await expect(service.open('Z:/elsewhere/PL1_1.kicad_sch')).rejects.toThrow(/host paths are mapped: Z:\/host\/projects -> /);
+    await expect(service.open('Z:/elsewhere/PL1_1.kicad_sch')).rejects.toThrow(/schematic not found: Z:\/elsewhere\/PL1_1\.kicad_sch/);
   });
 
   test('rejects missing files, wrong extensions, sheets and buses', async () => {

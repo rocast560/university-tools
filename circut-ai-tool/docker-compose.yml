@@ -12,6 +12,7 @@ services:
       - "${KICAD_PROJECTS:-C:/Users/rober/Documents/KiCad/9.0/projects}:/projects"
     environment:
       - CIRCUIT_PATH_MAP=${KICAD_PROJECTS:-C:/Users/rober/Documents/KiCad/9.0/projects}=/projects
+      - CIRCUIT_PUBLIC_URL=http://localhost:${CIRCUIT_HOST_PORT:-8765}
     restart: unless-stopped
 
 volumes:

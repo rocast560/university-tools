@@ -6,3 +6,4 @@ docs
 .git
 .vite
 *.md
+.env

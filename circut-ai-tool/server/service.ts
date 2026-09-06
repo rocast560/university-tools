@@ -102,25 +102,26 @@ export class Service {
   async open(pathOrId: string): Promise<OpenProject> {
     const known = this.open_.get(pathOrId) ?? (this.deps.registry.get(pathOrId) ? this.open_.get(this.deps.registry.get(pathOrId)!.id) : undefined);
     if (known) return known;
+    const requested = pathOrId;
     const remembered = this.deps.registry.get(pathOrId);
     const file = normalizePath(remembered ? remembered.path : mapHostPath(pathOrId, this.deps.pathMap ?? []));
     if (!file.toLowerCase().endsWith('.kicad_sch')) throw new ServiceError(`"${pathOrId}" is not a .kicad_sch file`);
     const id = projectId(file);
-    const project = await this.load(file, id);
+    const project = await this.load(file, id, requested);
     project.info = await this.deps.registry.remember(file);
     this.open_.set(id, project);
     if (this.deps.watch) this.startWatch(id, file);
     return project;
   }
 
-  private async load(file: string, id: string): Promise<OpenProject> {
+  private async load(file: string, id: string, requested = file): Promise<OpenProject> {
     let s;
     try {
       s = await stat(file);
     } catch {
       const map = this.deps.pathMap ?? [];
       const hint = map.length ? ` (host paths are mapped: ${map.map((m) => `${m.host} -> ${m.container}`).join(', ')})` : '';
-      throw new ServiceError(`schematic not found: ${file}${hint}`, 404);
+      throw new ServiceError(`schematic not found: ${requested}${hint}`, 404);
     }
     const text = await readFile(file, 'utf8');
     const schematic = parseSchematic(text, path.basename(file, '.kicad_sch'));
