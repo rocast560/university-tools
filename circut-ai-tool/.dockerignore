@@ -1,0 +1,8 @@
+node_modules
+dist
+src-tauri
+docs
+.data
+.git
+.vite
+*.md
