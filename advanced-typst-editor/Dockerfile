@@ -7,6 +7,14 @@ WORKDIR /app
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 
+# The server-side compiler (MCP PDF export) needs the typst CLI on PATH.
+ARG TYPST_VERSION=0.14.2
+ADD https://github.com/typst/typst/releases/download/v${TYPST_VERSION}/typst-x86_64-unknown-linux-musl.tar.xz /tmp/typst.tar.xz
+RUN apt-get update && apt-get install -y --no-install-recommends xz-utils && rm -rf /var/lib/apt/lists/* \
+ && tar -xJf /tmp/typst.tar.xz -C /tmp \
+ && install -m 0755 /tmp/typst-x86_64-unknown-linux-musl/typst /usr/local/bin/typst \
+ && /usr/local/bin/typst --version
+
 COPY . .
 # Stage the default fonts (no-op when public/fonts is already in the
 # context), typecheck + bundle the client, then precompress the big assets:
@@ -15,14 +23,6 @@ COPY . .
 RUN bun scripts/fonts.ts \
  && bun run build \
  && find dist/assets -type f \( -name '*.js' -o -name '*.css' -o -name '*.wasm' \) -exec gzip -9 -k {} \;
-
-# The server-side compiler (MCP PDF export) needs the typst CLI on PATH.
-ARG TYPST_VERSION=0.14.2
-ADD https://github.com/typst/typst/releases/download/v${TYPST_VERSION}/typst-x86_64-unknown-linux-musl.tar.xz /tmp/typst.tar.xz
-RUN apt-get update && apt-get install -y --no-install-recommends xz-utils && rm -rf /var/lib/apt/lists/* \
- && tar -xJf /tmp/typst.tar.xz -C /tmp \
- && install -m 0755 /tmp/typst-x86_64-unknown-linux-musl/typst /usr/local/bin/typst \
- && /usr/local/bin/typst --version
 
 # ── runtime ────────────────────────────────────────────────────────────────
 FROM oven/bun:1.3-slim
