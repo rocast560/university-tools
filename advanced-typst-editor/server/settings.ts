@@ -98,6 +98,29 @@ export function createSettingsStore(dataDir: string, opts: { now?: () => number 
     },
     scanLibrary(workspacesDir) {
       if (!isDir(workspacesDir)) return [];
+      // Self-heal first. A library workspace lives at <workspacesDir>/<name>;
+      // when the recorded folder is gone but that path exists, the data
+      // folder moved (another machine, a container mount) and the entry
+      // should follow it. If another entry already owns the folder, fold the
+      // stale one into it, keeping the group the user had set.
+      update((s) => {
+        const workspaces = [...s.workspaces];
+        for (let i = workspaces.length - 1; i >= 0; i--) {
+          const w = workspaces[i]!;
+          if (!w.library || isDir(w.path)) continue;
+          const home = path.resolve(workspacesDir, w.name);
+          if (!isDir(home)) continue;
+          const ownerIndex = workspaces.findIndex((o) => o !== w && samePath(o.path, home));
+          if (ownerIndex === -1) {
+            workspaces[i] = { ...w, path: home };
+          } else {
+            const owner = workspaces[ownerIndex]!;
+            if (owner.group === null && w.group !== null) workspaces[ownerIndex] = { ...owner, group: w.group };
+            workspaces.splice(i, 1);
+          }
+        }
+        return { ...s, workspaces };
+      });
       const known = get().workspaces;
       const added: WorkspaceEntry[] = [];
       for (const entry of fs.readdirSync(workspacesDir, { withFileTypes: true })) {

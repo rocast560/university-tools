@@ -41,6 +41,45 @@ describe('settings store', () => {
     expect(s.scanLibrary(lib)).toEqual([]);
   });
 
+  it('re-points a library workspace whose folder moved with the data dir, keeping its id and group', () => {
+    const d = tmpDir(); dirs.push(d);
+    const lib = path.join(d, 'workspaces');
+    fs.mkdirSync(path.join(lib, 'report'), { recursive: true });
+    const s = createSettingsStore(d);
+    const stale = s.addWorkspace({ path: path.join(d, 'gone', 'workspaces', 'report'), name: 'report', group: 'CPTC', library: true });
+
+    expect(s.scanLibrary(lib)).toEqual([]); // the folder is claimed by the healed entry, nothing new
+    const list = s.listWorkspaces();
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ id: stale.id, name: 'report', group: 'CPTC', path: path.resolve(lib, 'report') });
+  });
+
+  it('folds a stale duplicate into the entry that owns the folder and passes on its group', () => {
+    const d = tmpDir(); dirs.push(d);
+    const lib = path.join(d, 'workspaces');
+    fs.mkdirSync(path.join(lib, 'report'), { recursive: true });
+    const s = createSettingsStore(d);
+    const live = s.addWorkspace({ path: path.join(lib, 'report'), name: 'report', group: null, library: true });
+    s.addWorkspace({ path: path.join(d, 'gone', 'workspaces', 'report'), name: 'report', group: 'CPTC', library: true });
+
+    s.scanLibrary(lib);
+    const list = s.listWorkspaces();
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ id: live.id, group: 'CPTC', path: path.resolve(lib, 'report') });
+  });
+
+  it('never re-points an external workspace, even when a library folder shares its name', () => {
+    const d = tmpDir(); dirs.push(d);
+    const lib = path.join(d, 'workspaces');
+    fs.mkdirSync(path.join(lib, 'report'), { recursive: true });
+    const s = createSettingsStore(d);
+    const external = s.addWorkspace({ path: path.join(d, 'elsewhere', 'report'), name: 'report', group: null, library: false });
+
+    const added = s.scanLibrary(lib);
+    expect(added).toHaveLength(1); // the library folder is registered on its own
+    expect(s.getWorkspace(external.id)?.path).toBe(path.resolve(d, 'elsewhere', 'report'));
+  });
+
   it('creates, renames and removes groups, keeping member workspaces in sync', () => {
     const d = tmpDir(); dirs.push(d);
     const s = createSettingsStore(d, { now: () => 5 });
