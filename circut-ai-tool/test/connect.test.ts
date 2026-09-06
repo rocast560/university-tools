@@ -19,7 +19,8 @@ describe('buildConnectInfo', () => {
   test('outside Docker nothing mentions docker and the example path is the local projects folder', () => {
     const info = buildConnectInfo('http://localhost:8765', { container: null, projectsDir: 'C:\\Users\\me\\Documents\\KiCad\\9.0\\projects' });
     expect(info.container).toBeNull();
-    expect(info.stdioCommand).not.toContain('docker');
+    expect(info.stdioCommand.startsWith('"docker"')).toBe(false);
+    expect(info.stdioCommand).toContain('mcp-stdio.ts');
     expect(find(info, 'chatgpt').code.startsWith('bun start')).toBe(true);
     expect(find(info, 'api').code).toContain('C:/Users/me/Documents/KiCad/9.0/projects/lab1/lab1.kicad_sch');
     expect(find(info, 'claude-desktop').title).toContain('works even when this server is closed');
