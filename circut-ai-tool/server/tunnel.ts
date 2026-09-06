@@ -42,11 +42,19 @@ async function exists(p: string): Promise<boolean> {
   }
 }
 
-/** Download cloudflared to `dir` if it is not already there. Returns its path. */
-async function ensureBinary(dir: string): Promise<string> {
+/** The cloudflared to run: a copy downloaded earlier into DATA_DIR/bin, else one on PATH, else null. */
+export async function findCloudflared(dir: string, which: (name: string) => string | null = (n) => Bun.which(n)): Promise<string | null> {
   const exe = path.join(dir, exeName);
   if (await exists(exe)) return exe;
-  if (process.platform !== 'win32') throw new Error('automatic cloudflared download is only wired up for Windows; install cloudflared and put it on PATH');
+  return which(exeName);
+}
+
+/** Download cloudflared to `dir` if it is neither there nor on PATH. Returns its path. */
+async function ensureBinary(dir: string): Promise<string> {
+  const found = await findCloudflared(dir);
+  if (found) return found;
+  if (process.platform !== 'win32') throw new Error('cloudflared is not installed; put it on PATH (the Docker image ships it at /usr/local/bin/cloudflared)');
+  const exe = path.join(dir, exeName);
   await mkdir(dir, { recursive: true });
   const res = await fetch(DOWNLOAD_URL, { redirect: 'follow' });
   if (!res.ok) throw new Error(`downloading cloudflared failed (${res.status})`);
