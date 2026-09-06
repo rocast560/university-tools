@@ -29,17 +29,17 @@ FROM oven/bun:1.3-slim
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=8080 STATIC_DIR=/app/dist DATA_DIR=/data
 WORKDIR /app
 
-COPY package.json bun.lock ./
-RUN bun install --frozen-lockfile --production
+COPY --chown=bun:bun package.json bun.lock ./
+RUN bun install --frozen-lockfile --production && rm -rf /root/.bun/install/cache
 
 COPY --from=build /usr/local/bin/typst /usr/local/bin/typst
-COPY tsconfig.json tsconfig.server.json ./
-COPY server ./server
-COPY src/types.ts src/template.ts ./src/
-COPY src/lib ./src/lib
-COPY --from=build /app/dist ./dist
+COPY --chown=bun:bun tsconfig.json tsconfig.server.json ./
+COPY --chown=bun:bun server ./server
+COPY --chown=bun:bun src/types.ts src/template.ts ./src/
+COPY --chown=bun:bun src/lib ./src/lib
+COPY --chown=bun:bun --from=build /app/dist ./dist
 
-RUN mkdir -p /data && chown -R bun:bun /data /app
+RUN mkdir -p /data && chown bun:bun /data
 USER bun
 EXPOSE 8080
 VOLUME ["/data"]
