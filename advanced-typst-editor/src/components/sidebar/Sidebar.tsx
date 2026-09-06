@@ -1,13 +1,21 @@
 import { useState } from 'react';
-import { AlertTriangle, FolderPlus, Plus, Settings, Circle } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronRight, FolderPlus, Plus, Settings, Circle } from 'lucide-react';
 import { useAppStore } from '@/stores';
 import { groupWorkspaces } from '@/lib/workspace-groups';
+import { loadCollapsedGroups, saveCollapsedGroups, toggleGroup } from '@/lib/collapsed-groups';
 import { FolderBrowserDialog } from '@/components/ui/FolderBrowserDialog';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
-import type { WorkspaceStatus } from '@/types';
+import type { BackupState, WorkspaceStatus } from '@/types';
 
 /** The dragged workspace's id, as a browser drag-and-drop payload. */
 const DRAG_MIME = 'text/plain';
+
+function backupLabel(b: BackupState | null): string {
+  if (!b?.destinations.length) return 'Backup: not set up';
+  if (b.lastError) return `Backup: error (${b.lastError})`;
+  if (b.lastRunAt) return `Backup: ${new Date(b.lastRunAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  return 'Backup: pending';
+}
 
 export function Sidebar() {
   const workspaces = useAppStore((s) => s.workspaces);
@@ -34,6 +42,8 @@ export function Sidebar() {
   const [removing, setRemoving] = useState<WorkspaceStatus | null>(null);
   const [menu, setMenu] = useState<{ ws: WorkspaceStatus; x: number; y: number } | null>(null);
   const [folderMenu, setFolderMenu] = useState<{ name: string; x: number; y: number } | null>(null);
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => loadCollapsedGroups());
+  const toggle = (group: string) => setCollapsed((prev) => { const next = toggleGroup(prev, group); saveCollapsedGroups(next); return next; });
 
   const mcpConnected = !!mcp?.clients.some((c) => c.connected);
   const grouped = groupWorkspaces(workspaces, knownGroups);
@@ -65,32 +75,49 @@ export function Sidebar() {
         </form>
       )}
       <div data-testid="sidebar-workspace-list" className="min-h-0 flex-1 overflow-auto px-2 pb-2" onDragOver={(e) => e.preventDefault()} onDrop={(e) => dropOnGroup(e, null)}>
-        {grouped.map(({ group, items }) => (
-          <div key={group ?? '__loose'} className="mb-2">
-            {group && (
-              <div
-                className="px-1 py-1 text-[10px] font-semibold uppercase tracking-wider text-[hsl(var(--muted-foreground))]"
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={(e) => dropOnGroup(e, group)}
-                onContextMenu={(e) => { e.preventDefault(); setFolderMenu({ name: group, x: e.clientX, y: e.clientY }); }}
-              >
-                {group}
-              </div>
-            )}
-            {items.map((ws) => (
-              <button key={ws.id} type="button" draggable onDragStart={(e) => e.dataTransfer.setData(DRAG_MIME, ws.id)} onClick={() => void select(ws.id)} onContextMenu={(e) => { e.preventDefault(); setMenu({ ws, x: e.clientX, y: e.clientY }); }}
-                className={`flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-xs hover:bg-[hsl(var(--accent))] ${ws.id === active ? 'bg-[hsl(var(--accent))] font-medium' : ''}`}>
-                {ws.status === 'missing' ? <AlertTriangle size={12} className="text-[hsl(var(--status-amber))]" /> : <Circle size={6} className={ws.library ? 'fill-current text-[hsl(var(--muted-foreground))]' : 'text-[hsl(var(--status-blue))]'} />}
-                <span className="flex-1 truncate" title={ws.path}>{ws.name}</span>
-              </button>
-            ))}
-          </div>
-        ))}
+        {grouped.map(({ group, items }) => {
+          const isCollapsed = group !== null && collapsed.has(group);
+          return (
+            <div key={group ?? '__loose'} className="mb-2">
+              {group && (
+                <div
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => dropOnGroup(e, group)}
+                  onContextMenu={(e) => { e.preventDefault(); setFolderMenu({ name: group, x: e.clientX, y: e.clientY }); }}
+                >
+                  <button
+                    type="button"
+                    aria-expanded={!isCollapsed}
+                    onClick={() => toggle(group)}
+                    className="flex w-full items-center gap-1 rounded px-1 py-1 text-left text-[10px] font-semibold uppercase tracking-wider text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--accent))]"
+                  >
+                    {isCollapsed ? <ChevronRight size={12} className="shrink-0" /> : <ChevronDown size={12} className="shrink-0" />}
+                    <span className="flex-1 truncate">{group}</span>
+                    {isCollapsed && <span className="text-[9px] font-normal normal-case tracking-normal">{items.length}</span>}
+                  </button>
+                </div>
+              )}
+              {!isCollapsed && items.map((ws) => (
+                <button key={ws.id} type="button" draggable onDragStart={(e) => e.dataTransfer.setData(DRAG_MIME, ws.id)} onClick={() => void select(ws.id)} onContextMenu={(e) => { e.preventDefault(); setMenu({ ws, x: e.clientX, y: e.clientY }); }}
+                  className={`flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-xs hover:bg-[hsl(var(--accent))] ${ws.id === active ? 'bg-[hsl(var(--accent))] font-medium' : ''}`}>
+                  {ws.status === 'missing' ? <AlertTriangle size={12} className="text-[hsl(var(--status-amber))]" /> : <Circle size={6} className={ws.library ? 'fill-current text-[hsl(var(--muted-foreground))]' : 'text-[hsl(var(--status-blue))]'} />}
+                  <span className="flex-1 truncate" title={ws.path}>{ws.name}</span>
+                </button>
+              ))}
+            </div>
+          );
+        })}
         {workspaces.length === 0 && <div className="px-2 py-6 text-center text-xs text-[hsl(var(--muted-foreground))]">No workspaces yet. Create one to get started.</div>}
       </div>
-      <div className="border-t border-[hsl(var(--border))] px-3 py-2 text-[10px] text-[hsl(var(--muted-foreground))]">
-        <div className="flex items-center gap-2"><span className={`h-2 w-2 rounded-full ${mcpConnected ? 'bg-[hsl(var(--status-green))]' : 'bg-[hsl(var(--muted-foreground))]/40'}`} />MCP {mcpConnected ? `connected (${mcp!.clients.filter((c) => c.connected).map((c) => c.name).join(', ')})` : 'no client'}</div>
-        <div className="flex items-center gap-2"><span className={`h-2 w-2 rounded-full ${online ? 'bg-[hsl(var(--status-green))]' : 'bg-[hsl(var(--status-red))]'}`} />{backup?.destinations.length ? (backup.lastError ? `backup error: ${backup.lastError}` : backup.lastRunAt ? `backed up ${new Date(backup.lastRunAt).toLocaleTimeString()}` : 'backup pending') : 'no backup destination'}</div>
+      <div className="shrink-0 border-t border-[hsl(var(--border))] px-2 py-1.5 text-[10px] text-[hsl(var(--muted-foreground))]">
+        <button type="button" onClick={() => setSettingsOpen(true)} title="MCP status · open Settings" className="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left hover:bg-[hsl(var(--accent))]">
+          <span className={`h-2 w-2 shrink-0 rounded-full ${mcpConnected ? 'bg-[hsl(var(--status-green))]' : 'bg-[hsl(var(--muted-foreground))]/40'}`} />
+          <span className="truncate">MCP: {mcpConnected ? `connected (${mcp!.clients.filter((c) => c.connected).map((c) => c.name).join(', ')})` : 'no client'}</span>
+        </button>
+        <button type="button" onClick={() => setSettingsOpen(true)} title="Backup status · open Settings" className="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left hover:bg-[hsl(var(--accent))]">
+          <span className={`h-2 w-2 shrink-0 rounded-full ${online ? 'bg-[hsl(var(--status-green))]' : 'bg-[hsl(var(--status-red))]'}`} />
+          <span className="truncate">{backupLabel(backup)}</span>
+        </button>
       </div>
 
       {menu && (

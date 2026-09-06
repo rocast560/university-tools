@@ -13,6 +13,7 @@ function fakeDataTransfer() {
 }
 
 beforeEach(() => {
+  localStorage.clear();
   useAppStore.setState({
     workspaces: [], groups: [], activeWorkspaceId: null, backup: null, mcp: null, online: true,
   });
@@ -68,5 +69,44 @@ describe('Sidebar', () => {
     fireEvent.click(screen.getByText('Delete folder'));
     expect(deleteGroup).toHaveBeenCalledWith('CPTC');
     promptSpy.mockRestore();
+  });
+
+  it('collapses a folder from its header, shows a count, and remembers it', () => {
+    useAppStore.setState({ workspaces: [ws('a', 'CPTC'), ws('b', 'CPTC')], groups: ['CPTC'] });
+    const { unmount } = render(<Sidebar />);
+    expect(screen.getByText('a')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /CPTC/ }));
+    expect(screen.queryByText('a')).not.toBeInTheDocument();
+    expect(screen.getByText('2')).toBeInTheDocument();
+    expect(JSON.parse(localStorage.getItem('tfs-collapsed-groups')!)).toEqual(['CPTC']);
+
+    unmount();
+    render(<Sidebar />);
+    expect(screen.queryByText('a')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /CPTC/ }));
+    expect(screen.getByText('a')).toBeInTheDocument();
+  });
+
+  it('still files a dragged workspace when dropped on a collapsed folder', () => {
+    const setWorkspaceGroup = vi.fn();
+    localStorage.setItem('tfs-collapsed-groups', JSON.stringify(['CPTC']));
+    useAppStore.setState({ workspaces: [ws('a', null)], groups: ['CPTC'], setWorkspaceGroup });
+    render(<Sidebar />);
+    const dt = fakeDataTransfer();
+    fireEvent.dragStart(screen.getByText('a'), { dataTransfer: dt });
+    fireEvent.drop(screen.getByText('CPTC'), { dataTransfer: dt });
+    expect(setWorkspaceGroup).toHaveBeenCalledWith('a', 'CPTC');
+  });
+
+  it('opens Settings from the status footer', () => {
+    const setSettingsOpen = vi.fn();
+    useAppStore.setState({ setSettingsOpen, mcp: null, backup: null });
+    render(<Sidebar />);
+    fireEvent.click(screen.getByText(/MCP: no client/));
+    fireEvent.click(screen.getByText(/Backup: not set up/));
+    expect(setSettingsOpen).toHaveBeenCalledTimes(2);
+    expect(setSettingsOpen).toHaveBeenCalledWith(true);
   });
 });
