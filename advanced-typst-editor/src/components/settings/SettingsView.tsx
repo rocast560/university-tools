@@ -5,7 +5,17 @@ import { useAppStore } from '@/stores';
 import { Portal } from '@/components/ui/Portal';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { FolderBrowserDialog } from '@/components/ui/FolderBrowserDialog';
+import { CopyRow } from './CopyRow';
 import type { BackupDestination, SnapshotInfo } from '@/types';
+
+const MCP_ENDPOINT = 'http://localhost:8090/mcp';
+const MCP_NAME = 'typst-figure-studio';
+const BRIDGE_PLACEHOLDER = '<path to advanced-typst-editor>/server/mcp-stdio.ts';
+
+function desktopConfig(bridge: string | null): string {
+  const script = bridge ? bridge.replace(/\\/g, '/') : BRIDGE_PLACEHOLDER;
+  return JSON.stringify({ mcpServers: { [MCP_NAME]: { command: 'bun', args: [script] } } }, null, 2);
+}
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return <section className="mb-6"><h2 className="mb-2 text-[11px] font-bold uppercase tracking-widest text-[hsl(var(--muted-foreground))]">{title}</h2>{children}</section>;
@@ -82,11 +92,17 @@ export function SettingsView() {
               {backup && <div className="mt-2 text-[hsl(var(--muted-foreground))]">{backup.lastRunAt ? `Last run ${new Date(backup.lastRunAt).toLocaleString()}, ${backup.lastMirrorFiles ?? 0} files written` : 'No run yet.'}{backup.lastSnapshotAt ? ` · last snapshot ${new Date(backup.lastSnapshotAt).toLocaleString()}` : ''}{backup.lastError ? ` · error: ${backup.lastError}` : ''}</div>}
             </Section>
 
-            <Section title="MCP (Claude Code, Claude Desktop)">
-              <p>Endpoint: <code>http://localhost:8090/mcp</code> {mcp?.authRequired ? '(bearer token required: APP_TOKEN)' : '(no token)'}</p>
-              <p className="mt-1">Claude Code: <code>claude mcp add --transport http typst-figure-studio http://localhost:8090/mcp</code></p>
-              <p className="mt-1">Claude Desktop (stdio bridge): <code>{'{ "command": "bun", "args": ["C:/Users/rober/Desktop/university-tools/advanced-typst-editor/server/mcp-stdio.ts"] }'}</code></p>
-              <ul className="mt-2">
+            <Section title="Connect Claude">
+              <p className="mb-2 text-[hsl(var(--muted-foreground))]">The studio is an MCP server. Claude Code connects to it over HTTP; Claude Desktop launches a small bridge script that forwards to the same endpoint.</p>
+              <CopyRow label="Endpoint" value={MCP_ENDPOINT} />
+              {mcp?.authRequired && <p className="mb-2 text-[hsl(var(--status-amber))]">This server requires a bearer token: pass the APP_TOKEN it was started with.</p>}
+              <CopyRow label="Claude Code" value={`claude mcp add --transport http ${MCP_NAME} ${MCP_ENDPOINT}`} />
+              <CopyRow label="Claude Desktop (claude_desktop_config.json)" value={desktopConfig(mcp?.stdioBridge ?? null)} />
+              {!mcp?.stdioBridge && (
+                <p className="mb-2 text-[hsl(var(--muted-foreground))]">Running in Docker or as the packaged app: replace the path with where this repo lives on the machine that runs Claude Desktop.</p>
+              )}
+              <div className="mt-3 text-[10px] uppercase tracking-wider text-[hsl(var(--muted-foreground))]">Connected clients</div>
+              <ul className="mt-1">
                 {(mcp?.clients ?? []).map((c) => <li key={c.name} className="flex items-center gap-2"><span className={`h-2 w-2 rounded-full ${c.connected ? 'bg-[hsl(var(--status-green))]' : 'bg-[hsl(var(--muted-foreground))]/40'}`} />{c.name} {c.version ?? ''} · {c.sessions} session{c.sessions === 1 ? '' : 's'} · seen {new Date(c.lastSeenAt).toLocaleTimeString()}</li>)}
                 {(mcp?.clients ?? []).length === 0 && <li className="text-[hsl(var(--muted-foreground))]">No client has connected yet.</li>}
               </ul>
