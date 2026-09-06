@@ -39,23 +39,12 @@ interface Transport {
 function createWorkerTransport(): Transport {
   let worker: Worker | null = null;
   let seq = 0;
-  // Set by a crash, for the *next* call only: a request that was already
-  // committed to running when the worker died (but hadn't posted its
-  // message yet, so it isn't in `pending`) still needs to see the failure
-  // instead of silently sailing through on a freshly spawned worker.
-  let crashError: Error | null = null;
   const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
 
   const transport: Transport = {
     generation: 0,
     call<T>(cmd: DriverCommand): Promise<T> {
       return new Promise<T>((resolve, reject) => {
-        if (crashError) {
-          const err = crashError;
-          crashError = null;
-          reject(err);
-          return;
-        }
         const w = worker ?? spawn();
         const id = ++seq;
         pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
@@ -79,10 +68,11 @@ function createWorkerTransport(): Transport {
       pending.clear();
       w.terminate();
       if (worker === w) {
-        // A replacement worker starts with empty state; the generation
-        // bump tells the client to push fonts and shadow files again.
         worker = null;
-        crashError = err;
+        // Bump on crash (not lazily on the next spawn): syncState reads
+        // `generation` before deciding whether to call anything, so the
+        // next syncState must already see the bump in order to re-send
+        // fonts and shadow files before touching the replacement worker.
         transport.generation++;
       }
     };
@@ -209,35 +199,10 @@ export function getFontInfo(bytes: Uint8Array): Promise<TypstFontInfo | null> {
   return enqueue(() => getTransport().call<TypstFontInfo | null>({ op: 'fontInfo', bytes }));
 }
 
-/** Actually talk to the transport for one SVG compile: fonts/shadow sync, then the compile itself. */
-function runSvgCompile(source: string, mainPath: string): Promise<TypstSvgResult> {
-  return enqueue(async () => {
-    const t = getTransport();
-    await syncState(t);
-    return t.call<SvgOutput>({ op: 'svg', source, mainPath });
-  });
-}
-
-// Coalescing state for preview compiles: at most one coalesced compile is
-// ever in flight against the transport, plus (at most) one waiting behind
-// it. A further preview that arrives while one is already waiting replaces
-// it outright, so only the newest preview ever pays for a round trip; the
-// one it replaced is resolved as superseded without touching the transport.
-let svgActive = false;
-let svgPending: { source: string; mainPath: string; resolve: (r: TypstSvgResult) => void } | null = null;
-
-function startSvg(source: string, mainPath: string, resolve: (r: TypstSvgResult) => void): void {
-  svgActive = true;
-  void runSvgCompile(source, mainPath).then((res) => {
-    resolve(res);
-    svgActive = false;
-    if (svgPending) {
-      const next = svgPending;
-      svgPending = null;
-      startSvg(next.source, next.mainPath, next.resolve);
-    }
-  });
-}
+// Monotonic id for preview compiles, used to drop superseded ones before they
+// do any work. Export compiles (PDF/SVG download) deliberately don't
+// participate: an explicit export must always run.
+let svgRequestSeq = 0;
 
 /**
  * Compile Typst source to an SVG string, fully locally.
@@ -250,28 +215,26 @@ function startSvg(source: string, mainPath: string, resolve: (r: TypstSvgResult)
  * `mainPath` is where `source` is mounted and which file the compiler is
  * pointed at, so a document that `#include`s its neighbours resolves them
  * relative to the right place.
- *
- * Coalescing (`opts.coalesce`) is opt-in: the preview debounces typing, but
- * a document that takes longer to compile than the debounce window can
- * still pile up requests. Since only the newest preview is ever shown, at
- * most one coalesced compile waits behind the one in flight; anything it
- * displaces resolves immediately as `{ diagnostics: [], superseded: true }`
- * rather than paying for a round trip. An *export* must never be skipped,
- * so it always goes through `runSvgCompile` directly instead.
  */
 export function compileTypstSvg(
   source: string,
   opts: { coalesce?: boolean } = {},
   mainPath: string = MAIN_PATH,
 ): Promise<TypstSvgResult> {
-  if (!opts.coalesce) return runSvgCompile(source, mainPath);
-  return new Promise<TypstSvgResult>((resolve) => {
-    if (!svgActive) {
-      startSvg(source, mainPath, resolve);
-      return;
-    }
-    svgPending?.resolve({ diagnostics: [], superseded: true });
-    svgPending = { source, mainPath, resolve };
+  // Coalesce superseded previews. The preview already debounces typing, but a
+  // document that takes longer to compile than the debounce window will still
+  // queue up compiles whose output is discarded the moment they finish. Since
+  // only the newest preview can ever be shown, an older one that hasn't
+  // started yet should cost nothing rather than a full round trip.
+  //
+  // Opt-in, because an *export* must never be skipped: it isn't superseded by
+  // a preview that happens to be requested while it waits in the queue.
+  const seq = opts.coalesce ? ++svgRequestSeq : -1;
+  return enqueue(async () => {
+    if (seq !== -1 && seq !== svgRequestSeq) return { diagnostics: [], superseded: true };
+    const t = getTransport();
+    await syncState(t);
+    return t.call<SvgOutput>({ op: 'svg', source, mainPath });
   });
 }
 

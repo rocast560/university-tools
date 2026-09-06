@@ -87,10 +87,13 @@ describe('typst compiler client', () => {
     const d = c.compileTypstSvg('c', { coalesce: true });
     releaseFirst();
     const [ra, rb, rc] = await Promise.all([a, b, d]);
-    expect(ra.svg).toContain('a');
+    // 'a' and 'b' are both superseded before either reaches the front of the
+    // queue (all three were requested in the same tick, so neither has
+    // started when 'c' arrives); only the newest, 'c', actually compiles.
+    expect(ra).toEqual({ diagnostics: [], superseded: true });
     expect(rb).toEqual({ diagnostics: [], superseded: true });
     expect(rc.svg).toContain('c');
-    expect(ops(FakeWorker.instances[0]!)).toEqual(['svg', 'svg']); // 'b' never reached the worker
+    expect(ops(FakeWorker.instances[0]!)).toEqual(['svg']); // only 'c' reaches the worker
   });
 
   it('turns a PDF compile with errors into a readable rejection', async () => {
@@ -107,6 +110,11 @@ describe('typst compiler client', () => {
     // Hang the next compile, then crash the worker under it.
     FakeWorker.handler = () => new Promise(() => {});
     const hung = c.compileTypstSvg('b');
+    // Wait for 'b' to actually reach the worker before crashing it, so the
+    // crash finds a genuinely in-flight request in `pending`.
+    await vi.waitFor(() => {
+      expect(first.posted.some((p) => p.op === 'svg' && p.source === 'b')).toBe(true);
+    });
     first.crash('boom');
     await expect(hung).rejects.toThrow('boom');
 
