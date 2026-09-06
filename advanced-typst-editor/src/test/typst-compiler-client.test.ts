@@ -131,4 +131,32 @@ describe('typst compiler client', () => {
     FakeWorker.handler = (cmd) => (cmd.op === 'fontInfo' ? { family: 'Poppins' } : undefined);
     expect(await c.getFontInfo(bytes(3))).toEqual({ family: 'Poppins' });
   });
+
+  it('retries the inline compiler load after a failure', async () => {
+    // No Worker: falls back to the inline transport, which runs the driver
+    // directly on the main thread.
+    vi.stubGlobal('Worker', undefined);
+    let attempt = 0;
+    // Scoped to this test only: unmocked in `finally` so the other tests keep
+    // using the real driver module untouched.
+    vi.doMock('@/lib/typst-compiler.driver', () => ({
+      createTypstDriver: () => {
+        attempt++;
+        // First load fails (e.g. the wasm was unreachable); this must not be
+        // cached, so the next call gets a fresh attempt instead of the same
+        // stale rejection forever.
+        if (attempt === 1) throw new Error('wasm unreachable');
+        return { svg: async () => ({ svg: '<svg/>', diagnostics: [] }) };
+      },
+      dispatch: (driver: { svg: () => unknown }, cmd: DriverCommand) =>
+        (cmd.op === 'svg' ? driver.svg() : undefined),
+    }));
+    try {
+      const c = await loadClient();
+      await expect(c.compileTypstSvg('a')).rejects.toThrow('wasm unreachable');
+      await expect(c.compileTypstSvg('b')).resolves.toEqual({ svg: '<svg/>', diagnostics: [] });
+    } finally {
+      vi.doUnmock('@/lib/typst-compiler.driver');
+    }
+  });
 });
