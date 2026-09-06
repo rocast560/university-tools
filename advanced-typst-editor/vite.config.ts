@@ -14,6 +14,9 @@ export default defineConfig({
   // The typst.ts packages ship wasm-pack shims + large wasm that esbuild's dep
   // pre-bundler mishandles; they are loaded lazily via dynamic import + `?url`.
   optimizeDeps: { exclude: ['@myriaddreamin/typst.ts', '@myriaddreamin/typst-ts-web-compiler', '@myriaddreamin/typst-ts-renderer'] },
+  // The compiler worker uses dynamic imports (typst.ts loads its wasm shims
+  // lazily); Vite's default iife worker format cannot code-split.
+  worker: { format: 'es' },
   test: {
     projects: [
       { extends: true, test: { name: 'ui', environment: 'jsdom', globals: true, include: ['src/**/*.test.ts', 'src/**/*.test.tsx'], setupFiles: ['./src/test/setup.ts'] } },

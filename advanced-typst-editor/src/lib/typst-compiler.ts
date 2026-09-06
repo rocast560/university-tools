@@ -1,62 +1,26 @@
 // ─────────────────────────────────────────────────────────────────────────
-// Local (in-browser) Typst compiler.
+// Local (in-browser) Typst compiler: the main-thread client.
 //
-// Wraps @myriaddreamin/typst.ts so the Typst tab can render documents fully
-// offline: no calls to typst.app or any remote service. The compiler +
-// renderer WebAssembly modules are bundled with the app (imported via Vite's
-// `?url` so they ship as static assets in the Docker image).
+// The wasm lives in a Web Worker (typst-compiler.worker.ts, running
+// typst-compiler.driver.ts). This module keeps the API the rest of the app
+// has always used and turns each call into a request to the worker:
 //
-// The heavy typst.ts JS is loaded with a dynamic import the first time the
-// Typst tab compiles, keeping it out of the initial app bundle. Compilation
-// runs on a serialized queue because the compiler carries per-compilation
-// state: interleaving two compiles would corrupt output.
+//  - calls are serialized, because the compiler carries per-compilation
+//    state and interleaving two compiles would corrupt output;
+//  - fonts and shadow files are pushed only when they change, right before
+//    the compile that needs them, so a keystroke never re-sends an image;
+//  - superseded previews are dropped before they cost a round trip.
 //
-// Why we build the compiler/renderer ourselves instead of using typst.ts's
-// `$typst` singleton:
-//
-//  1. Custom fonts. Fonts can only be supplied at *init* time, through
-//     `loadFonts`, which merges the operator's uploads with the default
-//     asset set. Owning the instance lets us tear it down and rebuild it
-//     when the workspace's font list changes: see `setTypstFonts`.
-//  2. One filesystem root for both outputs. `$typst.pdf({mainContent})`
-//     writes the source to `/tmp/<random>.typ`, while the preview compiled
-//     at `/main.typ`. With no assets that difference was invisible; the
-//     moment a document says `#image("/assets/x.png")` the two paths would
-//     resolve differently and PDF export would break. Both now compile the
-//     same file at the same root.
+// When `Worker` does not exist (jsdom, very old browsers) the driver runs
+// inline on the main thread through the same code path.
 // ─────────────────────────────────────────────────────────────────────────
 
-// `?url` yields the asset URL (a string); Vite emits the wasm as a hashed file
-// and serves it locally. typst.ts fetches it lazily via `getModule`.
-import compilerWasmUrl from '@myriaddreamin/typst-ts-web-compiler/pkg/typst_ts_web_compiler_bg.wasm?url';
-import rendererWasmUrl from '@myriaddreamin/typst-ts-renderer/pkg/typst_ts_renderer_bg.wasm?url';
+import type {
+  DriverCommand, DriverRequest, DriverResponse, PdfOutput, SvgOutput, TypstFontInfo, TypstShadowFile, TypstSvgResult,
+} from './typst-compiler-types';
+import type { TypstDriver } from './typst-compiler.driver';
 
-/** A single Typst diagnostic (error/warning) from the compiler. */
-export interface TypstDiagnostic {
-  severity: string; // 'error' | 'warning' | …
-  message: string;
-  range?: string;
-  path?: string;
-}
-
-export interface TypstSvgResult {
-  svg?: string;
-  diagnostics: TypstDiagnostic[];
-  /**
-   * True when a newer preview compile was requested before this one reached
-   * the front of the queue, so it returned without doing any work. Callers
-   * should ignore the result entirely rather than treating the absent `svg`
-   * as "the document produced nothing".
-   */
-  superseded?: boolean;
-}
-
-/** A file mounted into the compiler's in-memory filesystem. */
-export interface TypstShadowFile {
-  /** Absolute virtual path, e.g. `/assets/screenshot.png`. */
-  path: string;
-  bytes: Uint8Array;
-}
+export type { TypstDiagnostic, TypstShadowFile, TypstSvgResult } from './typst-compiler-types';
 
 // Default virtual path for the document inside the compiler's in-memory FS.
 // Callers pass their own when the file being edited isn't main.typ: every
@@ -64,21 +28,86 @@ export interface TypstShadowFile {
 // be compiled as the main one.
 const MAIN_PATH = '/main.typ';
 
-// typst.ts's `format` discriminator (see CompileFormatEnum).
-const FORMAT_VECTOR = 0;
-const FORMAT_PDF = 1;
+// ── transport ────────────────────────────────────────────────────────────
 
-// typst.ts has no exported types we depend on here; treat the instances as
-// structurally `any` to avoid coupling to its (less-stable) public surface.
-/* eslint-disable @typescript-eslint/no-explicit-any */
-type AnyCompiler = any;
-type AnyRenderer = any;
+interface Transport {
+  /** Bumps every time a fresh worker replaces a crashed one. */
+  generation: number;
+  call<T>(cmd: DriverCommand): Promise<T>;
+}
 
-interface TypstInstance {
-  compiler: AnyCompiler;
-  renderer: AnyRenderer;
-  /** Which font generation this instance was built with. */
-  fontGeneration: number;
+function createWorkerTransport(): Transport {
+  let worker: Worker | null = null;
+  let seq = 0;
+  // Set by a crash, for the *next* call only: a request that was already
+  // committed to running when the worker died (but hadn't posted its
+  // message yet, so it isn't in `pending`) still needs to see the failure
+  // instead of silently sailing through on a freshly spawned worker.
+  let crashError: Error | null = null;
+  const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+
+  const transport: Transport = {
+    generation: 0,
+    call<T>(cmd: DriverCommand): Promise<T> {
+      return new Promise<T>((resolve, reject) => {
+        if (crashError) {
+          const err = crashError;
+          crashError = null;
+          reject(err);
+          return;
+        }
+        const w = worker ?? spawn();
+        const id = ++seq;
+        pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
+        w.postMessage({ id, ...cmd } satisfies DriverRequest);
+      });
+    },
+  };
+
+  const spawn = (): Worker => {
+    const w = new Worker(new URL('./typst-compiler.worker.ts', import.meta.url), { type: 'module' });
+    w.onmessage = (e: MessageEvent<DriverResponse>) => {
+      const p = pending.get(e.data.id);
+      if (!p) return;
+      pending.delete(e.data.id);
+      if (e.data.ok) p.resolve(e.data.value);
+      else p.reject(new Error(e.data.error));
+    };
+    w.onerror = (e) => {
+      const err = new Error(e.message || 'Typst worker crashed');
+      for (const p of pending.values()) p.reject(err);
+      pending.clear();
+      w.terminate();
+      if (worker === w) {
+        // A replacement worker starts with empty state; the generation
+        // bump tells the client to push fonts and shadow files again.
+        worker = null;
+        crashError = err;
+        transport.generation++;
+      }
+    };
+    worker = w;
+    return w;
+  };
+
+  return transport;
+}
+
+function createInlineTransport(): Transport {
+  let driver: Promise<TypstDriver> | null = null;
+  return {
+    generation: 0,
+    async call<T>(cmd: DriverCommand): Promise<T> {
+      driver ??= import('./typst-compiler.driver').then((m) => m.createTypstDriver());
+      const { dispatch } = await import('./typst-compiler.driver');
+      return dispatch(await driver, cmd) as Promise<T>;
+    },
+  };
+}
+
+let transport: Transport | null = null;
+function getTransport(): Transport {
+  return (transport ??= typeof Worker === 'undefined' ? createInlineTransport() : createWorkerTransport());
 }
 
 // ── mutable inputs ───────────────────────────────────────────────────────
@@ -87,83 +116,29 @@ interface TypstInstance {
 
 let customFonts: Uint8Array[] = [];
 let fontGeneration = 0;
+let sentFontGeneration = 0;
 
 let shadowFiles: TypstShadowFile[] = [];
 let shadowGeneration = 0;
-let appliedShadowGeneration = -1;
+let sentShadowGeneration = 0;
 
-let instancePromise: Promise<TypstInstance> | null = null;
+let sentOnTransport = 0;
 
-// Monotonic id for preview compiles, used to drop superseded ones before they
-// do any work. Export compiles (PDF/SVG download) deliberately don't
-// participate: an explicit export must always run.
-let svgRequestSeq = 0;
-
-/**
- * Build the compiler + renderer with the current font set.
- *
- * `loadFonts(userFonts, { assets: ['text'] })` reproduces exactly what
- * typst.ts's driver installs by default (the `text` asset family) and adds
- * the operator's uploads on top, so adding a custom font never costs you
- * New Computer Modern and friends.
- */
-async function buildInstance(): Promise<TypstInstance> {
-  const generation = fontGeneration;
-  const fonts = customFonts;
-  const { createTypstCompiler, createTypstRenderer, loadFonts } = await import(
-    '@myriaddreamin/typst.ts'
-  );
-
-  const compiler = createTypstCompiler();
-  await compiler.init({
-    getModule: () => compilerWasmUrl,
-    // Served by the app itself (scripts/fonts.ts); the default would fetch from jsdelivr.
-    beforeBuild: [loadFonts(fonts as unknown as Uint8Array[], { assets: ['text'], assetUrlPrefix: '/fonts/' })],
-  });
-
-  const renderer = createTypstRenderer();
-  await renderer.init({ getModule: () => rendererWasmUrl });
-
-  // A fresh compiler has an empty shadow FS, so whatever we mapped into the
-  // previous instance has to be re-applied on the next compile.
-  appliedShadowGeneration = -1;
-
-  return { compiler, renderer, fontGeneration: generation };
-}
-
-/**
- * Lazily build (and memoize) the compiler. Rebuilds transparently when the
- * font set has changed since the cached instance was created.
- */
-async function getInstance(): Promise<TypstInstance> {
-  if (instancePromise) {
-    const inst = await instancePromise;
-    if (inst.fontGeneration === fontGeneration) return inst;
-    // Fonts changed: drop the stale instance and build a new one.
-    instancePromise = null;
+/** Push fonts / shadow files if the worker doesn't have the current set. Runs inside the queue. */
+async function syncState(t: Transport): Promise<void> {
+  if (sentOnTransport !== t.generation) {
+    sentOnTransport = t.generation;
+    sentFontGeneration = -1;
+    sentShadowGeneration = -1;
   }
-  if (!instancePromise) {
-    instancePromise = buildInstance();
-    // If init throws (e.g. wasm failed to load), don't cache the rejection:
-    // let the next attempt retry from scratch.
-    instancePromise.catch(() => { instancePromise = null; });
+  if (sentFontGeneration !== fontGeneration) {
+    await t.call({ op: 'setFonts', fonts: customFonts });
+    sentFontGeneration = fontGeneration;
   }
-  return instancePromise;
-}
-
-// Serialize all compiler access: the compiler holds state across calls.
-let queue: Promise<unknown> = Promise.resolve();
-function enqueue<T>(task: () => Promise<T>): Promise<T> {
-  const run = queue.then(task, task);
-  // Keep the chain alive even if a task rejects.
-  queue = run.then(() => undefined, () => undefined);
-  return run;
-}
-
-function toMessage(err: unknown): string {
-  if (err instanceof Error) return err.message;
-  if (typeof err === 'string') return err;
-  try { return JSON.stringify(err); } catch { return String(err); }
+  if (sentShadowGeneration !== shadowGeneration) {
+    await t.call({ op: 'setShadow', files: shadowFiles });
+    sentShadowGeneration = shadowGeneration;
+  }
 }
 
 /**
@@ -173,7 +148,7 @@ function toMessage(err: unknown): string {
  * been cropped by `lib/typst-assets.ts`, so from Typst's point of view the
  * file simply is the cropped image.
  *
- * Cheap to call repeatedly: the bytes are only pushed into wasm when the set
+ * Cheap to call repeatedly: the bytes only travel to the worker when the set
  * actually changes, not on every keystroke-triggered recompile.
  *
  * Returns true if the set actually changed, so callers can skip forcing a
@@ -195,12 +170,9 @@ export function setTypstShadowFiles(files: TypstShadowFile[]): boolean {
 /**
  * Replace the set of custom fonts available to the compiler.
  *
- * Fonts can only be installed at init, so changing this discards the cached
- * compiler and the next compile rebuilds it (~1s; the wasm module itself is
- * already in the browser's module cache, so nothing is re-downloaded). Font
- * changes are rare: an operator drops in their client's brand font once per
- * engagement, so paying that on change rather than on every render is the
- * right trade.
+ * The default faces are always present; these are added on top. The worker
+ * installs them with typst.ts's `setFonts`, so a change costs one font
+ * resolver build (a few hundred ms), not a compiler rebuild.
  *
  * Returns true if the set actually changed.
  */
@@ -213,15 +185,19 @@ export function setTypstFonts(fonts: Uint8Array[]): boolean {
   return true;
 }
 
-/** Push the current shadow file set into the compiler if it's out of date. */
-function syncShadowFiles(compiler: AnyCompiler): void {
-  if (appliedShadowGeneration === shadowGeneration) return;
-  // resetShadow clears every mapped file, so removals take effect too.
-  compiler.resetShadow();
-  for (const f of shadowFiles) {
-    compiler.mapShadow(f.path, f.bytes);
-  }
-  appliedShadowGeneration = shadowGeneration;
+// Serialize all compiler access: the compiler holds state across calls.
+let queue: Promise<unknown> = Promise.resolve();
+function enqueue<T>(task: () => Promise<T>): Promise<T> {
+  const run = queue.then(task, task);
+  // Keep the chain alive even if a task rejects.
+  queue = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+function toMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === 'string') return err;
+  try { return JSON.stringify(err); } catch { return String(err); }
 }
 
 /**
@@ -229,16 +205,38 @@ function syncShadowFiles(compiler: AnyCompiler): void {
  * parser, so the family name we show the operator is the one the compiler
  * will actually match in `#set text(font: "…")`.
  */
-export async function getFontInfo(bytes: Uint8Array): Promise<{ family: string } | null> {
-  const { createTypstFontBuilder } = await import('@myriaddreamin/typst.ts');
-  const fb = createTypstFontBuilder();
-  await fb.init({ getModule: () => compilerWasmUrl });
-  const info: any = await fb.getFontInfo(bytes);
-  if (!info) return null;
-  // The wasm returns a struct whose family field has varied across versions;
-  // accept the known spellings rather than pinning to one.
-  const family = info.family ?? info.family_name ?? info.familyName ?? null;
-  return family ? { family: String(family) } : null;
+export function getFontInfo(bytes: Uint8Array): Promise<TypstFontInfo | null> {
+  return enqueue(() => getTransport().call<TypstFontInfo | null>({ op: 'fontInfo', bytes }));
+}
+
+/** Actually talk to the transport for one SVG compile: fonts/shadow sync, then the compile itself. */
+function runSvgCompile(source: string, mainPath: string): Promise<TypstSvgResult> {
+  return enqueue(async () => {
+    const t = getTransport();
+    await syncState(t);
+    return t.call<SvgOutput>({ op: 'svg', source, mainPath });
+  });
+}
+
+// Coalescing state for preview compiles: at most one coalesced compile is
+// ever in flight against the transport, plus (at most) one waiting behind
+// it. A further preview that arrives while one is already waiting replaces
+// it outright, so only the newest preview ever pays for a round trip; the
+// one it replaced is resolved as superseded without touching the transport.
+let svgActive = false;
+let svgPending: { source: string; mainPath: string; resolve: (r: TypstSvgResult) => void } | null = null;
+
+function startSvg(source: string, mainPath: string, resolve: (r: TypstSvgResult) => void): void {
+  svgActive = true;
+  void runSvgCompile(source, mainPath).then((res) => {
+    resolve(res);
+    svgActive = false;
+    if (svgPending) {
+      const next = svgPending;
+      svgPending = null;
+      startSvg(next.source, next.mainPath, next.resolve);
+    }
+  });
 }
 
 /**
@@ -252,43 +250,28 @@ export async function getFontInfo(bytes: Uint8Array): Promise<{ family: string }
  * `mainPath` is where `source` is mounted and which file the compiler is
  * pointed at, so a document that `#include`s its neighbours resolves them
  * relative to the right place.
+ *
+ * Coalescing (`opts.coalesce`) is opt-in: the preview debounces typing, but
+ * a document that takes longer to compile than the debounce window can
+ * still pile up requests. Since only the newest preview is ever shown, at
+ * most one coalesced compile waits behind the one in flight; anything it
+ * displaces resolves immediately as `{ diagnostics: [], superseded: true }`
+ * rather than paying for a round trip. An *export* must never be skipped,
+ * so it always goes through `runSvgCompile` directly instead.
  */
 export function compileTypstSvg(
   source: string,
   opts: { coalesce?: boolean } = {},
   mainPath: string = MAIN_PATH,
 ): Promise<TypstSvgResult> {
-  // Coalesce superseded previews. The preview already debounces typing, but a
-  // document that takes longer to compile than the debounce window will still
-  // queue up compiles whose output is discarded the moment they finish. Since
-  // only the newest preview can ever be shown, an older one that hasn't
-  // started yet should cost nothing rather than a full compile.
-  //
-  // Opt-in, because an *export* must never be skipped: it isn't superseded by
-  // a preview that happens to be requested while it waits in the queue.
-  const seq = opts.coalesce ? ++svgRequestSeq : -1;
-  return enqueue(async () => {
-    if (seq !== -1 && seq !== svgRequestSeq) return { diagnostics: [], superseded: true };
-
-    const { compiler, renderer } = await getInstance();
-    syncShadowFiles(compiler);
-    // Map the latest source, then reset + compile (matches typst.ts's own
-    // ordering in TypstSnippet.vector()).
-    compiler.addSource(mainPath, source);
-    await compiler.reset();
-    const res = await compiler.compile({
-      mainFilePath: mainPath,
-      format: FORMAT_VECTOR,
-      diagnostics: 'full',
-    });
-    const diagnostics: TypstDiagnostic[] = (res?.diagnostics ?? []) as TypstDiagnostic[];
-    if (!res?.result) return { diagnostics };
-
-    const svg: string = await renderer.runWithSession(async (session: unknown) => {
-      renderer.manipulateData({ renderSession: session, action: 'reset', data: res.result });
-      return renderer.renderSvg({ renderSession: session });
-    });
-    return { svg, diagnostics };
+  if (!opts.coalesce) return runSvgCompile(source, mainPath);
+  return new Promise<TypstSvgResult>((resolve) => {
+    if (!svgActive) {
+      startSvg(source, mainPath, resolve);
+      return;
+    }
+    svgPending?.resolve({ diagnostics: [], superseded: true });
+    svgPending = { source, mainPath, resolve };
   });
 }
 
@@ -301,26 +284,18 @@ export function compileTypstSvg(
  */
 export function compileTypstPdf(source: string, mainPath: string = MAIN_PATH): Promise<Uint8Array> {
   return enqueue(async () => {
-    const { compiler } = await getInstance();
-    syncShadowFiles(compiler);
-    compiler.addSource(mainPath, source);
-    await compiler.reset();
-    const res = await compiler.compile({
-      mainFilePath: mainPath,
-      format: FORMAT_PDF,
-      diagnostics: 'full',
-    });
-    if (!res?.result) {
-      const first = (res?.diagnostics ?? []).find(
-        (d: TypstDiagnostic) => d.severity === 'error',
-      );
+    const t = getTransport();
+    await syncState(t);
+    const res = await t.call<PdfOutput>({ op: 'pdf', source, mainPath });
+    if (!res.pdf) {
+      const first = res.diagnostics.find((d) => d.severity === 'error');
       throw new Error(
         first
           ? `Typst error: ${first.message}`
           : 'Typst document has errors: fix them before exporting a PDF.',
       );
     }
-    return res.result as Uint8Array;
+    return res.pdf;
   });
 }
 
