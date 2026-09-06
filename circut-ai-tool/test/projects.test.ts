@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { emptySidecar } from '../src/layout/types.ts';
-import { ProjectRegistry, projectId, readSidecar, scanProjects, sidecarPath, writeSidecar } from '../server/projects.ts';
+import { ProjectRegistry, mapHostPath, parsePathMap, projectId, readSidecar, scanProjects, sidecarPath, writeSidecar } from '../server/projects.ts';
 import { Events, watchFile } from '../server/watch.ts';
 
 describe('projectId', () => {
@@ -50,6 +50,32 @@ describe('scanProjects and sidecar', () => {
     await writeSidecar(sch, s);
     expect(existsSync(sidecarPath(sch))).toBe(true);
     expect((await readSidecar(sch)).pinned.R1['1']).toEqual({ col: 3, row: 'a' });
+  });
+});
+
+describe('path mapping', () => {
+  const map = parsePathMap('C:\\Users\\me\\Documents\\KiCad\\9.0\\projects=/projects; D:/labs/=/labs ;bad;=/x;C:/Users/me/Documents=/docs');
+
+  test('parses, normalises and sorts longest host prefix first', () => {
+    expect(map).toEqual([
+      { host: 'C:/Users/me/Documents/KiCad/9.0/projects', container: '/projects' },
+      { host: 'C:/Users/me/Documents', container: '/docs' },
+      { host: 'D:/labs', container: '/labs' },
+    ]);
+  });
+
+  test('rewrites matching prefixes case-insensitively, with either slash', () => {
+    expect(mapHostPath('c:\\users\\ME\\documents\\kicad\\9.0\\projects\\PL1_1\\PL1_1.kicad_sch', map)).toBe('/projects/PL1_1/PL1_1.kicad_sch');
+    expect(mapHostPath('C:/Users/me/Documents/other/x.kicad_sch', map)).toBe('/docs/other/x.kicad_sch');
+    expect(mapHostPath('D:/labs/a.kicad_sch', map)).toBe('/labs/a.kicad_sch');
+    expect(mapHostPath('C:/Users/me/Documents/KiCad/9.0/projects', map)).toBe('/projects');
+  });
+
+  test('leaves ids, container paths and unmapped paths alone', () => {
+    expect(mapHostPath('365480e020', map)).toBe('365480e020');
+    expect(mapHostPath('/projects/PL1_1/PL1_1.kicad_sch', map)).toBe('/projects/PL1_1/PL1_1.kicad_sch');
+    expect(mapHostPath('C:/Users/me/Documents2/x.kicad_sch', map)).toBe('C:/Users/me/Documents2/x.kicad_sch');
+    expect(mapHostPath('E:/x.kicad_sch', [])).toBe('E:/x.kicad_sch');
   });
 });
 

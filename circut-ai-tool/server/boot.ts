@@ -1,10 +1,10 @@
 // Wire the real dependencies together (used by the HTTP and stdio entries).
 
 import path from 'node:path';
-import { DATA_DIR, KICAD_CLI, KICAD_SYMBOL_DIR, PROJECTS_DIR, WATCH_POLL_MS } from './config.ts';
+import { DATA_DIR, KICAD_CLI, KICAD_SYMBOL_DIR, PATH_MAP, PROJECTS_DIR, WATCH_POLL_MS } from './config.ts';
 import { createKicadCli } from './kicad-cli.ts';
 import { createLibraryLookup } from './libraries.ts';
-import { ProjectRegistry } from './projects.ts';
+import { ProjectRegistry, parsePathMap } from './projects.ts';
 import { Service, type ProjectEvent } from './service.ts';
 import { Events } from './watch.ts';
 
@@ -14,6 +14,6 @@ export async function bootService(opts: { watch?: boolean } = {}) {
   const events = new Events<ProjectEvent>();
   const kicad = createKicadCli({ exe: KICAD_CLI, cacheDir: path.join(DATA_DIR, 'cache') });
   const libs = createLibraryLookup({ symbolDir: KICAD_SYMBOL_DIR });
-  const service = new Service({ kicad, registry, events, watch: opts.watch ?? true, watchPollMs: WATCH_POLL_MS, projectsDir: PROJECTS_DIR, libs });
+  const service = new Service({ kicad, registry, events, watch: opts.watch ?? true, watchPollMs: WATCH_POLL_MS, pathMap: parsePathMap(PATH_MAP), projectsDir: PROJECTS_DIR, libs });
   return { service, events, kicad };
 }

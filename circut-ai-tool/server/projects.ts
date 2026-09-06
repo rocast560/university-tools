@@ -17,6 +17,46 @@ export interface ProjectInfo {
 
 export const normalizePath = (p: string) => path.resolve(p).replace(/\\/g, '/');
 
+export interface PathMapping {
+  host: string;
+  container: string;
+}
+
+/**
+ * Parse CIRCUIT_PATH_MAP: "hostPrefix=containerPrefix;hostPrefix2=...". Host
+ * prefixes are normalised to forward slashes, trailing slashes are dropped on
+ * both sides, malformed entries are ignored. Sorted longest host prefix first
+ * so the most specific mapping wins in mapHostPath.
+ */
+export function parsePathMap(spec: string): PathMapping[] {
+  const out: PathMapping[] = [];
+  for (const entry of spec.split(';')) {
+    const i = entry.indexOf('=');
+    if (i <= 0) continue;
+    const host = entry.slice(0, i).trim().replace(/\\/g, '/').replace(/\/+$/, '');
+    const container = entry.slice(i + 1).trim().replace(/\/+$/, '');
+    if (host && container) out.push({ host, container });
+  }
+  return out.sort((a, b) => b.host.length - a.host.length);
+}
+
+/**
+ * Rewrite a path sent by a client on the host (drive letter, backslashes) into
+ * the container path. Case-insensitive on the host side. Unchanged when no
+ * prefix matches, so ids and container paths pass through.
+ */
+export function mapHostPath(p: string, map: PathMapping[]): string {
+  if (map.length === 0) return p;
+  const norm = p.replace(/\\/g, '/');
+  const lower = norm.toLowerCase();
+  for (const m of map) {
+    const h = m.host.toLowerCase();
+    if (lower === h) return m.container;
+    if (lower.startsWith(`${h}/`)) return m.container + norm.slice(m.host.length);
+  }
+  return p;
+}
+
 export function projectId(absPath: string): string {
   return createHash('sha256').update(normalizePath(absPath).toLowerCase()).digest('hex').slice(0, 10);
 }

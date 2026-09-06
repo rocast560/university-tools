@@ -2,13 +2,13 @@ import { describe, expect, test } from 'bun:test';
 import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { ProjectRegistry, sidecarPath } from '../server/projects.ts';
+import { ProjectRegistry, normalizePath, sidecarPath, type PathMapping } from '../server/projects.ts';
 import { Service, ServiceError, type ProjectEvent } from '../server/service.ts';
 import { Events } from '../server/watch.ts';
 import { fakeKicad } from './fake-kicad.ts';
 import { FIXTURES, readFixture } from './smoke.test.ts';
 
-export async function makeService(opts: { watch?: boolean; watchPollMs?: number } = {}) {
+export async function makeService(opts: { watch?: boolean; watchPollMs?: number; pathMap?: PathMapping[] } = {}) {
   const work = mkdtempSync(path.join(tmpdir(), 'svc-'));
   const sch = path.join(work, 'PL1_1.kicad_sch');
   copyFileSync(path.join(FIXTURES, 'PL1_1.kicad_sch'), sch);
@@ -21,6 +21,7 @@ export async function makeService(opts: { watch?: boolean; watchPollMs?: number 
     events,
     watch: opts.watch ?? false,
     watchPollMs: opts.watchPollMs,
+    pathMap: opts.pathMap,
     projectsDir: work,
     libs: { symbolText: async (id) => { throw new Error(`no lib ${id}`); } },
   });
@@ -40,6 +41,18 @@ describe('Service', () => {
     const list = await service.list();
     expect(list.recent[0].id).toBe(p.info.id);
     expect(list.found.map((f) => f.name)).toEqual(['PL1_1']);
+  });
+
+  test('maps host paths into the projects folder when a path map is set', async () => {
+    // Two calls, not one: `container` needs a work dir that already holds the fixture, and
+    // referencing the destructured `work` inside the same makeService() call's argument would
+    // hit its temporal dead zone (the argument object is evaluated before the assignment).
+    const { work } = await makeService();
+    const { service } = await makeService({ pathMap: [{ host: 'Z:/host/projects', container: work.replace(/\\/g, '/') }] });
+    const p = await service.open('Z:\\host\\projects\\PL1_1.kicad_sch');
+    expect(p.info.name).toBe('PL1_1');
+    expect(p.info.path).toBe(normalizePath(path.join(work, 'PL1_1.kicad_sch')));
+    await expect(service.open('Z:/elsewhere/PL1_1.kicad_sch')).rejects.toThrow(/host paths are mapped: Z:\/host\/projects -> /);
   });
 
   test('rejects missing files, wrong extensions, sheets and buses', async () => {

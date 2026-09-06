@@ -19,7 +19,7 @@ type Content = { type: 'text'; text: string } | { type: 'image'; data: string; m
 const text = (t: string): Content => ({ type: 'text', text: t });
 const image = (data: string, mimeType: string): Content => ({ type: 'image', data, mimeType });
 const fail = (message: string) => ({ isError: true as const, content: [text(message)], structuredContent: { ok: false, error: message } });
-const project = z.string().describe('Project id from open_schematic, or the absolute path of the .kicad_sch.');
+const project = z.string().describe('Project id from open_schematic, or the absolute path of the .kicad_sch (a Windows path is accepted when the server runs in Docker with CIRCUIT_PATH_MAP).');
 
 /** Accept "A" or "/A" or "+5V" and return the exact net name in the design. */
 export function resolveNet(p: OpenProject, name: string): string {
@@ -65,7 +65,7 @@ export function createMcpServer(service: Service): McpServer {
     return { content: [text(lines.join('\n'))], structuredContent: { recent, found } };
   }));
 
-  server.registerTool('open_schematic', { title: 'Open a schematic', description: 'Open a .kicad_sch by absolute path (or a known id), export its netlist through kicad-cli, lay it out on a breadboard and run the checks. Returns the id used by every other tool.', inputSchema: { path: z.string().describe('Absolute path to the .kicad_sch, or a project id') } }, ({ path }) => guard(async () => {
+  server.registerTool('open_schematic', { title: 'Open a schematic', description: 'Open a .kicad_sch by absolute path (or a known id), export its netlist through kicad-cli, lay it out on a breadboard and run the checks. Returns the id used by every other tool.', inputSchema: { path: z.string().describe('Absolute path to the .kicad_sch (a Windows path is accepted when the server runs in Docker with CIRCUIT_PATH_MAP), or a project id') } }, ({ path }) => guard(async () => {
     const p = await service.open(path);
     const s = summaryOf(p);
     return { content: [text(`Opened ${p.info.name} (id ${p.info.id}).\n${s.summary}\n${reminder()}`)], structuredContent: { ...s, ok: true } };
