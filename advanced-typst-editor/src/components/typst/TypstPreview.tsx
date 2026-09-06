@@ -19,7 +19,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo, memo, type RefObject } from 'react';
 import { ZoomIn, ZoomOut, Maximize, Loader2, AlertTriangle } from 'lucide-react';
 import { compileTypstSvg, typstErrorMessage, type TypstDiagnostic } from '@/lib/typst-compiler';
-import { splitTypstPages, extractTextRuns, DEFAULT_PAGE_GAP, type SplitTypstSvg, type TypstPageFragment } from '@/lib/typst-pages';
+import { splitTypstPages, extractTextRuns, DEFAULT_PAGE_GAP, type SplitTypstSvg } from '@/lib/typst-pages';
 import { occurrenceIndex } from '@/lib/typst-source-map';
 
 /** One guess at what a preview click corresponds to in the source. */
@@ -182,11 +182,17 @@ const SharedDefs = memo(function SharedDefs({ markup }: { markup: string }) {
  * markup unchanged never touches its DOM.
  */
 const PageCard = memo(function PageCard({
-  page,
+  tid,
+  width,
+  height,
+  body,
   index,
   scrollRoot,
 }: {
-  page: TypstPageFragment;
+  tid: string;
+  width: number;
+  height: number;
+  body: string;
   index: number;
   scrollRoot: RefObject<HTMLDivElement | null>;
 }) {
@@ -210,17 +216,17 @@ const PageCard = memo(function PageCard({
       ref={ref}
       data-page-index={index}
       className="rounded-sm bg-white shadow-lg"
-      style={{ width: `${page.width}px`, height: `${page.height}px`, contain: 'layout' }}
+      style={{ width: `${width}px`, height: `${height}px`, contain: 'layout' }}
     >
       {near && (
         <svg
           xmlns={SVG_NS}
           className="block"
-          viewBox={`0 0 ${page.width} ${page.height}`}
-          width={page.width}
-          height={page.height}
-          data-tid={page.tid}
-          dangerouslySetInnerHTML={{ __html: page.body }}
+          viewBox={`0 0 ${width} ${height}`}
+          width={width}
+          height={height}
+          data-tid={tid}
+          dangerouslySetInnerHTML={{ __html: body }}
         />
       )}
     </div>
@@ -335,7 +341,7 @@ export const TypstPreview = memo(function TypstPreview({
     for (let i = 0; i < pageIndex; i++) {
       let runs = textRunCache.get(i);
       if (!runs) { runs = extractTextRuns(split.pages[i]!.body); textRunCache.set(i, runs); }
-      out.push(...runs);
+      for (const run of runs) out.push(run);
     }
     return out;
   }, [split, textRunCache]);
@@ -454,7 +460,15 @@ export const TypstPreview = memo(function TypstPreview({
                 <SharedDefs markup={split.shared} />
                 <div className="flex flex-col items-center" style={{ gap: `${DEFAULT_PAGE_GAP}px` }}>
                   {split.pages.map((page, i) => (
-                    <PageCard key={i} page={page} index={i} scrollRoot={pageAreaRef} />
+                    <PageCard
+                      key={i}
+                      index={i}
+                      tid={page.tid}
+                      width={page.width}
+                      height={page.height}
+                      body={page.body}
+                      scrollRoot={pageAreaRef}
+                    />
                   ))}
                 </div>
               </>

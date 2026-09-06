@@ -106,7 +106,8 @@ describe('TypstPreview page virtualization', () => {
     compileTypstSvg.mockResolvedValueOnce({ svg: FOUR_PAGES, diagnostics: [] });
     const { container, rerender } = render(<TypstPreview source="a" />);
     await settle();
-    const firstBefore = mountedSvg(cards(container)[0]!)!;
+    const firstCardBefore = cards(container)[0]!;
+    const firstBefore = mountedSvg(firstCardBefore)!;
 
     // Second compile: only page 2 changed.
     compileTypstSvg.mockResolvedValueOnce({
@@ -116,8 +117,10 @@ describe('TypstPreview page virtualization', () => {
     rerender(<TypstPreview source="b" />);
     await settle();
 
-    const firstAfter = mountedSvg(cards(container)[0]!)!;
+    const firstCardAfter = cards(container)[0]!;
+    const firstAfter = mountedSvg(firstCardAfter)!;
     const secondAfter = mountedSvg(cards(container)[1]!)!;
+    expect(firstCardAfter).toBe(firstCardBefore); // untouched page: the card itself is the same node too
     expect(firstAfter).toBe(firstBefore); // untouched page: the very same node
     expect(secondAfter.innerHTML).toContain('two, edited');
   });
