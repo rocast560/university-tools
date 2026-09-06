@@ -2,26 +2,35 @@ import { describe, expect, test } from 'bun:test';
 import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { ProjectRegistry, sidecarPath } from '../server/projects.ts';
+import { ProjectRegistry, normalizePath, sidecarPath, type PathMapping } from '../server/projects.ts';
 import { Service, ServiceError, type ProjectEvent } from '../server/service.ts';
 import { Events } from '../server/watch.ts';
 import { fakeKicad } from './fake-kicad.ts';
 import { FIXTURES, readFixture } from './smoke.test.ts';
 
-export async function makeService(opts: { watch?: boolean } = {}) {
+export async function makeService(opts: { watch?: boolean; watchPollMs?: number; pathMap?: PathMapping[] } = {}) {
   const work = mkdtempSync(path.join(tmpdir(), 'svc-'));
   const sch = path.join(work, 'PL1_1.kicad_sch');
   copyFileSync(path.join(FIXTURES, 'PL1_1.kicad_sch'), sch);
   const registry = new ProjectRegistry(path.join(work, 'data'));
   await registry.load();
   const events = new Events<ProjectEvent>();
-  const service = new Service({ kicad: fakeKicad(readFixture('PL1_1.net')), registry, events, watch: opts.watch ?? false, projectsDir: work, libs: { symbolText: async (id) => { throw new Error(`no lib ${id}`); } } });
+  const service = new Service({
+    kicad: fakeKicad(readFixture('PL1_1.net')),
+    registry,
+    events,
+    watch: opts.watch ?? false,
+    watchPollMs: opts.watchPollMs,
+    pathMap: opts.pathMap,
+    projectsDir: work,
+    libs: { symbolText: async (id) => { throw new Error(`no lib ${id}`); } },
+  });
   return { service, sch, events, work };
 }
 
 describe('Service', () => {
   test('opens a schematic by path, then by id, and lists it', async () => {
-    const { service, sch } = await makeService();
+    const { service, sch, work } = await makeService();
     const p = await service.open(sch);
     expect(p.info.name).toBe('PL1_1');
     expect(p.doc.error).toBeNull();
@@ -32,6 +41,20 @@ describe('Service', () => {
     const list = await service.list();
     expect(list.recent[0].id).toBe(p.info.id);
     expect(list.found.map((f) => f.name)).toEqual(['PL1_1']);
+    expect(list.projectsDir).toBe(work);
+  });
+
+  test('maps host paths into the projects folder when a path map is set', async () => {
+    // Two calls, not one: `container` needs a work dir that already holds the fixture, and
+    // referencing the destructured `work` inside the same makeService() call's argument would
+    // hit its temporal dead zone (the argument object is evaluated before the assignment).
+    const { work } = await makeService();
+    const { service } = await makeService({ pathMap: [{ host: 'Z:/host/projects', container: work.replace(/\\/g, '/') }] });
+    const p = await service.open('Z:\\host\\projects\\PL1_1.kicad_sch');
+    expect(p.info.name).toBe('PL1_1');
+    expect(p.info.path).toBe(normalizePath(path.join(work, 'PL1_1.kicad_sch')));
+    await expect(service.open('Z:/elsewhere/PL1_1.kicad_sch')).rejects.toThrow(/host paths are mapped: Z:\/host\/projects -> /);
+    await expect(service.open('Z:/elsewhere/PL1_1.kicad_sch')).rejects.toThrow(/schematic not found: Z:\/elsewhere\/PL1_1\.kicad_sch/);
   });
 
   test('rejects missing files, wrong extensions, sheets and buses', async () => {
@@ -92,6 +115,17 @@ describe('Service', () => {
     expect(r.mtimeMs).toBeGreaterThan(0);
     service.close(p.info.id);
     expect(service.has(p.info.id)).toBe(false);
+  });
+
+  test('reloads through the polling watcher when asked', async () => {
+    const { service, sch, events } = await makeService({ watch: true, watchPollMs: 100 });
+    const p = await service.open(sch);
+    const got = new Promise<ProjectEvent>((resolve) => events.subscribe((e) => e.projectId === p.info.id && resolve(e)));
+    await new Promise((r) => setTimeout(r, 250));
+    writeFileSync(sch, `${readFileSync(sch, 'utf8')}\n`);
+    const ev = await Promise.race([got, new Promise<ProjectEvent>((_, reject) => setTimeout(() => reject(new Error('no event within 3 s')), 3000))]);
+    expect(ev.type).toBe('changed');
+    service.close(p.info.id);
   });
 });
 

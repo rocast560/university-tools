@@ -14,7 +14,7 @@ import { buildLayoutDoc, type LayoutDoc } from '../src/pipeline.ts';
 import { simulate, type SimResult } from '../src/sim/index.ts';
 import type { KicadCli } from './kicad-cli.ts';
 import type { LibraryLookup } from './libraries.ts';
-import { importSchematic, normalizePath, projectId, readSidecar, scanProjects, writeSidecar, type ProjectInfo, type ProjectRegistry } from './projects.ts';
+import { importSchematic, mapHostPath, normalizePath, projectId, readSidecar, scanProjects, writeSidecar, type PathMapping, type ProjectInfo, type ProjectRegistry } from './projects.ts';
 import { watchFile, type Events } from './watch.ts';
 
 export class ServiceError extends Error {
@@ -50,6 +50,10 @@ export interface ServiceDeps {
   watch: boolean;
   projectsDir: string;
   libs: LibraryLookup;
+  /** Poll interval for the schematic watcher; 0 or undefined uses fs.watch. */
+  watchPollMs?: number;
+  /** Host-to-container prefixes applied to paths clients send (CIRCUIT_PATH_MAP). */
+  pathMap?: PathMapping[];
 }
 
 export interface EditOutcome {
@@ -81,7 +85,7 @@ export class Service {
   }
 
   async list() {
-    return { recent: this.deps.registry.list(), found: await scanProjects(this.deps.projectsDir, 2) };
+    return { recent: this.deps.registry.list(), found: await scanProjects(this.deps.projectsDir, 2), projectsDir: this.deps.projectsDir };
   }
 
   /** Copy an uploaded schematic into the library, then open it. */
@@ -98,23 +102,26 @@ export class Service {
   async open(pathOrId: string): Promise<OpenProject> {
     const known = this.open_.get(pathOrId) ?? (this.deps.registry.get(pathOrId) ? this.open_.get(this.deps.registry.get(pathOrId)!.id) : undefined);
     if (known) return known;
+    const requested = pathOrId;
     const remembered = this.deps.registry.get(pathOrId);
-    const file = normalizePath(remembered ? remembered.path : pathOrId);
+    const file = normalizePath(remembered ? remembered.path : mapHostPath(pathOrId, this.deps.pathMap ?? []));
     if (!file.toLowerCase().endsWith('.kicad_sch')) throw new ServiceError(`"${pathOrId}" is not a .kicad_sch file`);
     const id = projectId(file);
-    const project = await this.load(file, id);
+    const project = await this.load(file, id, requested);
     project.info = await this.deps.registry.remember(file);
     this.open_.set(id, project);
     if (this.deps.watch) this.startWatch(id, file);
     return project;
   }
 
-  private async load(file: string, id: string): Promise<OpenProject> {
+  private async load(file: string, id: string, requested = file): Promise<OpenProject> {
     let s;
     try {
       s = await stat(file);
     } catch {
-      throw new ServiceError(`schematic not found: ${file}`, 404);
+      const map = this.deps.pathMap ?? [];
+      const hint = map.length ? ` (host paths are mapped: ${map.map((m) => `${m.host} -> ${m.container}`).join(', ')})` : '';
+      throw new ServiceError(`schematic not found: ${requested}${hint}`, 404);
     }
     const text = await readFile(file, 'utf8');
     const schematic = parseSchematic(text, path.basename(file, '.kicad_sch'));
@@ -132,11 +139,15 @@ export class Service {
     this.stops.get(id)?.();
     this.stops.set(
       id,
-      watchFile(file, () => {
-        this.refresh(id)
-          .then(() => this.deps.events.emit({ projectId: id, type: 'changed' }))
-          .catch((e) => this.deps.events.emit({ projectId: id, type: 'error', message: (e as Error).message }));
-      }),
+      watchFile(
+        file,
+        () => {
+          this.refresh(id)
+            .then(() => this.deps.events.emit({ projectId: id, type: 'changed' }))
+            .catch((e) => this.deps.events.emit({ projectId: id, type: 'error', message: (e as Error).message }));
+        },
+        { pollMs: this.deps.watchPollMs ?? 0 },
+      ),
     );
   }
 

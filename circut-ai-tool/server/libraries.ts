@@ -3,6 +3,7 @@
 
 import { access, readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { KICAD_SYM_LIB_TABLE } from './config.ts';
 import { extractLibSymbol } from '../src/kicad/libsymbol.ts';
 import { atom, child, children, isList, parse } from '../src/sexpr.ts';
 
@@ -41,7 +42,7 @@ function assertSafeNickname(nickname: string): void {
 
 export async function findLibraryFile(nickname: string, opts: { symbolDir: string; tableFile?: string; projectDir?: string }): Promise<string | null> {
   assertSafeNickname(nickname);
-  const table = opts.tableFile ?? path.join(process.env.APPDATA ?? '', 'kicad', '9.0', 'sym-lib-table');
+  const table = opts.tableFile ?? KICAD_SYM_LIB_TABLE;
   try {
     const map = parseSymLibTable(await readFile(table, 'utf8'), opts.symbolDir);
     const hit = map.get(nickname);

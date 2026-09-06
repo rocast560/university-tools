@@ -43,7 +43,7 @@ export async function loadProject(id: string) {
 async function renderHome() {
   app.replaceChildren(h(`<main class="home"><header><h1>Circuit AI Tool</h1><p class="sub">Open a KiCad schematic and get a breadboard wiring diagram, a build guide, checks and a logic simulator.</p></header>
     <section class="open"><div id="drop" class="dropzone"><b>Drop a .kicad_sch here</b><span class="muted">or</span><button class="primary" type="button" id="pick">Import…</button><input type="file" id="file" accept=".kicad_sch" hidden></div>
-      <form id="open-form"><label>Or open one in place <input name="path" placeholder="C:\\Users\\you\\Documents\\KiCad\\9.0\\projects\\lab1\\lab1.kicad_sch" required></label><button type="submit">Open</button></form></section>
+      <form id="open-form"><label>Or open one in place <input name="path" placeholder="absolute path to a .kicad_sch" required></label><button type="submit">Open</button></form></section>
     <section><h2>Recent</h2><ul id="recent" class="projects"></ul></section>
     <section><h2>Library</h2><ul id="found" class="projects"></ul></section>
     <footer><a href="#/connect">Connect Claude, ChatGPT or Claude Code</a> · <a href="/openapi.json">OpenAPI</a></footer></main>`));
@@ -86,6 +86,8 @@ async function renderHome() {
 
   try {
     const lists = await api.list();
+    const sep = lists.projectsDir.includes('\\') ? '\\' : '/';
+    form.querySelector<HTMLInputElement>('input[name=path]')!.placeholder = `${lists.projectsDir}${sep}lab1${sep}lab1.kicad_sch`;
     app.querySelector('#recent')!.innerHTML = lists.recent.map((p) => `<li><a href="#/p/${p.id}" data-path="${esc(p.path)}"><b>${esc(p.name)}</b><span>${esc(p.path)}</span></a></li>`).join('') || '<li class="muted">nothing yet</li>';
     app.querySelector('#found')!.innerHTML = lists.found.map((p) => `<li><a href="#/" data-open="${esc(p.path)}"><b>${esc(p.name)}</b><span>${esc(p.path)}</span></a></li>`).join('') || '<li class="muted">nothing imported yet</li>';
     app.querySelectorAll<HTMLAnchorElement>('a[data-open]').forEach((a) =>

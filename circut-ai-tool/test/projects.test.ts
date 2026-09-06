@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { emptySidecar } from '../src/layout/types.ts';
-import { ProjectRegistry, projectId, readSidecar, scanProjects, sidecarPath, writeSidecar } from '../server/projects.ts';
+import { ProjectRegistry, mapHostPath, normalizePath, parsePathMap, projectId, readSidecar, scanProjects, sidecarPath, writeSidecar } from '../server/projects.ts';
 import { Events, watchFile } from '../server/watch.ts';
 
 describe('projectId', () => {
@@ -18,12 +18,13 @@ describe('ProjectRegistry', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'reg-'));
     const reg = new ProjectRegistry(dir);
     await reg.load();
-    const a = await reg.remember('C:/p/a.kicad_sch');
+    const base = path.join(dir, 'p');
+    const a = await reg.remember(path.join(base, 'a.kicad_sch'));
     await new Promise((r) => setTimeout(r, 5));
-    const b = await reg.remember('C:/p/b.kicad_sch');
+    const b = await reg.remember(path.join(base, 'b.kicad_sch'));
     expect(reg.list().map((p) => p.name)).toEqual(['b', 'a']);
-    expect(reg.get(a.id)!.dir).toBe('C:/p');
-    await reg.remember('C:/p/a.kicad_sch');
+    expect(reg.get(a.id)!.dir).toBe(normalizePath(base));
+    await reg.remember(path.join(base, 'a.kicad_sch'));
     expect(reg.list().map((p) => p.name)).toEqual(['a', 'b']);
     await reg.forget(b.id);
     const reg2 = new ProjectRegistry(dir);
@@ -53,6 +54,32 @@ describe('scanProjects and sidecar', () => {
   });
 });
 
+describe('path mapping', () => {
+  const map = parsePathMap('C:\\Users\\me\\Documents\\KiCad\\9.0\\projects=/projects; D:/labs/=/labs ;bad;=/x;C:/Users/me/Documents=/docs');
+
+  test('parses, normalises and sorts longest host prefix first', () => {
+    expect(map).toEqual([
+      { host: 'C:/Users/me/Documents/KiCad/9.0/projects', container: '/projects' },
+      { host: 'C:/Users/me/Documents', container: '/docs' },
+      { host: 'D:/labs', container: '/labs' },
+    ]);
+  });
+
+  test('rewrites matching prefixes case-insensitively, with either slash', () => {
+    expect(mapHostPath('c:\\users\\ME\\documents\\kicad\\9.0\\projects\\PL1_1\\PL1_1.kicad_sch', map)).toBe('/projects/PL1_1/PL1_1.kicad_sch');
+    expect(mapHostPath('C:/Users/me/Documents/other/x.kicad_sch', map)).toBe('/docs/other/x.kicad_sch');
+    expect(mapHostPath('D:/labs/a.kicad_sch', map)).toBe('/labs/a.kicad_sch');
+    expect(mapHostPath('C:/Users/me/Documents/KiCad/9.0/projects', map)).toBe('/projects');
+  });
+
+  test('leaves ids, container paths and unmapped paths alone', () => {
+    expect(mapHostPath('365480e020', map)).toBe('365480e020');
+    expect(mapHostPath('/projects/PL1_1/PL1_1.kicad_sch', map)).toBe('/projects/PL1_1/PL1_1.kicad_sch');
+    expect(mapHostPath('C:/Users/me/Documents2/x.kicad_sch', map)).toBe('C:/Users/me/Documents2/x.kicad_sch');
+    expect(mapHostPath('E:/x.kicad_sch', [])).toBe('E:/x.kicad_sch');
+  });
+});
+
 describe('Events and watchFile', () => {
   test('emits once per debounced burst of changes', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'watch-'));
@@ -74,5 +101,21 @@ describe('Events and watchFile', () => {
     unsub();
     ev.emit({ n: 2 });
     expect(got).toEqual([1]);
+  });
+
+  test('polling mode notices a change without inotify and stops cleanly', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'poll-'));
+    const file = path.join(dir, 'x.kicad_sch');
+    writeFileSync(file, '(kicad_sch)');
+    let hits = 0;
+    const stop = watchFile(file, () => hits++, { debounceMs: 50, pollMs: 100 });
+    await new Promise((r) => setTimeout(r, 250));
+    writeFileSync(file, '(kicad_sch changed)');
+    await new Promise((r) => setTimeout(r, 600));
+    expect(hits).toBe(1);
+    stop();
+    writeFileSync(file, '(kicad_sch changed again)');
+    await new Promise((r) => setTimeout(r, 400));
+    expect(hits).toBe(1);
   });
 });

@@ -8,6 +8,7 @@
     "test": "bun test",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "breadboard": "bun scripts/breadboard.ts",
+    "docker:smoke": "bun scripts/docker-smoke.ts",
     "start": "bun server/index.ts",
     "mcp:stdio": "bun server/mcp-stdio.ts",
     "dev": "vite",
