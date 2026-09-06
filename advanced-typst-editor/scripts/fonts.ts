@@ -3,14 +3,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { DEFAULT_FONT_FILES } from '../src/lib/typst-default-fonts';
 
-export const FONT_FILES = [
-  'DejaVuSansMono-Bold.ttf', 'DejaVuSansMono-BoldOblique.ttf', 'DejaVuSansMono-Oblique.ttf', 'DejaVuSansMono.ttf',
-  'LibertinusSerif-Bold.otf', 'LibertinusSerif-BoldItalic.otf', 'LibertinusSerif-Italic.otf', 'LibertinusSerif-Regular.otf',
-  'LibertinusSerif-Semibold.otf', 'LibertinusSerif-SemiboldItalic.otf',
-  'NewCM10-Bold.otf', 'NewCM10-BoldItalic.otf', 'NewCM10-Italic.otf', 'NewCM10-Regular.otf',
-  'NewCMMath-Bold.otf', 'NewCMMath-Book.otf', 'NewCMMath-Regular.otf',
-];
+export const FONT_FILES = DEFAULT_FONT_FILES;
 const LOCAL = 'C:/Users/rober/Desktop/typst-editor/recovered-from-docker/fonts';
 const CDN = 'https://cdn.jsdelivr.net/gh/typst/typst-assets@v0.13.1/files/fonts/';
 
