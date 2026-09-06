@@ -94,7 +94,13 @@ export interface DirEntry { name: string; path: string; isEmpty: boolean; isBack
 export interface DirListing { path: string; parent: string | null; entries: DirEntry[] }
 
 export interface McpClientStatus { name: string; version: string | null; connected: boolean; lastSeenAt: number; sessions: number }
-export interface McpStatus { endpoint: string; authRequired: boolean; clients: McpClientStatus[] }
+export interface McpStatus {
+  endpoint: string;
+  authRequired: boolean;
+  clients: McpClientStatus[];
+  /** Absolute path of server/mcp-stdio.ts for Claude Desktop, or null when it is not reachable from the host (container, compiled sidecar). */
+  stdioBridge: string | null;
+}
 
 export interface Diagnostic { severity: 'error' | 'warning'; message: string; file: string | null; line: number | null; col: number | null }
 export interface CompileResult { ok: boolean; diagnostics: Diagnostic[] }

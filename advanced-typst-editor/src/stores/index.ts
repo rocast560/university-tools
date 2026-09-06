@@ -120,7 +120,7 @@ export const useAppStore = create<AppState>((set, get) => {
       switch (ev.type) {
         case 'workspaces.changed': void get().loadWorkspaces(); void get().loadGroups(); break;
         case 'backup.state': set({ backup: ev.state }); break;
-        case 'mcp.clients': set((s) => ({ mcp: { endpoint: s.mcp?.endpoint ?? '/mcp', authRequired: s.mcp?.authRequired ?? false, clients: ev.clients } })); break;
+        case 'mcp.clients': set((s) => ({ mcp: { endpoint: s.mcp?.endpoint ?? '/mcp', authRequired: s.mcp?.authRequired ?? false, stdioBridge: s.mcp?.stdioBridge ?? null, clients: ev.clients } })); break;
         case 'workspace.changed':
           if (ev.id !== get().activeWorkspaceId) return;
           set({ lastChange: { id: ev.id, paths: ev.paths, origin: ev.origin, seq: ++seq } });

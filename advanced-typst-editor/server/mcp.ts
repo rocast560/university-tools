@@ -1,4 +1,7 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import type { McpClientStatus, McpStatus } from '../src/types';
@@ -12,6 +15,21 @@ import type { SettingsStore } from './settings';
 
 export const SERVER_INFO = { name: 'typst-figure-studio', version: '0.1.0' };
 const SESSION_TTL_MS = 30 * 60_000;
+
+/**
+ * Where Claude Desktop should point its stdio bridge. Only meaningful when
+ * the script exists on the same machine as the client: null inside a
+ * container (the path would be the container's) and in the compiled sidecar
+ * (the script is not shipped).
+ */
+export function resolveStdioBridge(
+  serverDir: string,
+  opts: { inContainer: boolean } = { inContainer: fs.existsSync('/.dockerenv') },
+): string | null {
+  if (opts.inContainer) return null;
+  const script = path.join(serverDir, 'mcp-stdio.ts');
+  return fs.existsSync(script) ? script : null;
+}
 
 interface Session { id: string; server: McpServer; transport: WebStandardStreamableHTTPServerTransport; clientName: string; clientVersion: string | null; lastSeenAt: number; streamOpen: boolean }
 
@@ -38,6 +56,7 @@ function toContent(out: unknown): Array<ImageContent | TextContent> {
 export function createMcp(deps: McpDeps): McpApi & { close(): void } {
   const now = deps.now ?? (() => Date.now());
   const sessions = new Map<string, Session>();
+  const stdioBridge = resolveStdioBridge(path.dirname(fileURLToPath(import.meta.url)));
   const toolDeps: ToolDeps = { service: deps.service, compile: deps.compile, backup: deps.backup, settings: deps.settings };
 
   const status = (): McpStatus => {
@@ -48,7 +67,7 @@ export function createMcp(deps: McpDeps): McpApi & { close(): void } {
       if (cur) { cur.sessions += 1; cur.connected ||= connected; cur.lastSeenAt = Math.max(cur.lastSeenAt, s.lastSeenAt); }
       else byName.set(s.clientName, { name: s.clientName, version: s.clientVersion, connected, lastSeenAt: s.lastSeenAt, sessions: 1 });
     }
-    return { endpoint: '/mcp', authRequired: !!deps.token, clients: [...byName.values()] };
+    return { endpoint: '/mcp', authRequired: !!deps.token, clients: [...byName.values()], stdioBridge };
   };
   const publish = () => deps.bus.emit({ type: 'mcp.clients', clients: status().clients });
 
