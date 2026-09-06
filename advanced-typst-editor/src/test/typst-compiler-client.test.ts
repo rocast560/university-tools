@@ -73,19 +73,11 @@ describe('typst compiler client', () => {
 
   it('skips a coalesced preview that was superseded before it started', async () => {
     const c = await loadClient();
-    let releaseFirst!: () => void;
-    const firstDone = new Promise<void>((r) => { releaseFirst = r; });
-    let svgCalls = 0;
-    FakeWorker.handler = async (cmd) => {
-      if (cmd.op !== 'svg') return undefined;
-      svgCalls++;
-      if (svgCalls === 1) await firstDone;
-      return { svg: `<svg data-src="${cmd.source}"/>`, diagnostics: [] };
-    };
+    FakeWorker.handler = (cmd) =>
+      (cmd.op === 'svg' ? { svg: `<svg data-src="${cmd.source}"/>`, diagnostics: [] } : undefined);
     const a = c.compileTypstSvg('a', { coalesce: true });
     const b = c.compileTypstSvg('b', { coalesce: true });
     const d = c.compileTypstSvg('c', { coalesce: true });
-    releaseFirst();
     const [ra, rb, rc] = await Promise.all([a, b, d]);
     // 'a' and 'b' are both superseded before either reaches the front of the
     // queue (all three were requested in the same tick, so neither has
@@ -94,6 +86,34 @@ describe('typst compiler client', () => {
     expect(rb).toEqual({ diagnostics: [], superseded: true });
     expect(rc.svg).toContain('c');
     expect(ops(FakeWorker.instances[0]!)).toEqual(['svg']); // only 'c' reaches the worker
+  });
+
+  it('keeps an in-flight preview and runs only the newest of the ones queued behind it', async () => {
+    const c = await loadClient();
+    let releaseA!: () => void;
+    const aDone = new Promise<void>((r) => { releaseA = r; });
+    FakeWorker.handler = async (cmd) => {
+      if (cmd.op !== 'svg') return undefined;
+      if (cmd.source === 'a') await aDone;
+      return { svg: `<svg data-src="${cmd.source}"/>`, diagnostics: [] };
+    };
+    const a = c.compileTypstSvg('a', { coalesce: true });
+    // Wait for 'a' to actually reach the worker (and start hanging there)
+    // before queuing 'b' and 'c' behind it.
+    await vi.waitFor(() => {
+      expect(FakeWorker.instances[0]?.posted.some((p) => p.op === 'svg' && p.source === 'a')).toBe(true);
+    });
+    const w = FakeWorker.instances[0]!;
+    const b = c.compileTypstSvg('b', { coalesce: true });
+    const d = c.compileTypstSvg('c', { coalesce: true });
+    releaseA();
+    const [ra, rb, rc] = await Promise.all([a, b, d]);
+    // 'a' was already in flight, so it isn't superseded; 'b' is superseded by
+    // 'c' before either gets a turn, so only 'a' and 'c' ever reach the worker.
+    expect(ra.svg).toContain('a');
+    expect(rb).toEqual({ diagnostics: [], superseded: true });
+    expect(rc.svg).toContain('c');
+    expect(ops(w)).toEqual(['svg', 'svg']);
   });
 
   it('turns a PDF compile with errors into a readable rejection', async () => {
