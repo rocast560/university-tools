@@ -85,7 +85,7 @@ export class Service {
   }
 
   async list() {
-    return { recent: this.deps.registry.list(), found: await scanProjects(this.deps.projectsDir, 2) };
+    return { recent: this.deps.registry.list(), found: await scanProjects(this.deps.projectsDir, 2), projectsDir: this.deps.projectsDir };
   }
 
   /** Copy an uploaded schematic into the library, then open it. */

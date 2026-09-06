@@ -40,6 +40,8 @@ export interface ProjectSummary {
 export interface ProjectLists {
   recent: { id: string; name: string; path: string; lastOpened: string }[];
   found: { path: string; name: string }[];
+  /** Folder the server scans; shown as the example in the "open in place" field. */
+  projectsDir: string;
 }
 
 export interface TunnelStatus {

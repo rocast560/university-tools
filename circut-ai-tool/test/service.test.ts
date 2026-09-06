@@ -30,7 +30,7 @@ export async function makeService(opts: { watch?: boolean; watchPollMs?: number;
 
 describe('Service', () => {
   test('opens a schematic by path, then by id, and lists it', async () => {
-    const { service, sch } = await makeService();
+    const { service, sch, work } = await makeService();
     const p = await service.open(sch);
     expect(p.info.name).toBe('PL1_1');
     expect(p.doc.error).toBeNull();
@@ -41,6 +41,7 @@ describe('Service', () => {
     const list = await service.list();
     expect(list.recent[0].id).toBe(p.info.id);
     expect(list.found.map((f) => f.name)).toEqual(['PL1_1']);
+    expect(list.projectsDir).toBe(work);
   });
 
   test('maps host paths into the projects folder when a path map is set', async () => {
