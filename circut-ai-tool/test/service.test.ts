@@ -8,14 +8,22 @@ import { Events } from '../server/watch.ts';
 import { fakeKicad } from './fake-kicad.ts';
 import { FIXTURES, readFixture } from './smoke.test.ts';
 
-export async function makeService(opts: { watch?: boolean } = {}) {
+export async function makeService(opts: { watch?: boolean; watchPollMs?: number } = {}) {
   const work = mkdtempSync(path.join(tmpdir(), 'svc-'));
   const sch = path.join(work, 'PL1_1.kicad_sch');
   copyFileSync(path.join(FIXTURES, 'PL1_1.kicad_sch'), sch);
   const registry = new ProjectRegistry(path.join(work, 'data'));
   await registry.load();
   const events = new Events<ProjectEvent>();
-  const service = new Service({ kicad: fakeKicad(readFixture('PL1_1.net')), registry, events, watch: opts.watch ?? false, projectsDir: work, libs: { symbolText: async (id) => { throw new Error(`no lib ${id}`); } } });
+  const service = new Service({
+    kicad: fakeKicad(readFixture('PL1_1.net')),
+    registry,
+    events,
+    watch: opts.watch ?? false,
+    watchPollMs: opts.watchPollMs,
+    projectsDir: work,
+    libs: { symbolText: async (id) => { throw new Error(`no lib ${id}`); } },
+  });
   return { service, sch, events, work };
 }
 
@@ -92,6 +100,17 @@ describe('Service', () => {
     expect(r.mtimeMs).toBeGreaterThan(0);
     service.close(p.info.id);
     expect(service.has(p.info.id)).toBe(false);
+  });
+
+  test('reloads through the polling watcher when asked', async () => {
+    const { service, sch, events } = await makeService({ watch: true, watchPollMs: 100 });
+    const p = await service.open(sch);
+    const got = new Promise<ProjectEvent>((resolve) => events.subscribe((e) => e.projectId === p.info.id && resolve(e)));
+    await new Promise((r) => setTimeout(r, 250));
+    writeFileSync(sch, `${readFileSync(sch, 'utf8')}\n`);
+    const ev = await Promise.race([got, new Promise<ProjectEvent>((_, reject) => setTimeout(() => reject(new Error('no event within 3 s')), 3000))]);
+    expect(ev.type).toBe('changed');
+    service.close(p.info.id);
   });
 });
 

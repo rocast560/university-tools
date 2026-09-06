@@ -75,4 +75,20 @@ describe('Events and watchFile', () => {
     ev.emit({ n: 2 });
     expect(got).toEqual([1]);
   });
+
+  test('polling mode notices a change without inotify and stops cleanly', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'poll-'));
+    const file = path.join(dir, 'x.kicad_sch');
+    writeFileSync(file, '(kicad_sch)');
+    let hits = 0;
+    const stop = watchFile(file, () => hits++, { debounceMs: 50, pollMs: 100 });
+    await new Promise((r) => setTimeout(r, 250));
+    writeFileSync(file, '(kicad_sch changed)');
+    await new Promise((r) => setTimeout(r, 600));
+    expect(hits).toBe(1);
+    stop();
+    writeFileSync(file, '(kicad_sch changed again)');
+    await new Promise((r) => setTimeout(r, 400));
+    expect(hits).toBe(1);
+  });
 });

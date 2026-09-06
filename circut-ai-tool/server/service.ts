@@ -50,6 +50,8 @@ export interface ServiceDeps {
   watch: boolean;
   projectsDir: string;
   libs: LibraryLookup;
+  /** Poll interval for the schematic watcher; 0 or undefined uses fs.watch. */
+  watchPollMs?: number;
 }
 
 export interface EditOutcome {
@@ -132,11 +134,15 @@ export class Service {
     this.stops.get(id)?.();
     this.stops.set(
       id,
-      watchFile(file, () => {
-        this.refresh(id)
-          .then(() => this.deps.events.emit({ projectId: id, type: 'changed' }))
-          .catch((e) => this.deps.events.emit({ projectId: id, type: 'error', message: (e as Error).message }));
-      }),
+      watchFile(
+        file,
+        () => {
+          this.refresh(id)
+            .then(() => this.deps.events.emit({ projectId: id, type: 'changed' }))
+            .catch((e) => this.deps.events.emit({ projectId: id, type: 'error', message: (e as Error).message }));
+        },
+        { pollMs: this.deps.watchPollMs ?? 0 },
+      ),
     );
   }
 
