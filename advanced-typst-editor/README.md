@@ -8,7 +8,7 @@ Local Typst editor with a live preview, an assets rail for screenshots and fonts
 
 Open http://localhost:8090. Documents live in `./data` (bind-mounted, so the dev server sees the same workspaces). The container restarts with Docker Desktop. Stop it with `docker compose down`; rebuild after pulling changes with `docker compose up --build -d`.
 
-Before starting the container, stop any dev backend on port 8090.
+Before starting the container, stop any dev backend on port 8090. Both would write `data/settings.json`, and each records workspace paths in its own form (Windows paths or `/data/...`), so running the two against the same folder makes the registry flip on every boot.
 
 ## Run from source
 
