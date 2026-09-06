@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { emptySidecar } from '../src/layout/types.ts';
-import { ProjectRegistry, mapHostPath, parsePathMap, projectId, readSidecar, scanProjects, sidecarPath, writeSidecar } from '../server/projects.ts';
+import { ProjectRegistry, mapHostPath, normalizePath, parsePathMap, projectId, readSidecar, scanProjects, sidecarPath, writeSidecar } from '../server/projects.ts';
 import { Events, watchFile } from '../server/watch.ts';
 
 describe('projectId', () => {
@@ -18,12 +18,13 @@ describe('ProjectRegistry', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'reg-'));
     const reg = new ProjectRegistry(dir);
     await reg.load();
-    const a = await reg.remember('C:/p/a.kicad_sch');
+    const base = path.join(dir, 'p');
+    const a = await reg.remember(path.join(base, 'a.kicad_sch'));
     await new Promise((r) => setTimeout(r, 5));
-    const b = await reg.remember('C:/p/b.kicad_sch');
+    const b = await reg.remember(path.join(base, 'b.kicad_sch'));
     expect(reg.list().map((p) => p.name)).toEqual(['b', 'a']);
-    expect(reg.get(a.id)!.dir).toBe('C:/p');
-    await reg.remember('C:/p/a.kicad_sch');
+    expect(reg.get(a.id)!.dir).toBe(normalizePath(base));
+    await reg.remember(path.join(base, 'a.kicad_sch'));
     expect(reg.list().map((p) => p.name)).toEqual(['a', 'b']);
     await reg.forget(b.id);
     const reg2 = new ProjectRegistry(dir);
