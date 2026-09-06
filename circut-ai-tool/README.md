@@ -29,11 +29,14 @@ the schematic. Saving the schematic in KiCad reloads the board.
     docker compose down               # stop; `docker compose down -v` also drops the cache volume
 
 The image is `kicad/kicad:9.0.9` (kicad-cli plus the stock symbol libraries)
-with bun added. Your KiCad projects folder is mounted at `/projects`; set
+with bun added. Your KiCad projects folder is mounted at `/projects`; it must
+already exist before `docker compose up`, since Docker Desktop otherwise
+creates an empty root-owned folder there instead of refusing to start. Set
 `KICAD_PROJECTS` in a `.env` file (see `.env.example`) to use another folder.
 Windows paths sent by Claude Code or the API are translated into `/projects/...`
-automatically. The recent list, the kicad-cli cache and cloudflared live in the
-`circuit-data` volume. Port 8765 is bound to localhost only; set
+automatically. The recent list and the kicad-cli cache live in the
+`circuit-data` volume; cloudflared is baked into the image at
+`/usr/local/bin/cloudflared`. Port 8765 is bound to localhost only; set
 `CIRCUIT_HOST_PORT=8766` in `.env` to run it beside `bun start`.
 
 The old `circuit-designer` container used the same port and the same Claude

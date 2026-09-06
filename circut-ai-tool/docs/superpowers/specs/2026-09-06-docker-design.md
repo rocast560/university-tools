@@ -83,7 +83,8 @@ platform-neutral.
 
 ### 3.1 Image (`circut-ai-tool/Dockerfile`)
 
-Two stages plus an optional test target.
+Two stages (`client`, `runtime`) plus an optional `test` target and a `final`
+alias stage.
 
 **`client`** (`oven/bun:1.3`): `bun install --frozen-lockfile`, `bun run build`.
 Output: `dist/`.
@@ -114,7 +115,7 @@ Output: `dist/`.
    | `KICAD_CLI` | `/usr/bin/kicad-cli` | absolute, so `available()` is true |
    | `KICAD_SYMBOL_DIR` | `/usr/share/kicad/symbols` | |
    | `KICAD_SYM_LIB_TABLE` | `/home/kicad/.config/kicad/9.0/sym-lib-table` | new, see 3.3 |
-   | `DATA_DIR` | `/data` | registry, kicad-cli cache, cloudflared |
+   | `DATA_DIR` | `/data` | registry, kicad-cli cache |
    | `PROJECTS_DIR` | `/projects` | scanned for `.kicad_sch`; upload target |
    | `STATIC_DIR` | `/app/dist` | |
    | `CIRCUIT_WATCH_POLL_MS` | `1000` | new, see 3.3 |
@@ -129,6 +130,12 @@ Output: `dist/`.
 **`test`** builds on `client`, copies `test/` and runs
 `bun run typecheck && bun test`. It is not part of the default build
 (`docker build --target test .` runs it on demand and in CI later).
+
+**`final`** is a no-op `FROM runtime AS final` stage placed last in the
+Dockerfile so that a bare `docker build .` (no `--target`) resolves to the
+runtime image rather than the multi-gigabyte `test` image, since Docker
+defaults to the last stage in the file. Compose still pins `target: runtime`
+explicitly (Ruling 1).
 
 `.dockerignore`: `node_modules`, `dist`, `src-tauri`, `docs`, `.data`,
 `*.md`, `.git`. `test/` stays in the context for the `test` target.
@@ -157,8 +164,10 @@ volumes:
 
 `KICAD_PROJECTS` can be set in a `.env` file next to the compose file to point
 at another folder; both the mount and the path map follow it. Port 8765 is bound
-to loopback only. While the container runs, a dev server needs
-`CIRCUIT_PORT=8766 bun start`.
+to loopback only; set `CIRCUIT_HOST_PORT` in `.env` to publish it on a
+different host port, which also sets `CIRCUIT_PUBLIC_URL` so the server
+advertises that same port back to the user instead of the baked-in 8765.
+While the container runs, a dev server needs `CIRCUIT_PORT=8766 bun start`.
 
 ### 3.3 Server changes
 
@@ -174,8 +183,9 @@ Each change is small, keeps Windows behaviour identical, and gets a unit test.
    command name with `Bun.which` before falling back to `access`.
 3. **Symbol table location** (`libraries.ts`). New `KICAD_SYM_LIB_TABLE` env;
    default `%APPDATA%\kicad\9.0\sym-lib-table` on Windows,
-   `$XDG_CONFIG_HOME or ~/.config` + `/kicad/9.0/sym-lib-table` elsewhere.
-   `boot.ts` passes it as `tableFile`.
+   `$XDG_CONFIG_HOME or ~/.config` + `/kicad/9.0/sym-lib-table` elsewhere. The
+   default is applied inside `libraries.ts` itself, imported from `config.ts`,
+   not passed in by `boot.ts`.
 4. **Polling watcher** (`watch.ts`). `watchFile(file, onChange, { debounceMs, pollMs })`
    polls with `setInterval` plus `statSync` (mtime, size, or the file going
    missing and coming back) when `pollMs > 0`, otherwise today's `fs.watch`. `Service` receives `pollMs` from `boot.ts` and
@@ -198,7 +208,10 @@ Each change is small, keeps Windows behaviour identical, and gets a unit test.
    commands become `docker exec -i <name> bun server/index.ts --stdio`; the
    ChatGPT snippet says `docker compose up -d` instead of `bun start`; the
    curl example uses `<PROJECTS_DIR>/lab1/lab1.kicad_sch`. `/api/projects` gains
-   `projectsDir`, and the home page builds its placeholder from it.
+   `projectsDir`, and the home page builds its placeholder from it. The curl
+   example's path is derived from `PROJECTS_DIR` in both modes, not just the
+   container one; this is a deliberate small Windows-visible improvement over
+   the old hardcoded `C:/Users/you/...` placeholder.
 
 ### 3.4 Data flow: Claude Code opens a schematic
 
@@ -232,8 +245,9 @@ new container answers on the same URL.
 
 - kicad-cli missing or broken: `/api/health` reports `kicad: false`; every
   open fails with the existing `KicadError` text. The container still starts.
-- Bind-mount source missing: compose refuses to start with Docker's own error.
-  The README says the folder must exist.
+- Bind-mount source missing: Docker Desktop on Windows creates a missing bind
+  source as an empty root-owned folder rather than refusing; the README tells
+  the user the folder must exist.
 - Path not under any mapping: 404 `schematic not found: <path>` plus the list
   of mappings.
 - Polling watcher on a deleted file: `stat` fails, `refresh` throws, the
