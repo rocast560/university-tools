@@ -31,6 +31,21 @@ The old container (inspected with `docker inspect typst-editor`): `oven/bun` bas
 
 `data/settings.json` stores absolute Windows paths for every workspace. Inside a container those paths do not exist, so every workspace would show as "missing" and `scanLibrary` would add a second, ungrouped entry for each folder. That is the same mechanism behind the stale `.worktrees\typst-studio\...` duplicates in the sidebar today.
 
+**Measured after Tasks 2 and 3 (2026-09-06, Chrome, dev server, worker enabled):**
+
+| Operation (through the worker) | Time |
+|---|---|
+| Worker cold start (wasm + 17 default fonts), once per page | 925 ms |
+| Warm compile + SVG render, 23-page cptc-report | 48 to 89 ms |
+| Swap to default fonts + compile 2-page ccdc-inject-template | 47 ms |
+| Swap to Poppins (6 faces, 981 KB) + compile cptc-report | 422 ms first time, 82 ms after |
+| PDF export, cptc-report | 136 ms |
+| Main-thread long tasks during a warm compile | none |
+
+No `/fonts/` request is made after the first page load: the worker keeps the default faces in memory and swaps fonts with `setFonts`. The click-to-preview switch timing in the table above could not be re-measured cleanly because the browser window was in the background, which clamps the preview's 350 ms debounce and any polling to 1 s; the earlier 2.0 to 2.7 s figures were taken under the same throttling and are therefore an upper bound on both sides. The compile path itself, measured without timers, dropped from a full compiler rebuild per switch to under half a second.
+
+Found on the way: `getFontInfo` returns null because typst.ts hands back `{ info: [ { family, … } ] }` and the family is read one level too high; this predates the worker and is fixed in the final review wave.
+
 ## 3. Architecture
 
 ### 3.1 Docker
