@@ -91,7 +91,7 @@ export function Sidebar() {
                     onClick={() => toggle(group)}
                     className="flex w-full items-center gap-1 rounded px-1 py-1 text-left text-[10px] font-semibold uppercase tracking-wider text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--accent))]"
                   >
-                    {isCollapsed ? <ChevronRight size={12} className="shrink-0" /> : <ChevronDown size={12} className="shrink-0" />}
+                    {isCollapsed ? <ChevronRight size={12} className="shrink-0" aria-hidden="true" /> : <ChevronDown size={12} className="shrink-0" aria-hidden="true" />}
                     <span className="flex-1 truncate">{group}</span>
                     {isCollapsed && <span className="text-[9px] font-normal normal-case tracking-normal">{items.length}</span>}
                   </button>
