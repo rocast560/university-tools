@@ -1,0 +1,15 @@
+services:
+  typst-studio:
+    build: .
+    image: typst-studio:latest
+    container_name: typst-studio
+    ports:
+      - "127.0.0.1:8090:8080"
+    volumes:
+      # Same documents as the dev server: the registry self-heals paths on both sides.
+      - ./data:/data
+      # Backup destination reachable from inside the container as /host.
+      - C:/Users/rober/Desktop/typst-editor/backups:/host
+    environment:
+      - APP_TOKEN=${APP_TOKEN:-}
+    restart: unless-stopped
