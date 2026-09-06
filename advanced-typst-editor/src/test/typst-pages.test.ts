@@ -1,74 +1,100 @@
 import { describe, it, expect } from 'vitest';
-import { separateTypstPages, DEFAULT_PAGE_GAP } from '@/lib/typst-pages';
+import { splitTypstPages, extractTextRuns } from '@/lib/typst-pages';
 
-// Minimal stand-in for typst.ts SVG output: two 200×120 pages stacked with no
-// gap inside a 200×240 document (matches the real format probed from typst.ts).
-const TWO_PAGE_SVG =
-  '<svg style="overflow: visible;" class="typst-doc" viewBox="0 0 200.000 240.000" ' +
-  'width="200.000" height="240.000" data-width="200.000" data-height="240.000" ' +
-  'xmlns="http://www.w3.org/2000/svg">' +
-  '<defs id="defs"></defs>' +
-  '<g class="typst-page" transform="translate(0, 0)" data-tid="p1" data-page-width="200" data-page-height="120"><text>A</text></g>' +
-  '<g class="typst-page" transform="translate(0, 120)" data-tid="p2" data-page-width="200" data-page-height="120"><text>B</text></g>' +
+// ── splitTypstPages ──────────────────────────────────────────────────────
+
+
+// Shape of a real typst.ts 0.7 document: style + glyph/clip defs before the
+// pages, nested groups inside each page, and a trailing <script>.
+const PRELUDE =
+  '<style type="text/css">.tsel{position:fixed}</style>' +
+  '<defs class="glyph"><path id="gA" d="M0 0"/></defs>' +
+  '<defs class="clip-path"><clipPath id="cA"><rect/></clipPath></defs>';
+const PAGE_1 =
+  '<g class="typst-page" transform="translate(0, 0)" data-tid="p1" data-page-width="200" data-page-height="120">' +
+  '<g class="typst-group"><g><use href="#gA"/></g></g>' +
+  '<foreignObject x="1" y="2" width="10" height="5"><div class="tsel">Alpha</div></foreignObject>' +
+  '</g>';
+const PAGE_2 =
+  '<g class="typst-page" transform="translate(0, 120)" data-tid="p2" data-page-width="200" data-page-height="80">' +
+  '<g class="typst-group"><g><use href="#gA"/></g></g>' +
+  '<foreignObject x="1" y="2" width="10" height="5"><div class="tsel">Alpha</div></foreignObject>' +
+  '<foreignObject x="1" y="9" width="10" height="5"><div class="tsel">Beta &amp; <span>Gamma</span></div></foreignObject>' +
+  '</g>';
+const REAL_SHAPE_SVG =
+  '<svg style="overflow: visible;" class="typst-doc" viewBox="0 0 200.000 200.000" width="200.000" height="200.000" ' +
+  'xmlns="http://www.w3.org/2000/svg" xmlns:h5="http://www.w3.org/1999/xhtml">' +
+  PRELUDE + PAGE_1 + PAGE_2 +
+  '<script>console.log("</g>")</script>' +
   '</svg>';
 
-describe('separateTypstPages', () => {
-  it('counts the pages it recognizes', () => {
-    expect(separateTypstPages(TWO_PAGE_SVG).pages).toBe(2);
+describe('splitTypstPages', () => {
+  it('returns one fragment per page with its size and content id', () => {
+    const split = splitTypstPages(REAL_SHAPE_SVG)!;
+    expect(split).not.toBeNull();
+    expect(split.pages).toHaveLength(2);
+    expect(split.pages[0]).toMatchObject({ tid: 'p1', width: 200, height: 120 });
+    expect(split.pages[1]).toMatchObject({ tid: 'p2', width: 200, height: 80 });
   });
 
-  it('shifts each page down by a cumulative gap', () => {
-    const { svg } = separateTypstPages(TWO_PAGE_SVG, 24);
-    // First page stays put; second moves down by exactly one gap (120 + 24).
-    expect(svg).toContain('class="typst-page" transform="translate(0, 0)"');
-    expect(svg).toContain('class="typst-page" transform="translate(0, 144)"');
-    expect(svg).not.toContain('transform="translate(0, 120)"');
+  it('keeps the prelude (style + defs) once, outside every page', () => {
+    const split = splitTypstPages(REAL_SHAPE_SVG)!;
+    expect(split.shared).toBe(PRELUDE);
+    for (const p of split.pages) {
+      expect(p.body).not.toContain('<defs');
+      expect(p.body).not.toContain('<style');
+    }
   });
 
-  it('adds one white backing rect per page at the shifted position', () => {
-    const { svg } = separateTypstPages(TWO_PAGE_SVG, 24);
-    const rects = svg.match(/<rect class="typst-page-bg"/g) ?? [];
-    expect(rects).toHaveLength(2);
-    expect(svg).toContain('<rect class="typst-page-bg" x="0" y="0" width="200" height="120"');
-    expect(svg).toContain('<rect class="typst-page-bg" x="0" y="144" width="200" height="120"');
-    // Backing cards must paint before (behind) the page content.
-    expect(svg.indexOf('typst-pages-bg')).toBeLessThan(svg.indexOf('typst-page" transform'));
+  it('resets each page to the origin and keeps its nested groups intact', () => {
+    const split = splitTypstPages(REAL_SHAPE_SVG)!;
+    expect(split.pages[1]!.body.startsWith(
+      '<g class="typst-page" transform="translate(0, 0)" data-tid="p2" data-page-width="200" data-page-height="80">',
+    )).toBe(true);
+    expect(split.pages[1]!.body.endsWith('</g>')).toBe(true);
+    expect(split.pages[1]!.body).toContain('<g class="typst-group"><g><use href="#gA"/></g></g>');
+    expect(split.pages[1]!.body).toContain('Gamma');
+    // Page 1 stops where page 2 begins: nothing from the second page leaks in.
+    expect(split.pages[0]!.body).not.toContain('data-tid="p2"');
+    expect(split.pages[0]!.body).not.toContain('Beta');
   });
 
-  it('grows the root height/viewBox to fit the inserted gaps', () => {
-    const { svg } = separateTypstPages(TWO_PAGE_SVG, 24);
-    // 240 + (2 - 1) * 24 = 264
-    expect(svg).toContain('viewBox="0 0 200.000 264.000"');
-    expect(svg).toContain(' height="264.000"');
-    expect(svg).toContain('data-height="264.000"');
-    // Width is untouched.
-    expect(svg).toContain('width="200.000"');
+  it('drops the trailing script (it is never executed by innerHTML anyway)', () => {
+    const split = splitTypstPages(REAL_SHAPE_SVG)!;
+    expect(split.shared).not.toContain('<script');
+    for (const p of split.pages) expect(p.body).not.toContain('<script');
   });
 
-  it('uses a sensible default gap', () => {
-    const { svg } = separateTypstPages(TWO_PAGE_SVG);
-    expect(svg).toContain(`transform="translate(0, ${120 + DEFAULT_PAGE_GAP})"`);
+  it('is stable: identical page markup yields identical fragment strings', () => {
+    // The preview reuses a page's DOM when its fragment string is unchanged,
+    // so two compiles of the same page must split to the same string.
+    const a = splitTypstPages(REAL_SHAPE_SVG)!;
+    const b = splitTypstPages(REAL_SHAPE_SVG)!;
+    expect(a.pages[0]!.body).toBe(b.pages[0]!.body);
+    expect(a.shared).toBe(b.shared);
   });
 
-  it('leaves a single-page document unshifted but still backed', () => {
-    const onePage =
-      '<svg class="typst-doc" viewBox="0 0 200.000 120.000" width="200.000" height="120.000" data-height="120.000">' +
-      '<g class="typst-page" transform="translate(0, 0)" data-tid="p1" data-page-width="200" data-page-height="120"></g>' +
-      '</svg>';
-    const { svg, pages } = separateTypstPages(onePage);
-    expect(pages).toBe(1);
-    expect(svg).toContain('<rect class="typst-page-bg"');
-    expect(svg).toContain('viewBox="0 0 200.000 120.000"'); // no growth for one page
+  it('returns null for SVG that is not a typst.ts document', () => {
+    expect(splitTypstPages('<svg viewBox="0 0 10 10"><g class="other"></g></svg>')).toBeNull();
+    expect(splitTypstPages('')).toBeNull();
   });
 
-  it('passes through unrecognized SVG unchanged (graceful fallback)', () => {
-    const other = '<svg viewBox="0 0 10 10"><g class="something-else"></g></svg>';
-    const { svg, pages } = separateTypstPages(other);
-    expect(pages).toBe(0);
-    expect(svg).toBe(other);
+  it('returns null when a page group never closes (malformed input)', () => {
+    const broken = '<svg><g class="typst-page" transform="translate(0, 0)" data-tid="p1" data-page-width="1" data-page-height="1"><g></svg>';
+    expect(splitTypstPages(broken)).toBeNull();
+  });
+});
+
+describe('extractTextRuns', () => {
+  it('lists the text of every selection run in a page fragment, in document order', () => {
+    const split = splitTypstPages(REAL_SHAPE_SVG)!;
+    expect(extractTextRuns(split.pages[0]!.body)).toEqual(['Alpha']);
+    // Entities are decoded and nested spans are flattened, exactly as the
+    // live DOM's textContent would report them.
+    expect(extractTextRuns(split.pages[1]!.body)).toEqual(['Alpha', 'Beta & Gamma']);
   });
 
-  it('handles empty input', () => {
-    expect(separateTypstPages('')).toEqual({ svg: '', pages: 0 });
+  it('returns an empty list for a page with no text', () => {
+    expect(extractTextRuns('<g class="typst-page"><path d="M0 0"/></g>')).toEqual([]);
   });
 });
