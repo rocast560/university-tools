@@ -137,6 +137,7 @@ describe('typst compiler client', () => {
     // directly on the main thread.
     vi.stubGlobal('Worker', undefined);
     let attempt = 0;
+    const opsSeen: string[] = [];
     // Scoped to this test only: unmocked in `finally` so the other tests keep
     // using the real driver module untouched.
     vi.doMock('@/lib/typst-compiler.driver', () => ({
@@ -148,13 +149,19 @@ describe('typst compiler client', () => {
         if (attempt === 1) throw new Error('wasm unreachable');
         return { svg: async () => ({ svg: '<svg/>', diagnostics: [] }) };
       },
-      dispatch: (driver: { svg: () => unknown }, cmd: DriverCommand) =>
-        (cmd.op === 'svg' ? driver.svg() : undefined),
+      dispatch: (driver: { svg: () => unknown }, cmd: DriverCommand) => {
+        opsSeen.push(cmd.op);
+        return cmd.op === 'svg' ? driver.svg() : undefined;
+      },
     }));
     try {
       const c = await loadClient();
+      c.setTypstFonts([bytes(1)]);
       await expect(c.compileTypstSvg('a')).rejects.toThrow('wasm unreachable');
       await expect(c.compileTypstSvg('b')).resolves.toEqual({ svg: '<svg/>', diagnostics: [] });
+      // The replacement driver started empty: fonts and shadow files are
+      // re-sent to it before the retried compile runs.
+      expect(opsSeen).toEqual(['setFonts', 'setShadow', 'svg']);
     } finally {
       vi.doUnmock('@/lib/typst-compiler.driver');
     }

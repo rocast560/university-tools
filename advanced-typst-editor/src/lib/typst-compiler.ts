@@ -85,21 +85,28 @@ function createWorkerTransport(): Transport {
 
 function createInlineTransport(): Transport {
   let driver: Promise<TypstDriver> | null = null;
-  const getDriver = (): Promise<TypstDriver> => {
-    if (!driver) {
-      driver = import('./typst-compiler.driver').then((m) => m.createTypstDriver());
-      // A failed load (wasm unreachable) must not poison the session: let the next call retry.
-      driver.catch(() => { driver = null; });
-    }
-    return driver;
-  };
-  return {
+
+  const transport: Transport = {
     generation: 0,
     async call<T>(cmd: DriverCommand): Promise<T> {
       const { dispatch } = await import('./typst-compiler.driver');
       return dispatch(await getDriver(), cmd) as Promise<T>;
     },
   };
+
+  const getDriver = (): Promise<TypstDriver> => {
+    if (!driver) {
+      driver = import('./typst-compiler.driver').then((m) => m.createTypstDriver());
+      driver.catch(() => {
+        driver = null;
+        // A replacement driver starts empty, so the next syncState re-sends fonts and shadow files.
+        transport.generation++;
+      });
+    }
+    return driver;
+  };
+
+  return transport;
 }
 
 let transport: Transport | null = null;
