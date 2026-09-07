@@ -41,7 +41,10 @@ function floating(devices: Device[], nodes: string[], ground: string): Set<strin
   };
   for (const d of devices) {
     if (d.kind === 'resistor' || d.kind === 'switch' || d.kind === 'conductance') link(d.a, d.b);
-    else if (d.kind === 'diode') link(d.anode, d.cathode);
+    // A raw diode is deliberately NOT a link: this kernel stamps nothing for
+    // one, so a node held up only by a diode really is floating here and needs
+    // its GMIN leak. Once operatingPoint() swaps in the companion model, the
+    // conductance it adds is a link and the leak stops being applied.
     else if (d.kind === 'vsource') link(d.pos, d.neg);
     // A current source is an open circuit at DC and links nothing.
   }
