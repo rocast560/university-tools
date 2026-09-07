@@ -97,12 +97,30 @@ export const analog = {
   isRunning: () => running,
   latest: () => latest,
 
-  /** Throw away the solver, so the next call rebuilds it. */
+  /** Throw away the solver and everything it knew: a different project. */
   invalidate() {
     analog.stop();
     sim = null;
     builtFrom = null;
     latest = null;
+  },
+
+  /**
+   * Rebuild the solver for a changed board - a new part value, a new LED
+   * colour - without interrupting a run. Dropping the loop here would freeze
+   * the board on the numbers it had before the change, which reads as the
+   * change having had no effect.
+   */
+  rebuild(p: ProjectState) {
+    const wasRunning = running;
+    sim = null;
+    builtFrom = null;
+    const s = sync(p);
+    publish(s);
+    if (wasRunning) {
+      lastFrame = 0;
+      if (!raf) raf = requestAnimationFrame(frame);
+    }
   },
 
   subscribe(fn: Listener) {

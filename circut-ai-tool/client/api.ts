@@ -84,6 +84,7 @@ export const api = {
   move: (id: string, ref: string, holes: Record<string, Hole>) => post<LayoutDoc>(`/api/projects/${id}/layout/move`, { ref, holes }),
   options: (id: string, patch: Partial<Options>) => post<LayoutDoc>(`/api/projects/${id}/layout/options`, patch),
   color: (id: string, net: string, color: string | null) => post<LayoutDoc>(`/api/projects/${id}/layout/colors`, { net, color }),
+  ledColor: (id: string, ref: string, color: string | null) => post<LayoutDoc>(`/api/projects/${id}/layout/ledcolor`, { ref, color }),
   reset: (id: string) => post<LayoutDoc>(`/api/projects/${id}/layout/reset`, {}),
   connect: () => call<ConnectInfo>('/api/connect'),
   tunnel: (action: 'start' | 'stop') => post<TunnelStatus>('/api/tunnel', { action }),
