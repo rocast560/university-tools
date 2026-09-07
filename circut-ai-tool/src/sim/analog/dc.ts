@@ -8,9 +8,14 @@ import { solve, zeros } from './matrix.ts';
 
 export type Device =
   | { kind: 'resistor'; ref: string; a: string; b: string; ohms: number }
+  | { kind: 'conductance'; ref: string; a: string; b: string; siemens: number }
   | { kind: 'vsource'; ref: string; pos: string; neg: string; volts: number }
   | { kind: 'isource'; ref: string; from: string; to: string; amps: number }
-  | { kind: 'switch'; ref: string; a: string; b: string; closed: boolean };
+  | { kind: 'switch'; ref: string; a: string; b: string; closed: boolean }
+  // Nonlinear. The linear kernel registers its nodes but stamps nothing;
+  // operatingPoint() in nonlinear.ts replaces each one with a companion model
+  // before it ever reaches solveDC.
+  | { kind: 'diode'; ref: string; anode: string; cathode: string; is: number; n: number; rs: number; led?: unknown };
 
 export interface DcResult {
   /** node id -> volts, including the ground node at 0. */
@@ -35,7 +40,8 @@ function floating(devices: Device[], nodes: string[], ground: string): Set<strin
     adj.get(b)!.push(a);
   };
   for (const d of devices) {
-    if (d.kind === 'resistor' || d.kind === 'switch') link(d.a, d.b);
+    if (d.kind === 'resistor' || d.kind === 'switch' || d.kind === 'conductance') link(d.a, d.b);
+    else if (d.kind === 'diode') link(d.anode, d.cathode);
     else if (d.kind === 'vsource') link(d.pos, d.neg);
     // A current source is an open circuit at DC and links nothing.
   }
@@ -63,6 +69,7 @@ export function solveDC(devices: Device[], ground: string): DcResult | null {
   for (const d of devices) {
     if (d.kind === 'vsource') { note(d.pos); note(d.neg); }
     else if (d.kind === 'isource') { note(d.from); note(d.to); }
+    else if (d.kind === 'diode') { note(d.anode); note(d.cathode); }
     else { note(d.a); note(d.b); }
   }
   const sources = devices.filter((d): d is Extract<Device, { kind: 'vsource' }> => d.kind === 'vsource');
@@ -88,6 +95,7 @@ export function solveDC(devices: Device[], ground: string): DcResult | null {
 
   for (const d of devices) {
     if (d.kind === 'resistor') conductance(d.a, d.b, 1 / d.ohms);
+    else if (d.kind === 'conductance') conductance(d.a, d.b, d.siemens);
     else if (d.kind === 'switch') conductance(d.a, d.b, d.closed ? 1 / SWITCH_ON_OHMS : 1 / SWITCH_OFF_OHMS);
     else if (d.kind === 'isource') {
       const i = at(d.from);
