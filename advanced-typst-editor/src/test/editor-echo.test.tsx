@@ -2,7 +2,8 @@ import { describe, it, expect, vi } from 'vitest';
 import { render } from '@testing-library/react';
 import { EditorView } from '@codemirror/view';
 import { undo, undoDepth } from '@codemirror/commands';
-import { TypstEditor, setTypstEditorContent } from '@/components/typst/TypstEditor';
+import { TypstEditor } from '@/components/typst/TypstEditor';
+import { setTypstEditorContent } from '@/components/typst/typst-editor-bridge';
 
 const viewIn = (container: HTMLElement): EditorView => {
   const view = EditorView.findFromDOM(container.querySelector('.cm-editor') as HTMLElement);

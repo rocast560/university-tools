@@ -1,14 +1,32 @@
-import { useState } from 'react';
-import { AlertTriangle, ChevronDown, ChevronRight, FolderPlus, Plus, Settings, Circle } from 'lucide-react';
+import { useState, useCallback, useEffect, lazy, Suspense } from 'react';
+import {
+  AlertTriangle, ChevronDown, ChevronRight, FolderPlus, Plus, Settings, Circle,
+  PanelLeftClose, PanelLeftOpen,
+} from 'lucide-react';
 import { useAppStore } from '@/stores';
 import { groupWorkspaces } from '@/lib/workspace-groups';
 import { loadCollapsedGroups, saveCollapsedGroups, toggleGroup } from '@/lib/collapsed-groups';
-import { FolderBrowserDialog } from '@/components/ui/FolderBrowserDialog';
-import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { loadSidebarCollapsed, saveSidebarCollapsed } from '@/lib/sidebar-collapse';
 import type { BackupState, WorkspaceStatus } from '@/types';
+
+// Both only appear on a deliberate action (locating a moved workspace,
+// confirming a destructive one), so they stay off the app's first-paint chunk.
+const FolderBrowserDialog = lazy(() => import('@/components/ui/FolderBrowserDialog').then((m) => ({ default: m.FolderBrowserDialog })));
+const ConfirmDialog = lazy(() => import('@/components/ui/ConfirmDialog').then((m) => ({ default: m.ConfirmDialog })));
 
 /** The dragged workspace's id, as a browser drag-and-drop payload. */
 const DRAG_MIME = 'text/plain';
+
+/**
+ * Whether a keystroke belongs to something the user is typing into, so the
+ * collapse shortcut doesn't fire while they are naming a workspace (or, in a
+ * browser that doesn't claim Ctrl+B for bold, editing text anywhere).
+ */
+function isTypingTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el?.tagName) return false;
+  return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable;
+}
 
 function backupLabel(b: BackupState | null): string {
   if (!b?.destinations.length) return 'Backup: not set up';
@@ -45,6 +63,25 @@ export function Sidebar() {
   const [collapsed, setCollapsed] = useState<Set<string>>(() => loadCollapsedGroups());
   const toggle = (group: string) => setCollapsed((prev) => { const next = toggleGroup(prev, group); saveCollapsedGroups(next); return next; });
 
+  // Whole-sidebar collapse: the workspace list folds down to an icon rail so a
+  // long document gets the width back. The rail keeps the expand chevron, the
+  // settings gear and the two status dots, so nothing here becomes unreachable
+  // while it is shut.
+  const [railed, setRailed] = useState(loadSidebarCollapsed);
+  const toggleRail = useCallback(() => setRailed((prev) => { saveSidebarCollapsed(!prev); return !prev; }), []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'b' && e.key !== 'B') return;
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      if (isTypingTarget(e.target)) return;
+      e.preventDefault();
+      toggleRail();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [toggleRail]);
+
   const mcpConnected = !!mcp?.clients.some((c) => c.connected);
   const grouped = groupWorkspaces(workspaces, knownGroups);
   const dropOnGroup = (e: React.DragEvent, group: string | null) => {
@@ -54,14 +91,37 @@ export function Sidebar() {
     if (id) void setGroup(id, group);
   };
 
+  if (railed) {
+    return (
+      <aside data-ui="sidebar" data-collapsed="true" className="flex h-full w-11 shrink-0 flex-col items-center border-r border-[hsl(var(--border))] bg-[hsl(var(--card))] py-2">
+        <button type="button" title="Expand sidebar (Ctrl/⌘+B)" aria-label="Expand sidebar" aria-expanded={false} onClick={toggleRail} className="rounded p-1.5 hover:bg-[hsl(var(--accent))]">
+          <PanelLeftOpen size={15} />
+        </button>
+        <button type="button" title="Settings" onClick={() => setSettingsOpen(true)} className="mt-1 rounded p-1.5 hover:bg-[hsl(var(--accent))]">
+          <Settings size={15} />
+        </button>
+        <div className="flex-1" />
+        {/* The footer's two status readouts, reduced to their dots: the label
+            moves into the tooltip, and both still open Settings. */}
+        <button type="button" onClick={() => setSettingsOpen(true)} title={`MCP: ${mcpConnected ? `connected (${mcp!.clients.filter((c) => c.connected).map((c) => c.name).join(', ')})` : 'no client'}`} className="rounded p-1.5 hover:bg-[hsl(var(--accent))]">
+          <span className={`block h-2 w-2 rounded-full ${mcpConnected ? 'bg-[hsl(var(--status-green))]' : 'bg-[hsl(var(--muted-foreground))]/40'}`} />
+        </button>
+        <button type="button" onClick={() => setSettingsOpen(true)} title={backupLabel(backup)} className="rounded p-1.5 hover:bg-[hsl(var(--accent))]">
+          <span className={`block h-2 w-2 rounded-full ${online ? 'bg-[hsl(var(--status-green))]' : 'bg-[hsl(var(--status-red))]'}`} />
+        </button>
+      </aside>
+    );
+  }
+
   return (
-    <aside data-ui="sidebar" className="flex h-full w-[280px] shrink-0 flex-col border-r border-[hsl(var(--border))] bg-[hsl(var(--card))]">
+    <aside data-ui="sidebar" data-collapsed="false" className="flex h-full w-[280px] shrink-0 flex-col border-r border-[hsl(var(--border))] bg-[hsl(var(--card))]">
       <div className="flex items-center justify-between px-3 py-2">
         <span className="text-[11px] font-bold uppercase tracking-widest">Typst Studio</span>
         <div className="flex gap-1">
           <button type="button" title="New workspace" onClick={() => { setCreating(true); setDraft(''); }} className="rounded p-1 hover:bg-[hsl(var(--accent))]"><Plus size={14} /></button>
           <button type="button" title="New folder" onClick={() => { setCreatingFolder(true); setFolderDraft(''); }} className="rounded p-1 hover:bg-[hsl(var(--accent))]"><FolderPlus size={14} /></button>
           <button type="button" title="Settings" onClick={() => setSettingsOpen(true)} className="rounded p-1 hover:bg-[hsl(var(--accent))]"><Settings size={14} /></button>
+          <button type="button" title="Collapse sidebar (Ctrl/⌘+B)" aria-label="Collapse sidebar" aria-expanded onClick={toggleRail} className="rounded p-1 hover:bg-[hsl(var(--accent))]"><PanelLeftClose size={14} /></button>
         </div>
       </div>
       {creating && (
@@ -138,16 +198,22 @@ export function Sidebar() {
           </div>
         </div>
       )}
-      {browsing && <FolderBrowserDialog title={`Locate ${browsing.locate.name}`} onClose={() => setBrowsing(null)} onPick={(p) => { const ws = browsing.locate; setBrowsing(null); void remove(ws.id).then(() => openFolder(p)); }} />}
+      {browsing && (
+        <Suspense fallback={null}>
+          <FolderBrowserDialog title={`Locate ${browsing.locate.name}`} onClose={() => setBrowsing(null)} onPick={(p) => { const ws = browsing.locate; setBrowsing(null); void remove(ws.id).then(() => openFolder(p)); }} />
+        </Suspense>
+      )}
       {removing && (
-        <ConfirmDialog
-          title={removing.library ? 'Move workspace to trash?' : 'Forget this workspace?'}
-          message={removing.library ? `${removing.name} moves to the app trash folder; nothing is deleted.` : `${removing.name} stays on disk at ${removing.path}; it is only removed from the list.`}
-          confirmLabel={removing.library ? 'Move to trash' : 'Forget'}
-          destructive
-          onConfirm={() => { void remove(removing.id); setRemoving(null); }}
-          onCancel={() => setRemoving(null)}
-        />
+        <Suspense fallback={null}>
+          <ConfirmDialog
+            title={removing.library ? 'Move workspace to trash?' : 'Forget this workspace?'}
+            message={removing.library ? `${removing.name} moves to the app trash folder; nothing is deleted.` : `${removing.name} stays on disk at ${removing.path}; it is only removed from the list.`}
+            confirmLabel={removing.library ? 'Move to trash' : 'Forget'}
+            destructive
+            onConfirm={() => { void remove(removing.id); setRemoving(null); }}
+            onCancel={() => setRemoving(null)}
+          />
+        </Suspense>
       )}
     </aside>
   );

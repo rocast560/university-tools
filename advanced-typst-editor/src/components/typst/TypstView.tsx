@@ -9,18 +9,26 @@
 // folder is mounted into the compiler so #include and data files work.
 // ─────────────────────────────────────────────────────────────────────────
 
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback, lazy, Suspense } from 'react';
 import { PanelLeftClose, PanelLeftOpen, FileDown, Image, FileText, Images, Search } from 'lucide-react';
 import { useAppStore } from '@/stores';
 import { api } from '@/api/client';
 import { useWorkspaceFile } from '@/hooks/use-workspace-file';
 import {
-  TypstEditor, revealTypstRange, getTypstCaret, setTypstSearchRequest, setTypstEditorContent,
-} from './TypstEditor';
+  revealTypstRange, getTypstCaret, setTypstSearchRequest, setTypstEditorContent, setTypstDocKey,
+} from './typst-editor-bridge';
 import { DiskChangeBar } from './DiskChangeBar';
 import { TypstPreview, type SourceCandidate } from './TypstPreview';
-import { TypstSearchPanel } from './TypstSearchPanel';
 import { TypstAssetsPanel } from './TypstAssetsPanel';
+
+// CodeMirror and its Typst grammar are ~500 KB -- most of this tab's
+// JavaScript -- and the preview is what the operator looks at first. Loading
+// the editor as its own chunk lets the toolbar, preview and assets rail paint
+// while it arrives, and skips it entirely while the code pane is hidden. The
+// tab drives it through typst-editor-bridge, never by importing it.
+const TypstEditor = lazy(() => import('./TypstEditor').then((m) => ({ default: m.TypstEditor })));
+// Only ever mounted behind Ctrl/Cmd+F.
+const TypstSearchPanel = lazy(() => import('./TypstSearchPanel').then((m) => ({ default: m.TypstSearchPanel })));
 import {
   compileTypstPdf,
   compileTypstSvg,
@@ -240,6 +248,12 @@ function TypstWorkspaceView({ workspaceId }: { workspaceId: string }) {
   // editor when it is mounted so undo works; otherwise straight to the file.
   // setTypstEditorContent dispatches into CodeMirror, whose update listener
   // calls setText, so both paths end in the same autosave.
+  // The document the code pane is showing. The bridge scopes a reveal that is
+  // waiting for the (lazily loaded) editor to this key, so switching files
+  // cannot land a stale offset in the wrong text.
+  const docKey = `${workspaceId}:${file}`;
+  useEffect(() => { setTypstDocKey(docKey); }, [docKey]);
+
   const applySource = useCallback((next: string) => {
     if (!setTypstEditorContent(next)) setText(next);
   }, [setText]);
@@ -265,9 +279,10 @@ function TypstWorkspaceView({ workspaceId }: { workspaceId: string }) {
         saveTypstLayout(merged);
         return merged;
       });
-      requestAnimationFrame(() => revealTypstRange(from, to, focus));
-      return;
     }
+    // No waiting on a frame: the bridge queues the reveal until the editor
+    // registers, so this lands whether the pane was already open, mounts on
+    // the next frame, or (the first time it is opened) is still downloading.
     revealTypstRange(from, to, focus);
   }, []);
 
@@ -565,18 +580,22 @@ function TypstWorkspaceView({ workspaceId }: { workspaceId: string }) {
               style={{ width: `${layout.editor}px`, contain: 'layout paint' }}
             >
               {searchOpen && !loading && (
-                <TypstSearchPanel
-                  source={source}
-                  caret={getTypstCaret()}
-                  onReveal={revealForSearch}
-                  onReplaceSource={applySource}
-                  onClose={closeSearch}
-                />
+                <Suspense fallback={null}>
+                  <TypstSearchPanel
+                    source={source}
+                    caret={getTypstCaret()}
+                    onReveal={revealForSearch}
+                    onReplaceSource={applySource}
+                    onClose={closeSearch}
+                  />
+                </Suspense>
               )}
               {loading ? (
                 <div className="flex h-full items-center justify-center text-xs text-[hsl(var(--muted-foreground))]">Loading…</div>
               ) : (
-                <TypstEditor value={source} onChange={setText} docKey={`${workspaceId}:${file}`} />
+                <Suspense fallback={<div className="flex h-full items-center justify-center text-xs text-[hsl(var(--muted-foreground))]">Loading…</div>}>
+                  <TypstEditor value={source} onChange={setText} docKey={docKey} />
+                </Suspense>
               )}
             </div>
             <PaneDivider onPointerDown={startResize('editor')} onDoubleClick={resetPane('editor')} />
