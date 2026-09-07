@@ -6,6 +6,7 @@ import { displayName } from '../src/netlist.ts';
 import { ledSpec, type LedColour } from '../src/parts/led.ts';
 import type { AnalogState } from '../src/sim/analog/simulator.ts';
 import { analog } from './analog.ts';
+import { close3d, is3dOpen, open3d } from './view3d.ts';
 import { api } from './api.ts';
 import { fitView } from './board.ts';
 import { esc, toast } from './main.ts';
@@ -203,6 +204,7 @@ export function renderPanels(panels: HTMLElement, toolbar: HTMLElement, legend: 
   toolbar.innerHTML =
     `<div class="tgroup run"><button type="button" class="btn ${p.running ? 'is-on' : ''}" data-action="${p.running ? 'stop' : 'run'}">${p.running ? '■ Stop' : '▶ Run'}</button><button type="button" class="btn" data-action="step" ${p.running ? 'disabled' : ''}>Step</button><button type="button" class="btn ghost" data-action="reset-sim">Reset</button><span class="simclock mono" data-live-clock>0.000 s</span></div>` +
     `<div class="tgroup"><button type="button" class="btn" data-action="fit">Fit</button><button type="button" class="btn" data-action="print">Print</button></div>` +
+    `<div class="tgroup"><button type="button" class="btn ${is3dOpen() ? 'is-on' : ''}" data-action="view3d">${is3dOpen() ? 'Exit 3D' : '3D'}</button></div>` +
     `<div class="tgroup"><a class="btn" href="/api/projects/${p.id}/board.svg" download="${esc(p.name)}-breadboard.svg">SVG</a><a class="btn" href="/api/projects/${p.id}/board.png" download="${esc(p.name)}-breadboard.png">PNG</a><a class="btn" href="/api/projects/${p.id}/schematic.svg" target="_blank" rel="noopener">Schematic</a></div>` +
     (p.activeStep !== null ? '<button type="button" class="btn ghost" data-action="clear-step">Clear highlight</button>' : '') +
     `<span class="statuschip"><b>${esc(p.doc.board.kind)} board</b><i class="dot"></i>${p.doc.wires.length} wires<i class="dot"></i><em class="errs ${errs ? 'is-bad' : 'is-ok'}">${errs} ${errs === 1 ? 'error' : 'errors'}</em></span>`;
@@ -290,6 +292,13 @@ export function renderPanels(panels: HTMLElement, toolbar: HTMLElement, legend: 
     }
     if (action === 'step') analog.stepOnce(p);
     if (action === 'reset-sim') analog.reset(p);
+    if (action === 'view3d') {
+      const card = document.querySelector<HTMLElement>('.board-card')!;
+      if (is3dOpen()) close3d();
+      else void open3d(card, p.doc);
+      // Repaint the toolbar so the button flips to Exit.
+      setTimeout(() => renderPanels(panels, toolbar, legend, store.get()), 0);
+    }
   };
   legend.onclick = async (e) => {
     const net = (e.target as HTMLElement).closest<HTMLElement>('[data-legend]')?.dataset.legend;
