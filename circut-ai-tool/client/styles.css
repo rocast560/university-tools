@@ -1248,3 +1248,29 @@ th.mono {
 @media print {
   .tgroup.run, .simclock, .panel.sim table.live { display: none !important; }
 }
+
+/* ---------- 3D board ---------- */
+
+.board-card { position: relative; }
+.view3d {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  overflow: hidden;
+  background: #e9e5dc;
+  z-index: 3;
+}
+.view3d-canvas { position: absolute; inset: 0; }
+.view3d-hint {
+  position: absolute;
+  left: 10px;
+  top: 8px;
+  z-index: 1;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: rgba(20, 22, 26, .58);
+  color: #fff;
+  font-size: 11px;
+  pointer-events: none;
+}
+@media print { .view3d { display: none !important; } }
