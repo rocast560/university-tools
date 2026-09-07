@@ -1212,3 +1212,39 @@ th.mono {
     break-inside: avoid;
   }
 }
+
+/* ---------- simulation ---------- */
+
+.tgroup.run .btn.is-on { background: var(--accent, #d7263d); color: #fff; }
+.simclock {
+  align-self: center;
+  padding: 0 8px;
+  font-size: 11px;
+  color: var(--ink-muted, #5b6270);
+  min-width: 62px;
+}
+.panel.sim h3 { margin: 14px 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-muted, #5b6270); }
+.panel.sim .simstat { display: flex; gap: 10px; align-items: center; font-size: 12px; color: var(--ink-muted, #5b6270); }
+.panel.sim ul.sources, .panel.sim ul.ledcolours { list-style: none; margin: 0; padding: 0; }
+.panel.sim ul.sources li, .panel.sim ul.ledcolours li {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--hairline, #eee7d8);
+}
+.panel.sim ul.sources label { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+.panel.sim ul.ledcolours select { font: inherit; padding: 2px 4px; }
+.panel.sim table.live { width: 100%; border-collapse: collapse; font-size: 12px; }
+.panel.sim table.live th { text-align: left; font-weight: 600; color: var(--ink-muted, #5b6270); font-size: 11px; }
+.panel.sim table.live td, .panel.sim table.live th { padding: 2px 4px; border-bottom: 1px solid var(--hairline, #eee7d8); }
+.panel.sim table.live td:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* The board is a photograph of a physical object, so the glow layers must
+   blend against the board and not against the page behind it. */
+#board svg { isolation: isolate; }
+
+@media print {
+  .tgroup.run, .simclock, .panel.sim table.live { display: none !important; }
+}

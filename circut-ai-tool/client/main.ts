@@ -4,6 +4,7 @@
 import { normalizeSidecar } from '../src/layout/types.ts';
 import { parseNetlist } from '../src/netlist.ts';
 import { buildLayoutDoc } from '../src/pipeline.ts';
+import { analog } from './analog.ts';
 import { api, ApiError } from './api.ts';
 import { renderConnect } from './connect.ts';
 import { mountBoard } from './board.ts';
@@ -32,6 +33,8 @@ export async function loadProject(id: string) {
     const design = parseNetlist(netText);
     const side = normalizeSidecar(sidecar);
     const doc = buildLayoutDoc(design, side);
+    // A different board means a different circuit: drop the old solver.
+    analog.invalidate();
     store.set({ loading: false, project: { id, name: summary.name, path: summary.path, design, sidecar: side, doc, switches: {}, highlight: null, activeStep: null, done: loadDone(id), panel: 'guide', running: false } });
   } catch (e) {
     store.set({ loading: false, project: null });

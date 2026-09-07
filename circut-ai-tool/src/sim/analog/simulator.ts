@@ -26,6 +26,8 @@ export interface AnalogState {
   power: Record<string, number>;
   /** LED reference -> 0..1. */
   brightness: Record<string, number>;
+  /** LED reference -> how far past its rated current it is, 0 when within. */
+  overdrive: Record<string, number>;
   /** LED reference -> true once it is lit at all, for the flat renderer. */
   leds: Record<string, boolean>;
   /** Gate or decoder output -> level. */
@@ -140,7 +142,7 @@ export class Simulator {
   private readout(out: MixedResult | null, time: number): AnalogState {
     if (!out) {
       return {
-        time, nodes: {}, netVolts: {}, currents: {}, power: {}, brightness: {}, leds: {}, digitalState: {},
+        time, nodes: {}, netVolts: {}, currents: {}, power: {}, brightness: {}, overdrive: {}, leds: {}, digitalState: {},
         switches: { ...this.switches },
         faults: [{ kind: 'analog-unsolvable', level: 'error', ref: '', message: 'the circuit as wired cannot be solved; check for a short across the supply' }],
         converged: false,
@@ -159,7 +161,13 @@ export class Simulator {
       if (i === undefined) continue;
       if (d.kind === 'resistor') power[d.ref] = i * i * d.ohms;
     }
+    const overdrive: Record<string, number> = {};
     for (const [ref, b] of Object.entries(out.brightness)) leds[ref] = b > 0;
+    for (const d of this.model.devices) {
+      if (d.kind !== 'diode' || !d.led) continue;
+      const rated = (d.led as { ifRated: number }).ifRated;
+      overdrive[d.ref] = Math.max(0, (out.currents[d.ref] ?? 0) / rated - 1);
+    }
     // Resistor currents are not solved directly; derive them from the drop.
     for (const d of this.model.devices) {
       if (d.kind !== 'resistor') continue;
@@ -174,6 +182,7 @@ export class Simulator {
       currents: out.currents,
       power,
       brightness: out.brightness,
+      overdrive,
       leds,
       digitalState: out.digitalState,
       switches: { ...this.switches },
