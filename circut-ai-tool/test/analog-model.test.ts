@@ -5,6 +5,7 @@ import { makeDesign, parseNetlist } from '../src/netlist.ts';
 import { readFixture } from './smoke.test.ts';
 import { buildAnalogModel } from '../src/sim/analog/model.ts';
 import { solveDC } from '../src/sim/analog/dc.ts';
+import { operatingPoint } from '../src/sim/analog/nonlinear.ts';
 
 const R = (value: string, a: string, b: string) => ({ lib: 'Device', part: 'R', value, pins: { '1': ['1', 'passive', a] as [string, string, string], '2': ['2', 'passive', b] as [string, string, string] } });
 
@@ -71,11 +72,57 @@ describe('buildAnalogModel on the PL1_1 fixture', () => {
 
   test('models both switches and reports the parts it cannot do yet', () => {
     expect(model.devices.filter((d) => d.kind === 'switch').map((d) => d.ref).sort()).toEqual(['SW1', 'SW2']);
-    // LEDs arrive in phase 2 and the 74xx chips in phase 3.
-    expect(model.notModelled.sort()).toEqual(['D1 (LED)', 'D2 (LED)', 'U1 (74LS86)', 'U2 (74LS04)', 'U3 (74LS00)']);
+    // The 74xx chips arrive in phase 3.
+    expect(model.notModelled.sort()).toEqual(['U1 (74LS86)', 'U2 (74LS04)', 'U3 (74LS00)']);
   });
 
   test('the board as wired solves without a singular matrix', () => {
-    expect(solveDC(model.devices, model.ground)).not.toBeNull();
+    const out = operatingPoint(model.devices, model.ground);
+    expect(out).not.toBeNull();
+    expect(out!.converged).toBe(true);
+    // Both LEDs hang off 74xx outputs, which are not modelled until phase 3,
+    // so nothing drives them yet and they must read dark rather than NaN.
+    expect(Number.isFinite(out!.nodes[model.pinNodes.D1['2']])).toBe(true);
+    expect(out!.brightness.D1).toBe(0);
+  });
+});
+
+describe('buildAnalogModel LEDs', () => {
+  test('a 330R and an LED laid out on the board draw a real current', () => {
+    const design = makeDesign({
+      R3: R('330', '+5V', '/MID'),
+      D1: { lib: 'Device', part: 'LED', value: 'LED_Red', pins: { '1': ['K', 'passive', 'GND'], '2': ['A', 'passive', '/MID'] } },
+    });
+    const res = layout(design, emptySidecar());
+    const model = buildAnalogModel(design, res);
+    expect(model.notModelled).toEqual([]);
+    const out = operatingPoint(model.devices, model.ground)!;
+    expect(out.converged).toBe(true);
+    expect(out.currents.D1).toBeGreaterThan(0.009);
+    expect(out.currents.D1).toBeLessThan(0.011);
+    expect(out.brightness.D1).toBeGreaterThan(0.7);
+    expect(out.faults).toEqual([]);
+  });
+
+  test('the same LED with no series resistor is flagged', () => {
+    const design = makeDesign({
+      D1: { lib: 'Device', part: 'LED', value: 'LED_Red', pins: { '1': ['K', 'passive', 'GND'], '2': ['A', 'passive', '+5V'] } },
+    });
+    const res = layout(design, emptySidecar());
+    const model = buildAnalogModel(design, res);
+    const out = operatingPoint(model.devices, model.ground)!;
+    expect(out.faults.some((f) => f.kind === 'led-overcurrent' && f.ref === 'D1')).toBe(true);
+    expect(out.faults[0].message).toMatch(/add ~\d+R in series/);
+  });
+
+  test('a reversed LED stays dark', () => {
+    const design = makeDesign({
+      R3: R('330', '+5V', '/MID'),
+      D1: { lib: 'Device', part: 'LED', value: 'LED_Red', pins: { '1': ['K', 'passive', '/MID'], '2': ['A', 'passive', 'GND'] } },
+    });
+    const res = layout(design, emptySidecar());
+    const model = buildAnalogModel(design, res);
+    const out = operatingPoint(model.devices, model.ground)!;
+    expect(out.brightness.D1).toBe(0);
   });
 });
