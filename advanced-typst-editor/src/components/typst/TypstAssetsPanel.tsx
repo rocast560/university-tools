@@ -15,7 +15,7 @@
 // Fonts are installed into the compiler at init and used by name.
 // ─────────────────────────────────────────────────────────────────────────
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react';
 import {
   AlertTriangle, ChevronRight, Crop, EyeOff, FileType, Folder, FolderPlus, ImagePlus,
   Loader2, MapPin, Maximize2, Minimize2, PanelRightClose, Pencil, Plus, Trash2, Type, Upload,
@@ -35,10 +35,13 @@ import {
   setSlotPath,
   type ScreenshotSlot,
 } from '@/lib/typst-placeholders';
-import { insertAtTypstCursor } from './TypstEditor';
-import { PlaceScreenshotDialog } from './PlaceScreenshotDialog';
+import { insertAtTypstCursor } from './typst-editor-bridge';
 import { Portal } from '@/components/ui/Portal';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+
+// The crop-and-place window: ~32 KB of viewport maths and blur controls that
+// only exist once a thumbnail is clicked, so it stays out of the tab's chunk.
+const PlaceScreenshotDialog = lazy(() => import('./PlaceScreenshotDialog').then((m) => ({ default: m.PlaceScreenshotDialog })));
 
 const FONT_EXTS = ['.ttf', '.otf', '.woff', '.woff2', '.ttc'];
 
@@ -1012,17 +1015,19 @@ export const TypstAssetsPanel = memo(function TypstAssetsPanel({
 
       {placingLive && (
         <Portal>
-          <PlaceScreenshotDialog
-            asset={placingLive}
-            source={source}
-            hidePlacement={standalone}
-            onApply={(crop, blurs, slot, heightPt) =>
-              applyPlacement(crop, blurs, slot, assetPath(placingLive), heightPt)}
-            onUnplace={(crop, blurs, slot) => applyPlacement(crop, blurs, slot, null, null)}
-            onAddSlot={addSlot}
-            onRename={renameAsset}
-            onClose={() => setPlacing(null)}
-          />
+          <Suspense fallback={null}>
+            <PlaceScreenshotDialog
+              asset={placingLive}
+              source={source}
+              hidePlacement={standalone}
+              onApply={(crop, blurs, slot, heightPt) =>
+                applyPlacement(crop, blurs, slot, assetPath(placingLive), heightPt)}
+              onUnplace={(crop, blurs, slot) => applyPlacement(crop, blurs, slot, null, null)}
+              onAddSlot={addSlot}
+              onRename={renameAsset}
+              onClose={() => setPlacing(null)}
+            />
+          </Suspense>
         </Portal>
       )}
     </div>
