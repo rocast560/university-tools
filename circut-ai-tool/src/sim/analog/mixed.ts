@@ -33,14 +33,27 @@ const MAX_OUTER = 20;
 /** Fraction of a chip's worst-case Icc to draw from the rail. */
 const ICC_SHARE = 0.5;
 
-export function solveMixed(model: AnalogModel, maxOuter = MAX_OUTER): MixedResult | null {
-  const levels: Record<string, 0 | 1> = {};
+export interface MixedOptions {
+  /**
+   * Devices to solve instead of the model's own, for a caller that has
+   * already substituted companion models or flipped a switch. The chip list,
+   * ground and node names still come from the model.
+   */
+  devices?: Device[];
+  /** Levels carried over from the previous solve, so hysteresis works. */
+  levels?: Record<string, 0 | 1>;
+  maxOuter?: number;
+}
+
+export function solveMixed(model: AnalogModel, opts: MixedOptions = {}): MixedResult | null {
+  const maxOuter = opts.maxOuter ?? MAX_OUTER;
+  const levels: Record<string, 0 | 1> = { ...(opts.levels ?? {}) };
   const digitalState: Record<string, 0 | 1> = {};
   const faults: Fault[] = [];
 
   // Input loads and supply draw are linear and never change, so they are
   // stamped once rather than rebuilt every pass.
-  const base: Device[] = model.devices.slice();
+  const base: Device[] = (opts.devices ?? model.devices).slice();
   for (const chip of model.chips) {
     const { ohmsToVcc } = inputLoad(chip.family);
     chip.inputNodes.forEach((node, i) => {
@@ -53,10 +66,12 @@ export function solveMixed(model: AnalogModel, maxOuter = MAX_OUTER): MixedResul
   let out = operatingPoint(base, model.ground);
   if (!out) return null;
 
-  // Seed each input level from where the undriven board settled.
+  // Seed any input we have no history for from where the undriven board
+  // settled. Levels handed in by the caller are kept, so a running simulation
+  // carries its hysteresis across timesteps.
   for (const chip of model.chips) {
     const vcc = supplyOf(chip, out.nodes);
-    for (const node of chip.inputNodes) levels[node] = initialLevel(out.nodes[node] ?? 0, vcc, chip.family);
+    for (const node of chip.inputNodes) if (levels[node] === undefined) levels[node] = initialLevel(out.nodes[node] ?? 0, vcc, chip.family);
   }
 
   let outerPasses = 0;
