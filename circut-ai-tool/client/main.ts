@@ -32,7 +32,7 @@ export async function loadProject(id: string) {
     const design = parseNetlist(netText);
     const side = normalizeSidecar(sidecar);
     const doc = buildLayoutDoc(design, side);
-    store.set({ loading: false, project: { id, name: summary.name, path: summary.path, design, sidecar: side, doc, switches: {}, highlight: null, activeStep: null, done: loadDone(id), panel: 'guide' } });
+    store.set({ loading: false, project: { id, name: summary.name, path: summary.path, design, sidecar: side, doc, switches: {}, highlight: null, activeStep: null, done: loadDone(id), panel: 'guide', running: false } });
   } catch (e) {
     store.set({ loading: false, project: null });
     toast(e instanceof ApiError && e.status === 404 ? 'That project is not open on the server. Open it from the home page.' : (e as Error).message);

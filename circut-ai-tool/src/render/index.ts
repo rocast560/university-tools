@@ -7,6 +7,7 @@ import { P, pt, ROWY, svgSize, X0 } from './geometry.ts';
 import type { EngineResult } from '../layout/engine.ts';
 import type { BoardSpec, Hole, Package, PlacedPart, Row, Wire } from '../layout/types.ts';
 import { displayName } from '../netlist.ts';
+import type { LedColour } from '../parts/led.ts';
 import { FLAT, type BoardGeom, type Skin, type SkinContext, type SkinLedState } from './skin.ts';
 import { LIGHT, type Theme } from './theme.ts';
 
@@ -159,7 +160,7 @@ function drawPackage(pkg: Package, res: EngineResult, t: Theme, sim: SimState | 
 
 // ---------- parts ----------
 
-function body2(part: PlacedPart, t: Theme, sim: SimState | null, sk: Skin): string {
+function body2(part: PlacedPart, t: Theme, sim: SimState | null, sk: Skin, colours: Record<string, LedColour>): string {
   // Drawn horizontally, centred at the origin; the caller rotates it along the leg axis.
   const value = part.value;
   switch (part.style) {
@@ -176,7 +177,7 @@ function body2(part: PlacedPart, t: Theme, sim: SimState | null, sk: Skin): stri
       return el('rect', { x: -9, y: -4, width: 18, height: 8, rx: 2, fill: '#1B1C20', stroke: '#000' }) + el('rect', { x: -8, y: -4, width: 2.5, height: 8, fill: '#D0D3D8' }) + (part.style === 'Z' ? text(0, 2.5, 'Z', { fill: '#FFFFFF', 'font-size': 6 }) : '');
     case 'LED': {
       const state = ledState(part.id, sim);
-      if (sk.ledBody) return sk.ledBody(part, state, t);
+      if (sk.ledBody) return sk.ledBody(part, state, t, colours);
       const on = state.brightness > 0;
       // Flat: a solid dot, but its opacity follows the solved current when
       // there is one, so even the printable skin distinguishes dim from hot.
@@ -208,7 +209,7 @@ function drawPart(part: PlacedPart, res: EngineResult, t: Theme, sim: SimState |
     if (shadow) inner.push(shadow);
     const leads = part.style === 'LED' ? sk.ledLeads?.(part, [ax, ay], [bx, by]) : undefined;
     inner.push(leads ?? el('line', { x1: ax, y1: ay, x2: bx, y2: by, stroke: t.lead, 'stroke-width': 1.8 }));
-    inner.push(el('g', { transform: `translate(${n(mx)} ${n(my)}) rotate(${n(deg)})` }, body2(part, t, sim, sk)));
+    inner.push(el('g', { transform: `translate(${n(mx)} ${n(my)}) rotate(${n(deg)})` }, body2(part, t, sim, sk, res.ledColors ?? {})));
     for (const [x, y] of pts) inner.push(el('circle', { cx: x, cy: y, r: 2.2, fill: t.lead }));
     const perp = Math.abs(deg) < 45 || Math.abs(deg) > 135 ? [0, -10] : [12, 3];
     inner.push(text(mx + perp[0], my + perp[1], part.style === 'LED' ? part.id : `${part.id} ${part.value}`, { fill: t.text, 'font-size': 7.5, 'text-anchor': perp[0] ? 'start' : 'middle' }));
@@ -242,17 +243,22 @@ function wrap(id: string, style: string, inner: string | undefined): string {
   return inner ? `<g id="${id}" style="${style}" aria-hidden="true">${inner}</g>` : '';
 }
 
-function drawWire(w: Wire, i: number, color: string, t: Theme, opacity: number | undefined): string {
+function drawWire(w: Wire, i: number, color: string, t: Theme, opacity: number | undefined, sk: Skin): string {
   const [ax, ay] = pt(w.a);
   const [bx, by] = pt(w.b);
   const dx = bx - ax;
   const dy = by - ay;
   const len = Math.hypot(dx, dy) || 1;
-  const bulge = Math.min(0.28 * len, 26) * (w.role === 'power' || w.role === 'bridge' ? 0.6 : 1);
+  // Jumper wires run straight between their two holes, the way a tidy
+  // prototyping job looks. The control point stays in the API so a route that
+  // genuinely has to turn a corner can bend, but a plain hole-to-hole link
+  // puts it on the midpoint, which makes the quadratic a straight line.
+  const bulge = 0;
   const cx = (ax + bx) / 2 + (-dy / len) * bulge;
   const cy = (ay + by) / 2 + (dx / len) * bulge;
   const rail = isRail(w.a.row) || isRail(w.b.row);
-  return el('g', { class: 'wire', 'data-net': w.net, 'data-wire': i, opacity }, el('path', { d: `M ${n(ax)} ${n(ay)} Q ${n(cx)} ${n(cy)} ${n(bx)} ${n(by)}`, fill: 'none', stroke: color, 'stroke-width': rail ? 2.2 : 2.6, 'stroke-linecap': 'round' }) + el('circle', { cx: ax, cy: ay, r: 3.2, fill: color, stroke: t.chip, 'stroke-width': 0.8 }) + el('circle', { cx: bx, cy: by, r: 3.2, fill: color, stroke: t.chip, 'stroke-width': 0.8 }));
+  const body = sk.wireBody?.([ax, ay], [cx, cy], [bx, by], color, rail);
+  return el('g', { class: 'wire', 'data-net': w.net, 'data-wire': i, opacity }, body ?? el('path', { d: `M ${n(ax)} ${n(ay)} Q ${n(cx)} ${n(cy)} ${n(bx)} ${n(by)}`, fill: 'none', stroke: color, 'stroke-width': rail ? 2.2 : 2.6, 'stroke-linecap': 'round' }) + (body ? '' : el('circle', { cx: ax, cy: ay, r: 3.2, fill: color, stroke: t.chip, 'stroke-width': 0.8 }) + el('circle', { cx: bx, cy: by, r: 3.2, fill: color, stroke: t.chip, 'stroke-width': 0.8 })));
 }
 
 // ---------- entry ----------
@@ -277,7 +283,7 @@ export function renderSvg(res: EngineResult, opts: RenderOptions = {}): string {
   };
   const dimPart = (nets: string[], refs: string[]) => (hl?.wire !== undefined ? t.dim : dim(nets, refs));
   const size = svgSize(res.board);
-  const ctx: SkinContext = { parts: res.parts, board: res.board, leds: Object.fromEntries(res.parts.filter((p) => p.style === 'LED').map((p) => [p.id, ledState(p.id, sim)])) };
+  const ctx: SkinContext = { parts: res.parts, board: res.board, ledColors: res.ledColors ?? {}, leds: Object.fromEntries(res.parts.filter((p) => p.style === 'LED').map((p) => [p.id, ledState(p.id, sim)])) };
   const defs = sk.defs?.(ctx, t);
   const layers = [
     defs ? `<defs>${defs}</defs>` : '',
@@ -288,7 +294,7 @@ export function renderSvg(res: EngineResult, opts: RenderOptions = {}): string {
     wrap('l-spill', 'mix-blend-mode:multiply', sk.spillLayer?.(ctx, t)),
     el('g', { class: 'packages' }, res.packages.map((p) => drawPackage(p, res, t, sim, hl?.wire !== undefined || hl?.net !== undefined ? () => undefined : dim)).join('')),
     el('g', { class: 'parts' }, res.parts.map((p) => drawPart(p, res, t, sim, dimPart, sk)).join('')),
-    el('g', { class: 'wires' }, res.wires.map((w, i) => drawWire(w, i, res.nets[w.net]?.color ?? t.text, t, dim([w.net], [], i))).join('')),
+    el('g', { class: 'wires' }, res.wires.map((w, i) => drawWire(w, i, res.nets[w.net]?.color ?? t.text, t, dim([w.net], [], i), sk)).join('')),
     drawSupply(res, t, hl?.wire !== undefined ? () => undefined : dim),
     wrap('l-glow', 'mix-blend-mode:screen', sk.glowLayer?.(ctx, t)),
   ];

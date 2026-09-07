@@ -10,7 +10,10 @@
 // them can meet a gradient or a filter that resvg cannot rasterise.
 
 import type { BoardSpec, PlacedPart } from '../layout/types.ts';
+import type { LedColour } from '../parts/led.ts';
 import type { Theme } from './theme.ts';
+
+export type Point = [number, number];
 
 /** Where the board sits, so a skin can paint it without recomputing it. */
 export interface BoardGeom {
@@ -46,9 +49,14 @@ export interface Skin {
   /** A soft shadow under a part, drawn before its body. */
   contactShadow?(part: PlacedPart, mx: number, my: number, halfLen: number): string;
   /** Replaces the LED body inside the rotated group. */
-  ledBody?(part: PlacedPart, state: SkinLedState, t: Theme): string;
+  ledBody?(part: PlacedPart, state: SkinLedState, t: Theme, colours: Record<string, LedColour>): string;
   /** Replaces the straight lead line between an LED's two holes. */
   ledLeads?(part: PlacedPart, a: [number, number], b: [number, number]): string;
+  /**
+   * Replaces the whole body of a jumper wire: the quadratic arc from `a` to
+   * `b` through control point `c`, in `color`.
+   */
+  wireBody?(a: Point, c: Point, b: Point, color: string, rail: boolean): string;
   /** Coloured light pooling on the board, drawn under the parts. */
   spillLayer?(res: SkinContext, t: Theme): string;
   /** Light in the air, drawn over the wires. */
@@ -61,6 +69,8 @@ export interface SkinContext {
   board: BoardSpec;
   /** LED reference -> its live state, when a simulation is running. */
   leds: Record<string, SkinLedState>;
+  /** LED reference -> a colour chosen on the board, overriding its value. */
+  ledColors: Record<string, LedColour>;
 }
 
 /** The absence of a skin: every hook unimplemented. */
