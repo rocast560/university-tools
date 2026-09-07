@@ -15,7 +15,7 @@ import { DECODER_PINS, icInfo, type GateKind } from '../../parts/gates.ts';
 import { parseFarads, parseHenries, parseOhms } from '../../parts/values.ts';
 import type { Device } from './dc.ts';
 import type { Family } from './digital.ts';
-import { diodeFor } from './nonlinear.ts';
+import { diodeFor, diodeForColour } from './nonlinear.ts';
 
 /** One logic gate, with its pins already resolved to breadboard nodes. */
 export interface AnalogGate {
@@ -158,7 +158,10 @@ export function buildAnalogModel(design: Design, res: EngineResult, switches: Re
       // classify() puts the cathode on the `a` pin for every polarised
       // two-lead part, so `a` is K and `b` is A. The boolean simulator reads
       // them the same way round.
-      else if (fp.style === 'LED') devices.push({ ...diodeFor(value || 'LED'), ref, anode: b, cathode: a });
+      // A colour chosen on the board overrides the schematic value, and it is
+      // a real electrical choice: blue sits about 1.2 V higher than red, so
+      // the same series resistor gives noticeably less current.
+      else if (fp.style === 'LED') devices.push({ ...(res.ledColors?.[ref] ? diodeForColour(res.ledColors[ref]) : diodeFor(value || 'LED')), ref, anode: b, cathode: a });
       else if (fp.style === 'D' || fp.style === 'Z') devices.push({ ...diodeFor(value), ref, anode: b, cathode: a });
       else if (fp.style === 'C' || fp.style === 'Cpol') devices.push({ kind: 'capacitor', ref, a, b, farads: parseFarads(value) ?? DEFAULT_FARADS });
       else if (fp.style === 'L') devices.push({ kind: 'inductor', ref, a, b, henries: parseHenries(value) ?? DEFAULT_HENRIES });

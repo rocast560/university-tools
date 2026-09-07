@@ -1,5 +1,7 @@
 // Types shared by the engine, checks, simulator, guide, renderer and client.
 
+import { LED_COLOURS, type LedColour } from '../parts/led.ts';
+
 export type Row = 'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g' | 'h' | 'i' | 'j' | 'T+' | 'T-' | 'B+' | 'B-';
 
 export interface Hole {
@@ -24,11 +26,17 @@ export interface Sidecar {
   colors: Record<string, string>;
   /** ref -> pin -> uuids of labels or power symbols this app placed on that pin (editing plan). */
   placed: Record<string, Record<string, string[]>>;
+  /**
+   * LED reference -> colour, chosen on the board rather than in the schematic.
+   * Read by both the renderer and the analog solver, so picking blue also
+   * raises that LED's forward voltage and drops its current.
+   */
+  ledColors: Record<string, LedColour>;
 }
 
 export const defaultOptions = (): Options => ({ board: 'auto', railSplit: null, dipSwitchPositions: 0, packageOrder: [], substitutions: {} });
 
-export const emptySidecar = (): Sidecar => ({ version: 1, options: defaultOptions(), pinned: {}, colors: {}, placed: {} });
+export const emptySidecar = (): Sidecar => ({ version: 1, options: defaultOptions(), pinned: {}, colors: {}, placed: {}, ledColors: {} });
 
 const ROWS = new Set(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'T+', 'T-', 'B+', 'B-']);
 
@@ -63,6 +71,9 @@ export function normalizeSidecar(x: unknown): Sidecar {
       for (const [pin, ids] of Object.entries(pins as Record<string, unknown>)) if (Array.isArray(ids)) clean[pin] = ids.filter((i) => typeof i === 'string');
       s.placed[ref] = clean;
     }
+  }
+  if (o.ledColors && typeof o.ledColors === 'object') {
+    for (const [ref, c] of Object.entries(o.ledColors)) if (typeof c === 'string' && (LED_COLOURS as readonly string[]).includes(c)) s.ledColors[ref] = c as LedColour;
   }
   return s;
 }

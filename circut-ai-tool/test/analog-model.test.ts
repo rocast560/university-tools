@@ -128,3 +128,35 @@ describe('buildAnalogModel LEDs', () => {
     expect(out.brightness.D1).toBe(0);
   });
 });
+
+describe('LED colour chosen on the board', () => {
+  const design = makeDesign({
+    R3: R('330', '+5V', '/MID'),
+    D1: { lib: 'Device', part: 'LED', value: 'LED', pins: { '1': ['K', 'passive', 'GND'], '2': ['A', 'passive', '/MID'] } },
+  });
+  const solve = (colour?: 'red' | 'blue' | 'green') => {
+    const side = emptySidecar();
+    if (colour) side.ledColors = { D1: colour };
+    const res2 = layout(design, side);
+    return operatingPoint(buildAnalogModel(design, res2).devices, buildAnalogModel(design, res2).ground)!;
+  };
+
+  test('is a real electrical choice, not just paint', () => {
+    // Blue sits about 1.2 V higher than red, so behind the same 330R it draws
+    // visibly less current. If this ever passes with equal currents, the
+    // override is only reaching the renderer.
+    const red = solve('red');
+    const blue = solve('blue');
+    expect(blue.currents.D1).toBeLessThan(red.currents.D1 * 0.8);
+    expect(blue.nodes[Object.keys(blue.nodes).find((k) => blue.nodes[k] > 2.5 && blue.nodes[k] < 3.2)!]).toBeGreaterThan(2.5);
+  });
+
+  test('falls back to the schematic value when nothing is chosen', () => {
+    expect(solve().currents.D1).toBeCloseTo(solve('red').currents.D1, 6);
+  });
+
+  test('green sits between red and blue', () => {
+    expect(solve('green').currents.D1).toBeLessThan(solve('red').currents.D1);
+    expect(solve('green').currents.D1).toBeGreaterThan(solve('blue').currents.D1);
+  });
+});

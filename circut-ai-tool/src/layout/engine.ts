@@ -9,6 +9,7 @@
 import type { Component, Design, DesignPin } from '../netlist.ts';
 import { displayName, isUnconnected } from '../netlist.ts';
 import { classify, powerKind, type Footprint, type PowerKind } from '../parts/catalog.ts';
+import type { LedColour } from '../parts/led.ts';
 import { compareRefs } from '../parts/values.ts';
 import { BOT_ROWS, Board, LayoutError, MID_ROWS, Occupancy, PART_ROWS, RAILS, TOP_ROWS, WIRE_ROWS, hole, isRail, stripCol, stripHalf, stripOf } from './board.ts';
 import type { BoardSpec, Hole, NetInfo, Options, Package, PlacedPart, Row, Sidecar, Supply, Wire } from './types.ts';
@@ -33,6 +34,8 @@ export interface EngineResult {
   footprints: Record<string, Footprint>;
   values: Record<string, string>;
   power: { plus: string[]; minus: string[]; gnd: string[]; plusName: string; gndName: string; secondName: string | null };
+  /** LED reference -> the colour chosen on the board, when one was. */
+  ledColors: Record<string, LedColour>;
   error: string | null;
 }
 
@@ -660,6 +663,7 @@ class Engine {
       footprints: Object.fromEntries(this.fp),
       values: Object.fromEntries(this.values),
       power: { plus: this.plus, minus: this.minus, gnd: this.gnd, plusName: this.plusName, gndName: this.gndName, secondName: this.secondName },
+      ledColors: { ...this.sidecar.ledColors },
       error,
     };
   }

@@ -8,7 +8,7 @@
 // current-limiting resistor. That is exactly the mistake this tool exists to
 // catch, so it has to converge rather than blow up.
 
-import { ledSpec, type LedSpec } from '../../parts/led.ts';
+import { ledSpec, ledSpecFor, type LedColour, type LedSpec } from '../../parts/led.ts';
 import { solveDC, type Device } from './dc.ts';
 
 /** Thermal voltage kT/q at 27 C. */
@@ -81,6 +81,17 @@ function saturationCurrent(vf: number, iRated: number, n: number, rs: number): n
 
 /** Blue, white and UV are InGaN and run at a markedly higher ideality. */
 const isInGaN = (key: string) => key === 'blue' || key === 'white' || key === 'uv';
+
+/** Build a junction model straight from a chosen colour. */
+export function diodeForColour(key: LedColour): DiodeSpec {
+  return fromLed(ledSpecFor(key));
+}
+
+function fromLed(led: LedSpec): DiodeSpec {
+  const n = isInGaN(led.key) ? 2.5 : 1.9;
+  const rs = isInGaN(led.key) ? 12 : 15;
+  return { kind: 'diode', is: saturationCurrent(led.vf, led.ifRated, n, rs), n, rs, led };
+}
 
 /** Build a junction model from a schematic value: an LED colour, or a part number. */
 export function diodeFor(value: string): DiodeSpec {

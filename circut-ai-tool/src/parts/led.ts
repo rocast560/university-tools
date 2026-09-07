@@ -10,7 +10,8 @@
 // The flat skin deliberately does NOT use this: it keeps theme.ledOn/ledOff so
 // the server SVG, the print sheet and the MCP picture stay byte-identical.
 
-export type LedColour = 'red' | 'orange' | 'amber' | 'yellow' | 'green' | 'blue' | 'white' | 'uv' | 'ir';
+export const LED_COLOURS = ['red', 'orange', 'amber', 'yellow', 'green', 'blue', 'white', 'uv', 'ir'] as const;
+export type LedColour = (typeof LED_COLOURS)[number];
 
 export interface LedSpec {
   key: LedColour;
@@ -67,6 +68,11 @@ function fromNanometres(nm: number): LedColour | null {
  * "LED_Blue", "green", "LED 525nm" and a trailing "2.6V" override; anything
  * unrecognised is red, which is what the board has always drawn.
  */
+/** The spec for a colour chosen directly, bypassing the value string. */
+export function ledSpecFor(key: LedColour): LedSpec {
+  return { key, ...TABLE[key] };
+}
+
 export function ledSpec(value: string): LedSpec {
   const s = String(value ?? '');
   let key: LedColour = 'red';
