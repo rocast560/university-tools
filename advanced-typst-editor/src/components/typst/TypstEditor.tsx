@@ -4,6 +4,12 @@
 // A CodeMirror 6 instance over a plain string. The parent owns the text (see
 // hooks/use-workspace-file.ts); edits flow up through onChange and external
 // replacements flow down through the value prop.
+//
+// This module is the *only* one in the app that imports CodeMirror, and it is
+// loaded as its own lazy chunk: the editor plus its lezer grammar is ~500 KB,
+// the bulk of the Typst tab's JavaScript. Everything else drives the editor
+// through the dependency-free command interface in typst-editor-bridge.ts,
+// which this component registers on mount.
 // ─────────────────────────────────────────────────────────────────────────
 
 import { useEffect, useRef, memo } from 'react';
@@ -15,6 +21,12 @@ import {
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { highlightSelectionMatches } from '@codemirror/search';
 import { typstLanguage, typstHighlightExtension } from '@/lib/typst-language';
+import {
+  clearTypstEditorHandle,
+  requestTypstSearch,
+  setTypstEditorHandle,
+  type TypstEditorHandle,
+} from './typst-editor-bridge';
 
 // Editor chrome themed off the app's CSS variables so it matches both light
 // and dark modes and the active accent.
@@ -110,32 +122,14 @@ const editorTheme = EditorView.theme(
   { dark: true },
 );
 
-// ─────────────────────────────────────────────────────────────────────────
-// Module-level handle on the live editor, so the assets panel can insert an
-// `#image(…)` snippet at the caret without prop-drilling a ref through the
-// split-pane tree. Mirrors the pattern in lib/active-editor.ts.
-//
-// Writes go through the CodeMirror view (not the Y.Text directly) so the
-// insertion participates in the collab binding's undo history and lands
-// exactly where the user's cursor is.
-// ─────────────────────────────────────────────────────────────────────────
-let activeView: EditorView | null = null;
-
 /**
  * Select `[from, to)` and scroll it into view: the landing action for
  * click-to-source from the rendered preview.
  *
  * Centers the target rather than scrolling it to the top edge, so the
- * surrounding context stays visible. Returns false when no editor is mounted.
- *
- * `focus` defaults to true (a preview click wants the caret in the editor to
- * type immediately). The search panel passes `false` so focus stays in its
- * input, letting `Enter`/`Shift+Enter` keep stepping through matches instead of
- * being swallowed by the editor.
+ * surrounding context stays visible.
  */
-export function revealTypstRange(from: number, to: number, focus = true): boolean {
-  const view = activeView;
-  if (!view) return false;
+function revealIn(view: EditorView, from: number, to: number, focus: boolean): void {
   const max = view.state.doc.length;
   const anchor = Math.min(Math.max(from, 0), max);
   const head = Math.min(Math.max(to, 0), max);
@@ -144,35 +138,10 @@ export function revealTypstRange(from: number, to: number, focus = true): boolea
     effects: EditorView.scrollIntoView(anchor, { y: 'center' }),
   });
   if (focus) view.focus();
-  return true;
 }
 
-/**
- * The current caret offset, so the search panel can start "find next" from
- * where the user actually is rather than the top of the document. Returns 0
- * when no editor is mounted.
- */
-export function getTypstCaret(): number {
-  return activeView?.state.selection.main.head ?? 0;
-}
-
-// Bridge for the in-editor Ctrl/⌘+F: CodeMirror's key handler runs inside the
-// view, but the search *panel* is React state owned by TypstView. The view
-// calls this to ask the tab to open (and focus) the panel. Registered while
-// the tab is mounted; a no-op otherwise.
-let onSearchRequest: (() => void) | null = null;
-export function setTypstSearchRequest(fn: (() => void) | null): void {
-  onSearchRequest = fn;
-}
-
-/**
- * Insert `text` at the caret, replacing any selection. Returns false when no
- * Typst editor is mounted (the code pane is hidden), so callers can fall
- * back to copying the snippet instead.
- */
-export function insertAtTypstCursor(text: string): boolean {
-  const view = activeView;
-  if (!view) return false;
+/** Insert `text` at the caret, replacing any selection. */
+function insertIn(view: EditorView, text: string): boolean {
   const { from, to } = view.state.selection.main;
   view.dispatch({
     changes: { from, to, insert: text },
@@ -203,15 +172,13 @@ const fromParentValue = Annotation.define<boolean>();
 /**
  * Replace the whole document with `next` as a minimal change (common prefix
  * and suffix kept), so the caret and undo history survive a rewrite that only
- * touched one slot or one search match. Returns false when no editor is mounted.
+ * touched one slot or one search match.
  *
  * `echo: false` suppresses the resulting `onChange` and keeps the push out of
  * the undo history (see `fromParentValue`); `echo: true` -- a real programmatic
  * edit -- stays undoable.
  */
-export function setTypstEditorContent(next: string, echo = true): boolean {
-  const view = activeView;
-  if (!view) return false;
+function setContentIn(view: EditorView, next: string, echo: boolean): boolean {
   const cur = view.state.doc.toString();
   if (cur === next) return true;
   let start = 0;
@@ -242,7 +209,7 @@ export const TypstEditor = memo(function TypstEditor({ value, onChange, docKey }
           lineNumbers(), highlightActiveLineGutter(), highlightActiveLine(), drawSelection(), EditorView.lineWrapping, EditorState.tabSize.of(2),
           history(), typstLanguage(), typstHighlightExtension, editorTheme, highlightSelectionMatches(),
           keymap.of([
-            { key: 'Mod-f', preventDefault: true, run: () => { onSearchRequest?.(); return true; } },
+            { key: 'Mod-f', preventDefault: true, run: () => { requestTypstSearch(); return true; } },
             ...historyKeymap, ...defaultKeymap, indentWithTab,
           ]),
           EditorView.updateListener.of((u) => {
@@ -253,9 +220,22 @@ export const TypstEditor = memo(function TypstEditor({ value, onChange, docKey }
         ],
       }),
     });
-    activeView = view;
     viewRef.current = view;
-    return () => { if (activeView === view) activeView = null; viewRef.current = null; view.destroy(); };
+    // Publish the editor to the rest of the tab. Registering flushes any
+    // reveal that was requested while this (lazily loaded) chunk was still
+    // on its way — a preview click that opened a hidden code pane.
+    const handle: TypstEditorHandle = {
+      reveal: (from, to, focus) => revealIn(view, from, to, focus),
+      caret: () => view.state.selection.main.head,
+      insert: (text) => insertIn(view, text),
+      setContent: (next, echo) => setContentIn(view, next, echo),
+    };
+    setTypstEditorHandle(handle);
+    return () => {
+      clearTypstEditorHandle(handle);
+      viewRef.current = null;
+      view.destroy();
+    };
     // A new document (workspace/file switch) remounts; typing does not (value is only read at mount).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docKey]);
@@ -266,7 +246,7 @@ export const TypstEditor = memo(function TypstEditor({ value, onChange, docKey }
   useEffect(() => {
     const view = viewRef.current;
     if (!view || view.state.doc.toString() === value) return;
-    setTypstEditorContent(value, false);
+    setContentIn(view, value, false);
   }, [value]);
 
   return <div ref={hostRef} className="h-full w-full overflow-hidden" />;
