@@ -3,20 +3,27 @@
 // the client can attach hover, drag and click handlers.
 
 import { isRail } from '../layout/board.ts';
+import { P, pt, ROWY, svgSize, X0 } from './geometry.ts';
 import type { EngineResult } from '../layout/engine.ts';
 import type { BoardSpec, Hole, Package, PlacedPart, Row, Wire } from '../layout/types.ts';
 import { displayName } from '../netlist.ts';
+import { FLAT, type BoardGeom, type Skin, type SkinContext, type SkinLedState } from './skin.ts';
 import { LIGHT, type Theme } from './theme.ts';
 
-export const P = 18;
-export const X0 = 40;
-export const ROWY: Record<Row, number> = { 'T+': 30, 'T-': 48, a: 84, b: 102, c: 120, d: 138, e: 156, f: 192, g: 210, h: 228, i: 246, j: 264, 'B-': 300, 'B+': 318 };
-const HEIGHT = 350;
+export { HEIGHT, P, pt, ROWY, svgSize, X0 } from './geometry.ts';
 
 export interface SimState {
   leds: Record<string, boolean>;
   segments: Record<string, Record<string, boolean>>;
   switches: Record<string, boolean>;
+  /**
+   * LED reference -> 0..1 from the analog solver. Optional: without it an LED
+   * is simply on or off, which is what the boolean simulator and every
+   * existing caller supply.
+   */
+  ledBrightness?: Record<string, number>;
+  /** LED reference -> how far past its rated current it is being driven. */
+  ledOverdrive?: Record<string, number>;
 }
 
 export interface Highlight {
@@ -29,16 +36,12 @@ export interface RenderOptions {
   theme?: Theme;
   highlight?: Highlight | null;
   sim?: SimState | null;
-}
-
-export function pt(h: Hole): [number, number] {
-  return [X0 + (h.col - 1) * P, ROWY[h.row]];
-}
-
-export function svgSize(board: BoardSpec): { width: number; height: number; viewBox: string } {
-  const xr = X0 + (board.cols - 1) * P;
-  const width = xr + 140;
-  return { width, height: HEIGHT, viewBox: `-100 0 ${width} ${HEIGHT}` };
+  /**
+   * How to paint it. Omitted means FLAT, which is byte-identical to what this
+   * renderer has always produced - the contract resvg, the MCP picture, the
+   * downloads and the print sheet all depend on.
+   */
+  skin?: Skin;
 }
 
 const esc = (s: string) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -58,12 +61,16 @@ function text(x: number, y: number, s: string, extra: Record<string, string | nu
 
 // ---------- board ----------
 
-function drawBoard(res: EngineResult, t: Theme): string {
+function drawBoard(res: EngineResult, t: Theme, sk: Skin): string {
   const b = res.board;
   const xr = X0 + (b.cols - 1) * P;
+  const geom: BoardGeom = { x: 8, y: 8, width: xr + 16, height: 334, xr, board: b };
   const out: string[] = [];
-  out.push(el('rect', { x: 8, y: 8, width: xr + 16, height: 334, rx: 6, fill: t.board, stroke: t.boardStroke }));
-  out.push(el('rect', { x: 26, y: 168, width: xr - 10, height: 12, rx: 2, fill: t.gutter }));
+  out.push(sk.boardSlab?.(geom, t) ?? el('rect', { x: 8, y: 8, width: xr + 16, height: 334, rx: 6, fill: t.board, stroke: t.boardStroke }));
+  if (sk.boardOverlay) out.push(sk.boardOverlay(geom, t));
+  out.push(sk.channel?.(geom, t) ?? el('rect', { x: 26, y: 168, width: xr - 10, height: 12, rx: 2, fill: t.gutter }));
+  const bands = sk.holeBands?.(geom, t);
+  if (bands) out.push(bands);
   const gapL = b.splitCol ? pt({ col: b.splitCol, row: 'a' })[0] + 7 : null;
   const gapR = b.splitCol ? pt({ col: b.splitCol + 1, row: 'a' })[0] - 7 : null;
   const railNet: Record<string, string> = { 'T+': res.power.plus.length ? displayName(res.power.plusName) : '+', 'T-': displayName(res.power.gndName), 'B-': displayName(res.power.gndName), 'B+': displayName(res.power.secondName ?? res.power.plusName) };
@@ -75,7 +82,7 @@ function drawBoard(res: EngineResult, t: Theme): string {
     } else out.push(el('line', { x1: 34, y1: y, x2: xr + 10, y2: y, stroke: color, 'stroke-width': 1.2, opacity: 0.55 }));
     out.push(text(xr + 18, y + 3.5, row[1], { 'font-size': 12, fill: color, 'font-weight': 600 }));
     out.push(text(-40, y + 3.5, railNet[row], { 'font-size': 9, fill: color, 'font-weight': 600, 'text-anchor': 'end' }));
-    for (let c = 1; c <= b.cols; c++) if (c % b.railGapEvery !== 0) out.push(el('circle', { cx: pt({ col: c, row })[0], cy: y, r: 2.4, fill: t.hole, class: 'hole', 'data-hole': `${row}${c}` }));
+    if (!bands) for (let c = 1; c <= b.cols; c++) if (c % b.railGapEvery !== 0) out.push(el('circle', { cx: pt({ col: c, row })[0], cy: y, r: 2.4, fill: t.hole, class: 'hole', 'data-hole': `${row}${c}` }));
   }
   if (gapL !== null && gapR !== null) {
     const sx = (gapL + gapR) / 2;
@@ -86,7 +93,7 @@ function drawBoard(res: EngineResult, t: Theme): string {
   for (const row of ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'] as Row[]) {
     out.push(text(22, ROWY[row] + 3.5, row, { 'font-size': 10, fill: t.textMuted }));
     out.push(text(xr + 18, ROWY[row] + 3.5, row, { 'font-size': 10, fill: t.textMuted }));
-    for (let c = 1; c <= b.cols; c++) out.push(el('circle', { cx: pt({ col: c, row })[0], cy: ROWY[row], r: 2.4, fill: t.hole, class: 'hole', 'data-hole': `${row}${c}` }));
+    if (!bands) for (let c = 1; c <= b.cols; c++) out.push(el('circle', { cx: pt({ col: c, row })[0], cy: ROWY[row], r: 2.4, fill: t.hole, class: 'hole', 'data-hole': `${row}${c}` }));
   }
   for (let c = 1; c <= b.cols; c++) {
     if (c !== 1 && c % 5 !== 0) continue;
@@ -152,7 +159,7 @@ function drawPackage(pkg: Package, res: EngineResult, t: Theme, sim: SimState | 
 
 // ---------- parts ----------
 
-function body2(part: PlacedPart, t: Theme, sim: SimState | null): string {
+function body2(part: PlacedPart, t: Theme, sim: SimState | null, sk: Skin): string {
   // Drawn horizontally, centred at the origin; the caller rotates it along the leg axis.
   const value = part.value;
   switch (part.style) {
@@ -168,8 +175,13 @@ function body2(part: PlacedPart, t: Theme, sim: SimState | null): string {
     case 'Z':
       return el('rect', { x: -9, y: -4, width: 18, height: 8, rx: 2, fill: '#1B1C20', stroke: '#000' }) + el('rect', { x: -8, y: -4, width: 2.5, height: 8, fill: '#D0D3D8' }) + (part.style === 'Z' ? text(0, 2.5, 'Z', { fill: '#FFFFFF', 'font-size': 6 }) : '');
     case 'LED': {
-      const on = !!sim?.leds[part.id];
-      return el('circle', { cx: 0, cy: 0, r: 6.5, fill: on ? t.ledOn : t.ledOff, stroke: '#7A1F1F', 'data-led': on ? 'on' : 'off' }) + el('line', { x1: -6.5, y1: -4, x2: -6.5, y2: 4, stroke: '#1E1E1E', 'stroke-width': 1.6 });
+      const state = ledState(part.id, sim);
+      if (sk.ledBody) return sk.ledBody(part, state, t);
+      const on = state.brightness > 0;
+      // Flat: a solid dot, but its opacity follows the solved current when
+      // there is one, so even the printable skin distinguishes dim from hot.
+      const fade = sim?.ledBrightness ? { 'fill-opacity': (0.35 + 0.65 * Math.min(state.brightness, 1)).toFixed(2) } : {};
+      return el('circle', { cx: 0, cy: 0, r: 6.5, fill: on ? t.ledOn : t.ledOff, stroke: '#7A1F1F', 'data-led': on ? 'on' : 'off', ...fade }) + el('line', { x1: -6.5, y1: -4, x2: -6.5, y2: 4, stroke: '#1E1E1E', 'stroke-width': 1.6 });
     }
     case 'SW': {
       const on = !!sim?.switches[part.id];
@@ -184,7 +196,7 @@ function body2(part: PlacedPart, t: Theme, sim: SimState | null): string {
   }
 }
 
-function drawPart(part: PlacedPart, res: EngineResult, t: Theme, sim: SimState | null, dim: (nets: string[], refs: string[]) => number | undefined): string {
+function drawPart(part: PlacedPart, res: EngineResult, t: Theme, sim: SimState | null, dim: (nets: string[], refs: string[]) => number | undefined, sk: Skin): string {
   const pts = part.holes.map(pt);
   const inner: string[] = [];
   if (part.kind === 'lead2') {
@@ -192,8 +204,11 @@ function drawPart(part: PlacedPart, res: EngineResult, t: Theme, sim: SimState |
     const mx = (ax + bx) / 2;
     const my = (ay + by) / 2;
     const deg = (Math.atan2(by - ay, bx - ax) * 180) / Math.PI;
-    inner.push(el('line', { x1: ax, y1: ay, x2: bx, y2: by, stroke: t.lead, 'stroke-width': 1.8 }));
-    inner.push(el('g', { transform: `translate(${n(mx)} ${n(my)}) rotate(${n(deg)})` }, body2(part, t, sim)));
+    const shadow = sk.contactShadow?.(part, mx, my, Math.hypot(bx - ax, by - ay) / 2);
+    if (shadow) inner.push(shadow);
+    const leads = part.style === 'LED' ? sk.ledLeads?.(part, [ax, ay], [bx, by]) : undefined;
+    inner.push(leads ?? el('line', { x1: ax, y1: ay, x2: bx, y2: by, stroke: t.lead, 'stroke-width': 1.8 }));
+    inner.push(el('g', { transform: `translate(${n(mx)} ${n(my)}) rotate(${n(deg)})` }, body2(part, t, sim, sk)));
     for (const [x, y] of pts) inner.push(el('circle', { cx: x, cy: y, r: 2.2, fill: t.lead }));
     const perp = Math.abs(deg) < 45 || Math.abs(deg) > 135 ? [0, -10] : [12, 3];
     inner.push(text(mx + perp[0], my + perp[1], part.style === 'LED' ? part.id : `${part.id} ${part.value}`, { fill: t.text, 'font-size': 7.5, 'text-anchor': perp[0] ? 'start' : 'middle' }));
@@ -222,6 +237,11 @@ function drawPart(part: PlacedPart, res: EngineResult, t: Theme, sim: SimState |
 
 // ---------- wires ----------
 
+/** A named layer, or nothing at all when the skin does not paint one. */
+function wrap(id: string, style: string, inner: string | undefined): string {
+  return inner ? `<g id="${id}" style="${style}" aria-hidden="true">${inner}</g>` : '';
+}
+
 function drawWire(w: Wire, i: number, color: string, t: Theme, opacity: number | undefined): string {
   const [ax, ay] = pt(w.a);
   const [bx, by] = pt(w.b);
@@ -237,8 +257,15 @@ function drawWire(w: Wire, i: number, color: string, t: Theme, opacity: number |
 
 // ---------- entry ----------
 
+/** An LED's live state, defaulting to the boolean on/off when no solver ran. */
+function ledState(ref: string, sim: SimState | null): SkinLedState {
+  const b = sim?.ledBrightness?.[ref];
+  return { brightness: b !== undefined ? b : sim?.leds[ref] ? 1 : 0, overdrive: sim?.ledOverdrive?.[ref] ?? 0 };
+}
+
 export function renderSvg(res: EngineResult, opts: RenderOptions = {}): string {
   const t = opts.theme ?? LIGHT;
+  const sk = opts.skin ?? FLAT;
   const hl = opts.highlight ?? null;
   const sim = opts.sim ?? null;
   const dim = (nets: string[], refs: string[], wire?: number): number | undefined => {
@@ -250,12 +277,20 @@ export function renderSvg(res: EngineResult, opts: RenderOptions = {}): string {
   };
   const dimPart = (nets: string[], refs: string[]) => (hl?.wire !== undefined ? t.dim : dim(nets, refs));
   const size = svgSize(res.board);
+  const ctx: SkinContext = { parts: res.parts, board: res.board, leds: Object.fromEntries(res.parts.filter((p) => p.style === 'LED').map((p) => [p.id, ledState(p.id, sim)])) };
+  const defs = sk.defs?.(ctx, t);
   const layers = [
-    drawBoard(res, t),
+    defs ? `<defs>${defs}</defs>` : '',
+    drawBoard(res, t, sk),
+    // Spill sits between the board and the parts and multiplies onto the
+    // plastic, so light pools on the board. Glow sits above the wires and
+    // screens over them, so it reads as light in the air.
+    wrap('l-spill', 'mix-blend-mode:multiply', sk.spillLayer?.(ctx, t)),
     el('g', { class: 'packages' }, res.packages.map((p) => drawPackage(p, res, t, sim, hl?.wire !== undefined || hl?.net !== undefined ? () => undefined : dim)).join('')),
-    el('g', { class: 'parts' }, res.parts.map((p) => drawPart(p, res, t, sim, dimPart)).join('')),
+    el('g', { class: 'parts' }, res.parts.map((p) => drawPart(p, res, t, sim, dimPart, sk)).join('')),
     el('g', { class: 'wires' }, res.wires.map((w, i) => drawWire(w, i, res.nets[w.net]?.color ?? t.text, t, dim([w.net], [], i))).join('')),
     drawSupply(res, t, hl?.wire !== undefined ? () => undefined : dim),
+    wrap('l-glow', 'mix-blend-mode:screen', sk.glowLayer?.(ctx, t)),
   ];
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${size.viewBox}" width="${size.width}" height="${size.height}" font-family="ui-monospace, Consolas, monospace">${layers.join('')}</svg>`;
 }
