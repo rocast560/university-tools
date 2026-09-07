@@ -12,7 +12,7 @@ import type { EngineResult } from '../../layout/engine.ts';
 import type { Hole } from '../../layout/types.ts';
 import type { Design } from '../../netlist.ts';
 import { DECODER_PINS, icInfo, type GateKind } from '../../parts/gates.ts';
-import { parseOhms } from '../../parts/values.ts';
+import { parseFarads, parseHenries, parseOhms } from '../../parts/values.ts';
 import type { Device } from './dc.ts';
 import type { Family } from './digital.ts';
 import { diodeFor } from './nonlinear.ts';
@@ -62,10 +62,51 @@ export interface AnalogModel {
   chips: AnalogChip[];
   /** Parts that were placed but have no analog model yet. */
   notModelled: string[];
+  /**
+   * Largest integration step that still resolves this circuit's dynamics, in
+   * seconds. Infinity when nothing in it can change on its own, which is the
+   * common case for a board of gates and LEDs: then one solve per frame is
+   * not an approximation, it is the whole answer.
+   */
+  dtMax: number;
 }
 
-/** Fallback when a resistor has no parseable value. */
+/** Fallbacks when a part's value cannot be parsed. */
 export const DEFAULT_OHMS = 1000;
+export const DEFAULT_FARADS = 100e-9;
+export const DEFAULT_HENRIES = 1e-3;
+
+/** Steps per time constant, and per source period, needed to resolve a curve. */
+const STEPS_PER_TAU = 20;
+
+/**
+ * The largest step that still resolves what this circuit can do.
+ *
+ * A board with no reactive elements and no time-varying source has no
+ * dynamics at all: its answer is the same whenever you ask, so one solve per
+ * frame is exact rather than coarse. Deriving this instead of fixing it is
+ * what keeps a plain board of gates and LEDs running in real time.
+ */
+export function stepCeiling(devices: Device[]): number {
+  let dt = Infinity;
+  const resistance = (a: string, b: string) => {
+    let best = Infinity;
+    for (const d of devices) {
+      if (d.kind === 'resistor' && ((d.a === a && d.b === b) || (d.a === b && d.b === a))) best = Math.min(best, d.ohms);
+      else if (d.kind === 'resistor' && (d.a === a || d.b === a || d.a === b || d.b === b)) best = Math.min(best, d.ohms);
+    }
+    return Number.isFinite(best) ? best : 1000;
+  };
+  for (const d of devices) {
+    if (d.kind === 'capacitor') dt = Math.min(dt, (resistance(d.a, d.b) * d.farads) / STEPS_PER_TAU);
+    else if (d.kind === 'inductor') dt = Math.min(dt, d.henries / resistance(d.a, d.b) / STEPS_PER_TAU);
+    else if (d.kind === 'vsource' && d.source && d.source.wave !== 'dc') {
+      const hz = d.source.wave === 'pulse' ? 1 / Math.max(d.source.period, 1e-9) : d.source.hz;
+      dt = Math.min(dt, 1 / (STEPS_PER_TAU * Math.max(hz, 1e-6)));
+    }
+  }
+  return dt;
+}
 
 export function buildAnalogModel(design: Design, res: EngineResult, switches: Record<string, boolean> = {}): AnalogModel {
   const uf = connectivity(res);
@@ -119,6 +160,8 @@ export function buildAnalogModel(design: Design, res: EngineResult, switches: Re
       // them the same way round.
       else if (fp.style === 'LED') devices.push({ ...diodeFor(value || 'LED'), ref, anode: b, cathode: a });
       else if (fp.style === 'D' || fp.style === 'Z') devices.push({ ...diodeFor(value), ref, anode: b, cathode: a });
+      else if (fp.style === 'C' || fp.style === 'Cpol') devices.push({ kind: 'capacitor', ref, a, b, farads: parseFarads(value) ?? DEFAULT_FARADS });
+      else if (fp.style === 'L') devices.push({ kind: 'inductor', ref, a, b, henries: parseHenries(value) ?? DEFAULT_HENRIES });
       else notModelled.push(`${ref} (${value})`);
     } else if (fp.kind === 'dip') {
       const info = icInfo(value, fp.pins);
@@ -158,5 +201,5 @@ export function buildAnalogModel(design: Design, res: EngineResult, switches: Re
   const nodeOfNet: Record<string, string> = {};
   for (const [node, net] of Object.entries(netOf)) if (nodeOfNet[net] === undefined) nodeOfNet[net] = node;
 
-  return { devices, ground, pinNodes, netOf, nodeOfNet, chips, notModelled };
+  return { devices, ground, pinNodes, netOf, nodeOfNet, chips, notModelled, dtMax: stepCeiling(devices) };
 }
