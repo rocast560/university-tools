@@ -13,6 +13,7 @@ import type { Hole } from '../../layout/types.ts';
 import type { Design } from '../../netlist.ts';
 import { parseOhms } from '../../parts/values.ts';
 import type { Device } from './dc.ts';
+import { diodeFor } from './nonlinear.ts';
 
 export interface AnalogModel {
   devices: Device[];
@@ -75,6 +76,11 @@ export function buildAnalogModel(design: Design, res: EngineResult, switches: Re
       if (a === undefined || b === undefined) continue;
       if (fp.style === 'R') devices.push({ kind: 'resistor', ref, a, b, ohms: parseOhms(value) ?? DEFAULT_OHMS });
       else if (fp.style === 'SW' || fp.style === 'BTN') devices.push({ kind: 'switch', ref, a, b, closed: !!switches[ref] });
+      // classify() puts the cathode on the `a` pin for every polarised
+      // two-lead part, so `a` is K and `b` is A. The boolean simulator reads
+      // them the same way round.
+      else if (fp.style === 'LED') devices.push({ ...diodeFor(value || 'LED'), ref, anode: b, cathode: a });
+      else if (fp.style === 'D' || fp.style === 'Z') devices.push({ ...diodeFor(value), ref, anode: b, cathode: a });
       else notModelled.push(`${ref} (${value})`);
     } else notModelled.push(`${ref} (${value})`);
   }
