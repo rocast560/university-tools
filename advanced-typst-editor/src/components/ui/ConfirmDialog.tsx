@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { Portal } from '@/components/ui/Portal';
-import { cn } from '@/lib/utils';
 
 /**
  * The app's replacement for `window.confirm` / `window.prompt`: a themed sheet
@@ -53,7 +52,7 @@ export function ConfirmDialog({
           className="w-full max-w-sm rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 shadow-2xl"
           onClick={(e) => e.stopPropagation()}
         >
-          <div className={cn('mb-2 flex items-center gap-2 text-sm font-semibold', destructive && 'text-[hsl(var(--status-red))]')}>
+          <div className={`mb-2 flex items-center gap-2 text-sm font-semibold ${destructive ? 'text-[hsl(var(--status-red))]' : ''}`}>
             {destructive && <AlertTriangle size={16} />}
             {title}
           </div>
@@ -81,12 +80,11 @@ export function ConfirmDialog({
               type="button"
               onClick={submit}
               disabled={!!input && !value.trim()}
-              className={cn(
-                'rounded-lg px-3 py-1.5 text-xs font-medium disabled:opacity-50',
+              className={`rounded-lg px-3 py-1.5 text-xs font-medium disabled:opacity-50 ${
                 destructive
                   ? 'bg-[hsl(var(--status-red))] text-white hover:opacity-90'
-                  : 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:opacity-90',
-              )}
+                  : 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:opacity-90'
+              }`}
             >
               {confirmLabel}
             </button>

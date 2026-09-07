@@ -110,3 +110,68 @@ describe('Sidebar', () => {
     expect(setSettingsOpen).toHaveBeenCalledWith(true);
   });
 });
+
+describe('Sidebar collapse', () => {
+  it('collapses to a rail, hiding the workspace list but keeping a way back', () => {
+    useAppStore.setState({ workspaces: [ws('a', null)] });
+    render(<Sidebar />);
+    expect(screen.getByText('a')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse sidebar' }));
+
+    expect(screen.queryByText('a')).not.toBeInTheDocument();
+    expect(screen.queryByTitle('New workspace')).not.toBeInTheDocument();
+    const expand = screen.getByRole('button', { name: 'Expand sidebar' });
+    expect(expand).toBeInTheDocument();
+
+    fireEvent.click(expand);
+    expect(screen.getByText('a')).toBeInTheDocument();
+  });
+
+  it('remembers the collapsed state across a remount', () => {
+    useAppStore.setState({ workspaces: [ws('a', null)] });
+    const { unmount } = render(<Sidebar />);
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse sidebar' }));
+    expect(JSON.parse(localStorage.getItem('tfs-sidebar-collapsed')!)).toBe(true);
+
+    unmount();
+    render(<Sidebar />);
+    expect(screen.queryByText('a')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Expand sidebar' })).toBeInTheDocument();
+  });
+
+  it('still reaches Settings from the collapsed rail', () => {
+    const setSettingsOpen = vi.fn();
+    useAppStore.setState({ setSettingsOpen });
+    render(<Sidebar />);
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse sidebar' }));
+
+    fireEvent.click(screen.getByTitle('Settings'));
+    fireEvent.click(screen.getByTitle(/^MCP:/));
+    fireEvent.click(screen.getByTitle(/^Backup:/));
+    expect(setSettingsOpen).toHaveBeenCalledTimes(3);
+    expect(setSettingsOpen).toHaveBeenCalledWith(true);
+  });
+
+  it('toggles on Ctrl/Cmd+B', () => {
+    useAppStore.setState({ workspaces: [ws('a', null)] });
+    render(<Sidebar />);
+
+    fireEvent.keyDown(window, { key: 'b', ctrlKey: true });
+    expect(screen.queryByText('a')).not.toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: 'b', metaKey: true });
+    expect(screen.getByText('a')).toBeInTheDocument();
+  });
+
+  it('leaves Ctrl+B alone while the user is typing in a field', () => {
+    useAppStore.setState({ workspaces: [ws('a', null)] });
+    render(<Sidebar />);
+    fireEvent.click(screen.getByTitle('New workspace'));
+    const input = screen.getByPlaceholderText('Workspace name');
+    input.focus();
+
+    fireEvent.keyDown(input, { key: 'b', ctrlKey: true, bubbles: true });
+    expect(screen.getByText('a')).toBeInTheDocument();
+  });
+});

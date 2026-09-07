@@ -5,17 +5,23 @@
 // extra row and column each, whose solution value is the branch current.
 
 import { solve, zeros } from './matrix.ts';
+import type { SourceSpec } from './transient.ts';
 
 export type Device =
   | { kind: 'resistor'; ref: string; a: string; b: string; ohms: number }
   | { kind: 'conductance'; ref: string; a: string; b: string; siemens: number }
-  | { kind: 'vsource'; ref: string; pos: string; neg: string; volts: number }
+  // `source` makes the value time-varying; transient.ts resolves it per step.
+  | { kind: 'vsource'; ref: string; pos: string; neg: string; volts: number; source?: SourceSpec }
   | { kind: 'isource'; ref: string; from: string; to: string; amps: number }
   | { kind: 'switch'; ref: string; a: string; b: string; closed: boolean }
   // Nonlinear. The linear kernel registers its nodes but stamps nothing;
   // operatingPoint() in nonlinear.ts replaces each one with a companion model
   // before it ever reaches solveDC.
-  | { kind: 'diode'; ref: string; anode: string; cathode: string; is: number; n: number; rs: number; led?: unknown };
+  | { kind: 'diode'; ref: string; anode: string; cathode: string; is: number; n: number; rs: number; led?: unknown }
+  // Reactive. The DC kernel treats a capacitor as open and an inductor as a
+  // short; transient.ts swaps in a companion model before solving a step.
+  | { kind: 'capacitor'; ref: string; a: string; b: string; farads: number }
+  | { kind: 'inductor'; ref: string; a: string; b: string; henries: number };
 
 export interface DcResult {
   /** node id -> volts, including the ground node at 0. */
@@ -40,7 +46,7 @@ function floating(devices: Device[], nodes: string[], ground: string): Set<strin
     adj.get(b)!.push(a);
   };
   for (const d of devices) {
-    if (d.kind === 'resistor' || d.kind === 'switch' || d.kind === 'conductance') link(d.a, d.b);
+    if (d.kind === 'resistor' || d.kind === 'switch' || d.kind === 'conductance' || d.kind === 'inductor') link(d.a, d.b);
     // A raw diode is deliberately NOT a link: this kernel stamps nothing for
     // one, so a node held up only by a diode really is floating here and needs
     // its GMIN leak. Once operatingPoint() swaps in the companion model, the
@@ -99,6 +105,8 @@ export function solveDC(devices: Device[], ground: string): DcResult | null {
   for (const d of devices) {
     if (d.kind === 'resistor') conductance(d.a, d.b, 1 / d.ohms);
     else if (d.kind === 'conductance') conductance(d.a, d.b, d.siemens);
+    // At DC a capacitor is an open circuit and an inductor is a wire.
+    else if (d.kind === 'inductor') conductance(d.a, d.b, 1 / SWITCH_ON_OHMS);
     else if (d.kind === 'switch') conductance(d.a, d.b, d.closed ? 1 / SWITCH_ON_OHMS : 1 / SWITCH_OFF_OHMS);
     else if (d.kind === 'isource') {
       const i = at(d.from);
