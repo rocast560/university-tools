@@ -143,9 +143,44 @@ function options(p: ProjectState): string {
     <p class="muted mono">${esc(p.path)}</p></div>`;
 }
 
+/**
+ * Live numbers are written straight into the DOM, off the store, and no more
+ * than ten times a second. Nobody reads a 60 Hz table, and textContent writes
+ * across forty rows are the expensive part of showing one.
+ */
+let liveWired = false;
+const LIVE_HZ = 10;
+
+function wireLive() {
+  if (liveWired) return;
+  liveWired = true;
+  let last = 0;
+  let trailing = 0;
+  const paint = (frame: AnalogState) => {
+    last = performance.now();
+    const panels = document.getElementById('panels');
+    if (panels) patchSim(panels, frame, analog.isRunning());
+    const clock = document.querySelector<HTMLElement>('.toolbar [data-live-clock]');
+    if (clock) clock.textContent = `${frame.time.toFixed(3)} s`;
+  };
+  analog.subscribe((frame) => {
+    const wait = 1000 / LIVE_HZ - (performance.now() - last);
+    if (wait <= 0) {
+      clearTimeout(trailing);
+      return paint(frame);
+    }
+    // Always schedule the frame that was throttled away. Dropping it outright
+    // loses the last frame of a run, and loses a one-off re-solve entirely -
+    // which looks exactly like the change having had no effect.
+    clearTimeout(trailing);
+    trailing = setTimeout(() => paint(frame), wait) as unknown as number;
+  });
+}
+
 export function renderPanels(panels: HTMLElement, toolbar: HTMLElement, legend: HTMLElement, s: AppState) {
   const p = s.project;
   if (!p) return;
+  wireLive();
   const body = { guide, sim, parts, pinouts, checks, truth, options }[p.panel](p);
   // The tab bar is built once and kept: replacing it on every state change
   // killed the active-pill transition and reset the panel's scroll position.
@@ -162,9 +197,11 @@ export function renderPanels(panels: HTMLElement, toolbar: HTMLElement, legend: 
     if (b.dataset.tab === 'checks') b.querySelector('.tabwarn')!.toggleAttribute('hidden', !warn);
   }
   panels.querySelector<HTMLElement>('.panelbody')!.innerHTML = body;
+  if (p.panel === 'sim') patchSim(panels, analog.latest(), p.running);
 
   const errs = p.doc.checks.filter((c) => c.level === 'error').length;
   toolbar.innerHTML =
+    `<div class="tgroup run"><button type="button" class="btn ${p.running ? 'is-on' : ''}" data-action="${p.running ? 'stop' : 'run'}">${p.running ? '■ Stop' : '▶ Run'}</button><button type="button" class="btn" data-action="step" ${p.running ? 'disabled' : ''}>Step</button><button type="button" class="btn ghost" data-action="reset-sim">Reset</button><span class="simclock mono" data-live-clock>0.000 s</span></div>` +
     `<div class="tgroup"><button type="button" class="btn" data-action="fit">Fit</button><button type="button" class="btn" data-action="print">Print</button></div>` +
     `<div class="tgroup"><a class="btn" href="/api/projects/${p.id}/board.svg" download="${esc(p.name)}-breadboard.svg">SVG</a><a class="btn" href="/api/projects/${p.id}/board.png" download="${esc(p.name)}-breadboard.png">PNG</a><a class="btn" href="/api/projects/${p.id}/schematic.svg" target="_blank" rel="noopener">Schematic</a></div>` +
     (p.activeStep !== null ? '<button type="button" class="btn ghost" data-action="clear-step">Clear highlight</button>' : '') +
@@ -193,6 +230,12 @@ export function renderPanels(panels: HTMLElement, toolbar: HTMLElement, legend: 
     }
     const check = t.closest<HTMLElement>('.check[data-ref]');
     if (check) return store.setProject({ highlight: { ref: check.dataset.ref! }, activeStep: null });
+    const sw = t.closest<HTMLInputElement>('input[data-sw]');
+    if (sw) {
+      const key = sw.dataset.sw!;
+      store.setProject({ switches: { ...p.switches, [key]: sw.checked } });
+      return void analog.refresh({ ...p, switches: { ...p.switches, [key]: sw.checked } });
+    }
     const action = t.closest<HTMLElement>('[data-action]')?.dataset.action;
     if (action === 'reset') {
       try {
@@ -205,6 +248,19 @@ export function renderPanels(panels: HTMLElement, toolbar: HTMLElement, legend: 
   };
   panels.onchange = async (e) => {
     const t = e.target as HTMLInputElement | HTMLSelectElement;
+    const led = t.dataset.ledcolour;
+    if (led) {
+      try {
+        const doc = await api.ledColor(p.id, led, t.value);
+        const ledColors = { ...p.sidecar.ledColors, [led]: t.value as LedColour };
+        store.setProject({ doc, sidecar: { ...p.sidecar, ledColors } });
+        // The colour changes the diode model, so the solver has to be rebuilt.
+        analog.rebuild({ ...p, doc, sidecar: { ...p.sidecar, ledColors } });
+      } catch (err) {
+        toast((err as Error).message);
+      }
+      return;
+    }
     const opt = t.dataset.opt;
     if (!opt) return;
     const patch: Record<string, unknown> = {};
@@ -224,6 +280,16 @@ export function renderPanels(panels: HTMLElement, toolbar: HTMLElement, legend: 
     if (action === 'fit') fitView(document.getElementById('board')!);
     if (action === 'print') window.print();
     if (action === 'clear-step') store.setProject({ activeStep: null, highlight: null });
+    if (action === 'run') {
+      analog.start(p);
+      store.setProject({ running: true });
+    }
+    if (action === 'stop') {
+      analog.stop();
+      store.setProject({ running: false });
+    }
+    if (action === 'step') analog.stepOnce(p);
+    if (action === 'reset-sim') analog.reset(p);
   };
   legend.onclick = async (e) => {
     const net = (e.target as HTMLElement).closest<HTMLElement>('[data-legend]')?.dataset.legend;
