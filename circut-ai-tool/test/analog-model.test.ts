@@ -72,8 +72,10 @@ describe('buildAnalogModel on the PL1_1 fixture', () => {
 
   test('models both switches and reports the parts it cannot do yet', () => {
     expect(model.devices.filter((d) => d.kind === 'switch').map((d) => d.ref).sort()).toEqual(['SW1', 'SW2']);
-    // The 74xx chips arrive in phase 3.
-    expect(model.notModelled.sort()).toEqual(['U1 (74LS86)', 'U2 (74LS04)', 'U3 (74LS00)']);
+    // Nothing on this board is left unmodelled: resistors and switches from
+    // phase 1, LEDs from phase 2, the three 74xx chips from phase 3.
+    expect(model.notModelled).toEqual([]);
+    expect(model.chips.map((c) => c.ref).sort()).toEqual(['U1', 'U2', 'U3']);
   });
 
   test('the board as wired solves without a singular matrix', () => {
