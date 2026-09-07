@@ -16,9 +16,9 @@
 // lines up exactly.
 
 import { ROWY, X0, P } from './geometry.ts';
-import type { BoardGeom, Skin, SkinContext, SkinLedState } from './skin.ts';
+import type { BoardGeom, Point, Skin, SkinContext, SkinLedState } from './skin.ts';
 import type { Theme } from './theme.ts';
-import { ledSpec } from '../parts/led.ts';
+import { ledSpec, ledSpecFor, type LedColour } from '../parts/led.ts';
 import type { PlacedPart } from '../layout/types.ts';
 
 const esc = (s: string) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -59,12 +59,18 @@ function socketPatterns(g: BoardGeom): string {
   );
 }
 
+/** A chosen colour wins over whatever the schematic value says. */
+export function specOf(ref: string, value: string, colours: Record<string, LedColour>): ReturnType<typeof ledSpec> {
+  const chosen = colours[ref];
+  return chosen ? ledSpecFor(chosen) : ledSpec(value || 'LED');
+}
+
 function ledDefs(ctx: SkinContext): string {
   const out: string[] = [];
   for (const part of ctx.parts) {
     if (part.style !== 'LED') continue;
     const id = idOf(part.id);
-    const spec = ledSpec(part.value || 'LED');
+    const spec = specOf(part.id, part.value, ctx.ledColors);
     const body = spec.body;
     const light = spec.light;
     out.push(
@@ -131,6 +137,10 @@ export const RICH: Skin = {
         `<stop offset="0" stop-color="#9AA0AA"/><stop offset=".5" stop-color="#5A5F68"/><stop offset="1" stop-color="#2F333A"/>` +
         `</linearGradient>` +
       `<radialGradient id="bbContact"><stop offset="0" stop-color="#2A2416" stop-opacity=".26"/><stop offset="1" stop-color="#2A2416" stop-opacity="0"/></radialGradient>` +
+      `<linearGradient id="bbTin" x1="0" y1="0" x2=".35" y2="1">` +
+        `<stop offset="0" stop-color="#F2F4F7"/><stop offset=".38" stop-color="#B9BFC8"/>` +
+        `<stop offset=".7" stop-color="#818892"/><stop offset="1" stop-color="#5A606A"/>` +
+        `</linearGradient>` +
       `<radialGradient id="bbSpec"><stop offset="0" stop-color="#FFFFFF" stop-opacity=".92"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/></radialGradient>` +
       socketPatterns(g) +
       ledDefs(ctx)
@@ -178,9 +188,9 @@ export const RICH: Skin = {
     return `<ellipse cx="${n(mx + 1)}" cy="${n(my + 3.4)}" rx="${n(halfLen + 5)}" ry="7" fill="url(#bbContact)"/>`;
   },
 
-  ledBody(part, state) {
+  ledBody(part, state, _t, colours) {
     const id = idOf(part.id);
-    const spec = ledSpec(part.value || 'LED');
+    const spec = specOf(part.id, part.value, colours);
     const lit = state.brightness > 0;
     return (
       // Flange with the cathode flat cut as a chord on the -x side.
@@ -213,6 +223,31 @@ export const RICH: Skin = {
     );
   },
 
+  wireBody(a, c, b, color, rail) {
+    const d = `M ${n(a[0])} ${n(a[1])} Q ${n(c[0])} ${n(c[1])} ${n(b[0])} ${n(b[1])}`;
+    const w = rail ? 3.2 : 3.6;
+    // The insulation is the same path with its two ends dashed away, so the
+    // bare tinned core underneath shows through exactly where a real jumper
+    // is stripped. pathLength normalises the curve to 100 units, which means
+    // no Bezier splitting is needed to place the cut.
+    const tip = Math.round(Math.min(28, Math.max(5, (TIP_UNITS / quadLength(a, c, b)) * 100)));
+    const jacket = { pathLength: 100, 'stroke-dasharray': `0 ${tip} ${100 - 2 * tip} ${tip}`, 'stroke-linecap': 'butt' as const };
+    const stroke = (extra: Record<string, string | number>) => `<path d="${d}" fill="none" ${Object.entries(extra).map(([k, v]) => `${k}="${typeof v === 'number' ? n(v) : v}"`).join(' ')}/>`;
+    return (
+      // Cast shadow, so a wire crossing another reads as over rather than merged.
+      stroke({ stroke: '#2A2416', 'stroke-opacity': '.22', 'stroke-width': w + 2.4, 'stroke-linecap': 'round', transform: 'translate(0.8 2.2)' }) +
+      // Bare core: only the stripped ends are ever visible.
+      stroke({ stroke: 'url(#bbTin)', 'stroke-width': w * 0.62, 'stroke-linecap': 'round' }) +
+      // Three concentric strokes read as a round tube: dark edge, body, sheen.
+      stroke({ ...jacket, stroke: shade(color, -0.5), 'stroke-width': w + 1.3 }) +
+      stroke({ ...jacket, stroke: color, 'stroke-width': w }) +
+      stroke({ ...jacket, stroke: shade(color, 0.55), 'stroke-opacity': '.5', 'stroke-width': w * 0.3 }) +
+      // The crimp where the jacket is cut, and the pin pressed into the hole.
+      endCap(a, color) +
+      endCap(b, color)
+    );
+  },
+
   spillLayer(ctx) {
     return ledPositions(ctx)
       .map(({ part, x, y, state }) => `<ellipse data-spill="${esc(part.id)}" cx="${n(x)}" cy="${n(y)}" rx="34" ry="26" fill="url(#bbSpill-${idOf(part.id)})" opacity="${n(spillOpacity(state))}"/>`)
@@ -225,6 +260,23 @@ export const RICH: Skin = {
       .join('');
   },
 };
+
+/** How much bare conductor to leave showing at each end, in board units. */
+const TIP_UNITS = 7;
+
+/** Good enough for a shallow arc, and it only picks the dash length. */
+function quadLength(a: Point, c: Point, b: Point): number {
+  const d = (p: Point, q: Point) => Math.hypot(q[0] - p[0], q[1] - p[1]);
+  return Math.max((d(a, c) + d(c, b) + d(a, b)) / 2, 1);
+}
+
+/** A pin pressed into a hole, with the crimp of the jacket behind it. */
+function endCap([x, y]: Point, color: string): string {
+  return (
+    `<circle cx="${n(x)}" cy="${n(y)}" r="2.9" fill="url(#bbTin)" stroke="${shade(color, -0.6)}" stroke-width=".6"/>` +
+    `<circle cx="${n(x - 0.7)}" cy="${n(y - 0.8)}" r="1" fill="#FFFFFF" opacity=".5"/>`
+  );
+}
 
 /** The mid-point of each LED, where its light comes from. */
 function ledPositions(ctx: SkinContext): { part: PlacedPart; x: number; y: number; state: SkinLedState }[] {

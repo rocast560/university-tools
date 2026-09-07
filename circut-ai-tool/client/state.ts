@@ -19,7 +19,15 @@ export interface ProjectState {
   highlight: Highlight | null;
   activeStep: number | null;
   done: Set<number>;
-  panel: 'guide' | 'parts' | 'pinouts' | 'checks' | 'truth' | 'options';
+  panel: 'guide' | 'sim' | 'parts' | 'pinouts' | 'checks' | 'truth' | 'options';
+  /** Whether the analog simulation loop is running. */
+  running: boolean;
+  /**
+   * The live AnalogState never lives here. Every store.set() re-renders the
+   * panels, which at 60 Hz would be far worse than anything the solver costs,
+   * so frames go out on the bus in client/analog.ts instead and only this
+   * discrete flag is state.
+   */
 }
 
 export interface AppState {
