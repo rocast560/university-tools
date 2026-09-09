@@ -3,12 +3,95 @@
 // delegated event handlers.
 
 import { displayName } from '../src/netlist.ts';
+import { ledSpec, type LedColour } from '../src/parts/led.ts';
+import type { AnalogState } from '../src/sim/analog/simulator.ts';
+import { analog } from './analog.ts';
+import { close3d, is3dOpen, open3d } from './view3d.ts';
 import { api } from './api.ts';
 import { fitView } from './board.ts';
 import { esc, toast } from './main.ts';
 import { saveDone, store, type AppState, type ProjectState } from './state.ts';
 
-const TABS: [ProjectState['panel'], string][] = [['guide', 'Guide'], ['parts', 'Parts'], ['pinouts', 'Pinouts'], ['checks', 'Checks'], ['truth', 'Truth table'], ['options', 'Options']];
+const TABS: [ProjectState['panel'], string][] = [['guide', 'Guide'], ['sim', 'Simulate'], ['parts', 'Parts'], ['pinouts', 'Pinouts'], ['checks', 'Checks'], ['truth', 'Truth table'], ['options', 'Options']];
+
+const LED_COLOURS: [LedColour, string][] = [['red', 'Red'], ['orange', 'Orange'], ['yellow', 'Yellow'], ['green', 'Green'], ['blue', 'Blue'], ['white', 'White'], ['uv', 'UV']];
+
+/**
+ * The Simulate panel is rendered once per structural change and then patched
+ * in place - see patchSim(). Rebuilding this HTML every frame would mean
+ * three innerHTML writes per frame, which costs far more than the solver.
+ */
+function sim(p: ProjectState): string {
+  const inputs = p.doc.sim.model.inputs;
+  const leds = p.doc.parts.filter((x) => x.style === 'LED');
+  const parts = p.doc.parts.filter((x) => x.style === 'R' || x.style === 'LED' || x.style === 'D');
+  const nets = Object.keys(p.doc.nets).sort((a, b) => displayName(a).localeCompare(displayName(b), undefined, { numeric: true }));
+  const controls = inputs.length
+    ? `<ul class="sources">${inputs.map((i) => `<li><label><input type="checkbox" data-sw="${esc(i.key)}" ${p.switches[i.key] ? 'checked' : ''}> <b class="mono">${esc(i.name)}</b></label><span class="muted">${esc(i.control)}</span><span class="mono" data-live-net="${esc(displayName(i.net))}">—</span></li>`).join('')}</ul>`
+    : '<p class="muted">No switches on this board, so there is nothing to drive by hand.</p>';
+  const colours = leds.length
+    ? `<h3>LED colour</h3><ul class="ledcolours">${leds.map((l) => `<li><b class="mono">${esc(l.id)}</b><select data-ledcolour="${esc(l.id)}">${LED_COLOURS.map(([k, label]) => `<option value="${k}" ${ledColourOf(p, l.id) === k ? 'selected' : ''}>${label}</option>`).join('')}</select><span class="mono" data-live-i="${esc(l.id)}">—</span></li>`).join('')}</ul>`
+    : '';
+  return `<div class="panel sim">
+    <h2>Simulate</h2>
+    <p class="muted">A real solve of the board as wired: every net gets a voltage, every part a current. Press Run in the toolbar.</p>
+    <div class="simstat"><span class="mono" data-live-clock>0.000 s</span><span class="mono" data-live-status>idle</span></div>
+    <h3>Inputs</h3>${controls}
+    ${colours}
+    <h3>Faults</h3><div data-live-faults><p class="muted">None.</p></div>
+    <h3>Parts</h3>
+    <table class="live"><tr><th>Part</th><th>Current</th><th>Power</th></tr>
+    ${parts.map((x) => `<tr data-ref="${esc(x.id)}"><td class="mono">${esc(x.id)} ${esc(x.value)}</td><td class="mono" data-live-i="${esc(x.id)}">—</td><td class="mono" data-live-p="${esc(x.id)}">—</td></tr>`).join('')}</table>
+    <h3>Nets</h3>
+    <table class="live"><tr><th>Net</th><th>Voltage</th></tr>
+    ${nets.map((netName) => `<tr data-net="${esc(netName)}"><td class="mono">${esc(displayName(netName))}</td><td class="mono" data-live-net="${esc(displayName(netName))}">—</td></tr>`).join('')}</table>
+  </div>`;
+}
+
+/** The colour override for an LED, falling back to whatever its value says. */
+export function ledColourOf(p: ProjectState, ref: string): LedColour {
+  const override = p.sidecar.ledColors?.[ref];
+  if (override) return override;
+  const part = p.doc.parts.find((x) => x.id === ref);
+  return ledSpec(part?.value ?? 'LED').key;
+}
+
+/**
+ * Write the live numbers into the panel that is already on the page. Only
+ * textContent, and only where the text actually changed.
+ */
+export function patchSim(root: HTMLElement, s: AnalogState | null, running: boolean) {
+  const put = (el: Element | null, text: string) => {
+    if (el && el.textContent !== text) el.textContent = text;
+  };
+  put(root.querySelector('[data-live-clock]'), s ? `${s.time.toFixed(3)} s` : '0.000 s');
+  put(root.querySelector('[data-live-status]'), !s ? 'idle' : !s.converged ? 'did not settle' : running ? 'running' : 'solved');
+  for (const el of root.querySelectorAll<HTMLElement>('[data-live-net]')) {
+    const v = s?.netVolts[el.dataset.liveNet!];
+    put(el, v === undefined ? '—' : `${v.toFixed(2)} V`);
+  }
+  for (const el of root.querySelectorAll<HTMLElement>('[data-live-i]')) {
+    const i = s?.currents[el.dataset.liveI!];
+    put(el, i === undefined ? '—' : formatAmps(i));
+  }
+  for (const el of root.querySelectorAll<HTMLElement>('[data-live-p]')) {
+    const w = s?.power[el.dataset.liveP!];
+    put(el, w === undefined ? '—' : `${(w * 1000).toFixed(1)} mW`);
+  }
+  const faults = root.querySelector('[data-live-faults]');
+  if (faults) {
+    const html = s?.faults.length ? s.faults.map((f) => `<div class="check ${f.level}" ${f.ref ? `data-ref="${esc(f.ref)}"` : ''}><b>${esc(f.level)}</b> ${esc(f.message)}</div>`).join('') : '<p class="muted">None.</p>';
+    if (faults.innerHTML !== html) faults.innerHTML = html;
+  }
+}
+
+function formatAmps(i: number): string {
+  const a = Math.abs(i);
+  if (a < 1e-6) return '0 A';
+  if (a < 1e-3) return `${(i * 1e6).toFixed(1)} µA`;
+  if (a < 1) return `${(i * 1000).toFixed(2)} mA`;
+  return `${i.toFixed(3)} A`;
+}
 
 function guide(p: ProjectState): string {
   const total = p.doc.steps.length;
@@ -61,10 +144,45 @@ function options(p: ProjectState): string {
     <p class="muted mono">${esc(p.path)}</p></div>`;
 }
 
+/**
+ * Live numbers are written straight into the DOM, off the store, and no more
+ * than ten times a second. Nobody reads a 60 Hz table, and textContent writes
+ * across forty rows are the expensive part of showing one.
+ */
+let liveWired = false;
+const LIVE_HZ = 10;
+
+function wireLive() {
+  if (liveWired) return;
+  liveWired = true;
+  let last = 0;
+  let trailing = 0;
+  const paint = (frame: AnalogState) => {
+    last = performance.now();
+    const panels = document.getElementById('panels');
+    if (panels) patchSim(panels, frame, analog.isRunning());
+    const clock = document.querySelector<HTMLElement>('.toolbar [data-live-clock]');
+    if (clock) clock.textContent = `${frame.time.toFixed(3)} s`;
+  };
+  analog.subscribe((frame) => {
+    const wait = 1000 / LIVE_HZ - (performance.now() - last);
+    if (wait <= 0) {
+      clearTimeout(trailing);
+      return paint(frame);
+    }
+    // Always schedule the frame that was throttled away. Dropping it outright
+    // loses the last frame of a run, and loses a one-off re-solve entirely -
+    // which looks exactly like the change having had no effect.
+    clearTimeout(trailing);
+    trailing = setTimeout(() => paint(frame), wait) as unknown as number;
+  });
+}
+
 export function renderPanels(panels: HTMLElement, toolbar: HTMLElement, legend: HTMLElement, s: AppState) {
   const p = s.project;
   if (!p) return;
-  const body = { guide, parts, pinouts, checks, truth, options }[p.panel](p);
+  wireLive();
+  const body = { guide, sim, parts, pinouts, checks, truth, options }[p.panel](p);
   // The tab bar is built once and kept: replacing it on every state change
   // killed the active-pill transition and reset the panel's scroll position.
   const warn = p.doc.checks.some((c) => c.level === 'error');
@@ -80,10 +198,13 @@ export function renderPanels(panels: HTMLElement, toolbar: HTMLElement, legend: 
     if (b.dataset.tab === 'checks') b.querySelector('.tabwarn')!.toggleAttribute('hidden', !warn);
   }
   panels.querySelector<HTMLElement>('.panelbody')!.innerHTML = body;
+  if (p.panel === 'sim') patchSim(panels, analog.latest(), p.running);
 
   const errs = p.doc.checks.filter((c) => c.level === 'error').length;
   toolbar.innerHTML =
+    `<div class="tgroup run"><button type="button" class="btn ${p.running ? 'is-on' : ''}" data-action="${p.running ? 'stop' : 'run'}">${p.running ? '■ Stop' : '▶ Run'}</button><button type="button" class="btn" data-action="step" ${p.running ? 'disabled' : ''}>Step</button><button type="button" class="btn ghost" data-action="reset-sim">Reset</button><span class="simclock mono" data-live-clock>0.000 s</span></div>` +
     `<div class="tgroup"><button type="button" class="btn" data-action="fit">Fit</button><button type="button" class="btn" data-action="print">Print</button></div>` +
+    `<div class="tgroup"><button type="button" class="btn ${is3dOpen() ? 'is-on' : ''}" data-action="view3d">${is3dOpen() ? 'Exit 3D' : '3D'}</button></div>` +
     `<div class="tgroup"><a class="btn" href="/api/projects/${p.id}/board.svg" download="${esc(p.name)}-breadboard.svg">SVG</a><a class="btn" href="/api/projects/${p.id}/board.png" download="${esc(p.name)}-breadboard.png">PNG</a><a class="btn" href="/api/projects/${p.id}/schematic.svg" target="_blank" rel="noopener">Schematic</a></div>` +
     (p.activeStep !== null ? '<button type="button" class="btn ghost" data-action="clear-step">Clear highlight</button>' : '') +
     `<span class="statuschip"><b>${esc(p.doc.board.kind)} board</b><i class="dot"></i>${p.doc.wires.length} wires<i class="dot"></i><em class="errs ${errs ? 'is-bad' : 'is-ok'}">${errs} ${errs === 1 ? 'error' : 'errors'}</em></span>`;
@@ -111,6 +232,12 @@ export function renderPanels(panels: HTMLElement, toolbar: HTMLElement, legend: 
     }
     const check = t.closest<HTMLElement>('.check[data-ref]');
     if (check) return store.setProject({ highlight: { ref: check.dataset.ref! }, activeStep: null });
+    const sw = t.closest<HTMLInputElement>('input[data-sw]');
+    if (sw) {
+      const key = sw.dataset.sw!;
+      store.setProject({ switches: { ...p.switches, [key]: sw.checked } });
+      return void analog.refresh({ ...p, switches: { ...p.switches, [key]: sw.checked } });
+    }
     const action = t.closest<HTMLElement>('[data-action]')?.dataset.action;
     if (action === 'reset') {
       try {
@@ -123,6 +250,19 @@ export function renderPanels(panels: HTMLElement, toolbar: HTMLElement, legend: 
   };
   panels.onchange = async (e) => {
     const t = e.target as HTMLInputElement | HTMLSelectElement;
+    const led = t.dataset.ledcolour;
+    if (led) {
+      try {
+        const doc = await api.ledColor(p.id, led, t.value);
+        const ledColors = { ...p.sidecar.ledColors, [led]: t.value as LedColour };
+        store.setProject({ doc, sidecar: { ...p.sidecar, ledColors } });
+        // The colour changes the diode model, so the solver has to be rebuilt.
+        analog.rebuild({ ...p, doc, sidecar: { ...p.sidecar, ledColors } });
+      } catch (err) {
+        toast((err as Error).message);
+      }
+      return;
+    }
     const opt = t.dataset.opt;
     if (!opt) return;
     const patch: Record<string, unknown> = {};
@@ -142,6 +282,23 @@ export function renderPanels(panels: HTMLElement, toolbar: HTMLElement, legend: 
     if (action === 'fit') fitView(document.getElementById('board')!);
     if (action === 'print') window.print();
     if (action === 'clear-step') store.setProject({ activeStep: null, highlight: null });
+    if (action === 'run') {
+      analog.start(p);
+      store.setProject({ running: true });
+    }
+    if (action === 'stop') {
+      analog.stop();
+      store.setProject({ running: false });
+    }
+    if (action === 'step') analog.stepOnce(p);
+    if (action === 'reset-sim') analog.reset(p);
+    if (action === 'view3d') {
+      const card = document.querySelector<HTMLElement>('.board-card')!;
+      if (is3dOpen()) close3d();
+      else void open3d(card, p.doc);
+      // Repaint the toolbar so the button flips to Exit.
+      setTimeout(() => renderPanels(panels, toolbar, legend, store.get()), 0);
+    }
   };
   legend.onclick = async (e) => {
     const net = (e.target as HTMLElement).closest<HTMLElement>('[data-legend]')?.dataset.legend;
