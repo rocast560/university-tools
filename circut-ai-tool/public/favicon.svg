@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="Circuit AI Tool">
+  <!-- Circuit AI Tool: a jumper wire arcing over breadboard holes. Tile and wire
+       take the dark theme's background and accent. Keep this comment free of
+       double hyphens (CSS variable names) - they are illegal inside an XML
+       comment and make the whole file unparseable, so the favicon silently
+       fails to render. -->
+  <rect width="32" height="32" rx="7" fill="#0e1014"/>
+  <rect x=".6" y=".6" width="30.8" height="30.8" rx="6.4" fill="none" stroke="#2a303a" stroke-width="1.2"/>
+  <g fill="#586070">
+    <circle cx="8" cy="8" r="1.5"/><circle cx="16" cy="8" r="1.5"/><circle cx="24" cy="8" r="1.5"/>
+    <circle cx="8" cy="16" r="1.5"/><circle cx="16" cy="16" r="1.5"/><circle cx="24" cy="16" r="1.5"/>
+    <circle cx="8" cy="24" r="1.5"/><circle cx="16" cy="24" r="1.5"/><circle cx="24" cy="24" r="1.5"/>
+  </g>
+  <path d="M8 24C8 12 24 12 24 24" fill="none" stroke="#6aa8ff" stroke-width="2.8" stroke-linecap="round"/>
+  <circle cx="8" cy="24" r="2.9" fill="#6aa8ff"/>
+  <circle cx="24" cy="24" r="2.9" fill="#6aa8ff"/>
+</svg>
