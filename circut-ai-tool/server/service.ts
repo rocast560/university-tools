@@ -11,6 +11,7 @@ import type { Hole, Options, Sidecar } from '../src/layout/types.ts';
 import { emptySidecar } from '../src/layout/types.ts';
 import { parseNetlist, type Design } from '../src/netlist.ts';
 import { buildLayoutDoc, type LayoutDoc } from '../src/pipeline.ts';
+import { LED_COLOURS, type LedColour } from '../src/parts/led.ts';
 import { simulate, type SimResult } from '../src/sim/index.ts';
 import type { KicadCli } from './kicad-cli.ts';
 import type { LibraryLookup } from './libraries.ts';
@@ -321,6 +322,20 @@ export class Service {
     if (color === null) delete p.sidecar.colors[net];
     else if (/^#[0-9a-fA-F]{6}$/.test(color)) p.sidecar.colors[net] = color;
     else throw new ServiceError('color must be #rrggbb');
+    return this.rebuild(p);
+  }
+
+  /**
+   * Choose an LED's colour on the board. Stored in the sidecar, never in the
+   * schematic, and read by both the renderer and the analog solver - so this
+   * also changes that LED's forward voltage and current.
+   */
+  async setLedColor(id: string, ref: string, colour: string | null): Promise<OpenProject> {
+    const p = this.get(id);
+    if (!p.design.components.has(ref)) throw new ServiceError(`no part ${ref} in the schematic`, 404);
+    if (colour === null) delete p.sidecar.ledColors[ref];
+    else if ((LED_COLOURS as readonly string[]).includes(colour)) p.sidecar.ledColors[ref] = colour as LedColour;
+    else throw new ServiceError(`colour must be one of ${LED_COLOURS.join(', ')}`);
     return this.rebuild(p);
   }
 
