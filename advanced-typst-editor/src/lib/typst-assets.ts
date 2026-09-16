@@ -64,7 +64,9 @@ export async function uploadAsset(
 // screenshot's raw bytes for the whole session would cost megabytes per
 // asset for data a local fetch can restore in milliseconds.
 const rawBytesCache = new Map<string, Promise<Uint8Array>>();
-const RAW_CACHE_MAX = 12;
+// Enough for every screenshot of a handful of prefetched workspaces to stay
+// resident; a screenshot is tens to hundreds of KB.
+const RAW_CACHE_MAX = 64;
 
 function assetKey(id: string): { wsId: string; key: string } {
   const s = useAppStore.getState();
@@ -72,9 +74,18 @@ function assetKey(id: string): { wsId: string; key: string } {
   return { wsId: s.activeWorkspaceId ?? '', key: `${s.activeWorkspaceId}:${id}:${etag}` };
 }
 
-/** Fetch (and memoize) an asset's original bytes. */
+/** Fetch (and memoize) an asset of the *active* workspace by id. */
 export function fetchAssetBytes(id: string): Promise<Uint8Array> {
   const { wsId, key } = assetKey(id);
+  return fetchRaw(wsId, key, id);
+}
+
+/** Fetch (and memoize) an asset's original bytes for any workspace, active or not. */
+export function fetchAssetBytesFor(wsId: string, asset: Pick<TypstAsset, 'id' | 'etag'>): Promise<Uint8Array> {
+  return fetchRaw(wsId, `${wsId}:${asset.id}:${asset.etag}`, asset.id);
+}
+
+function fetchRaw(wsId: string, key: string, id: string): Promise<Uint8Array> {
   const hit = rawBytesCache.get(key);
   if (hit) {
     // Refresh recency: Map iteration order is insertion order.
@@ -97,12 +108,12 @@ export function fetchAssetBytes(id: string): Promise<Uint8Array> {
 
 /** Drop an asset from the byte caches (called when it's deleted). */
 export function forgetAsset(id: string): void {
-  const rawPrefix = `${useAppStore.getState().activeWorkspaceId}:${id}:`;
+  const prefix = `${useAppStore.getState().activeWorkspaceId}:${id}:`;
   for (const key of [...rawBytesCache.keys()]) {
-    if (key.startsWith(rawPrefix)) rawBytesCache.delete(key);
+    if (key.startsWith(prefix)) rawBytesCache.delete(key);
   }
   for (const key of [...croppedCache.keys()]) {
-    if (key.startsWith(`${id}:`)) croppedCache.delete(key);
+    if (key.startsWith(prefix)) croppedCache.delete(key);
   }
 }
 
@@ -352,8 +363,9 @@ export function blurredPreviewBytes(
  * re-encoding them isn't possible, and for SVG rasterizing would throw away
  * resolution independence.
  */
-export function resolveAssetBytes(asset: TypstAsset): Promise<Uint8Array> {
-  if (asset.kind !== 'image') return fetchAssetBytes(asset.id);
+export function resolveAssetBytes(asset: TypstAsset, workspaceId?: string): Promise<Uint8Array> {
+  const wsId = workspaceId ?? useAppStore.getState().activeWorkspaceId ?? '';
+  if (asset.kind !== 'image') return fetchAssetBytesFor(wsId, asset);
 
   const claimed = formatFromFilename(asset.filename);
   const wantsCrop = !isFullFrame(asset.crop);
@@ -361,13 +373,13 @@ export function resolveAssetBytes(asset: TypstAsset): Promise<Uint8Array> {
 
   // Nothing a canvas can produce → mount as-is. (An SVG crop rect or blur
   // region is ignored rather than rasterized.)
-  if (!claimed || !ENCODABLE_FORMATS.has(claimed)) return fetchAssetBytes(asset.id);
+  if (!claimed || !ENCODABLE_FORMATS.has(claimed)) return fetchAssetBytesFor(wsId, asset);
 
-  const key = `${asset.id}:${asset.etag}:${claimed}:${wantsCrop ? cropKey(asset.crop as CropRect) : 'full'}:${blursKey(asset.blurs)}`;
+  const key = `${wsId}:${asset.id}:${asset.etag}:${claimed}:${wantsCrop ? cropKey(asset.crop as CropRect) : 'full'}:${blursKey(asset.blurs)}`;
   const hit = croppedCache.get(key);
   if (hit) return hit;
 
-  const p = fetchAssetBytes(asset.id).then(async (raw) => {
+  const p = fetchAssetBytesFor(wsId, asset).then(async (raw) => {
     const actual = sniffImageFormat(raw);
     if (wantsCrop) {
       return cropImageBytes(
@@ -387,7 +399,7 @@ export function resolveAssetBytes(asset: TypstAsset): Promise<Uint8Array> {
   // them: without this, a session of crop/blur adjustments retains every
   // intermediate multi-MB encode until the tab closes.
   for (const k of [...croppedCache.keys()]) {
-    if (k !== key && k.startsWith(`${asset.id}:`)) croppedCache.delete(k);
+    if (k !== key && k.startsWith(`${wsId}:${asset.id}:`)) croppedCache.delete(k);
   }
   croppedCache.set(key, p);
   return p;
