@@ -7,6 +7,7 @@ import { useAppStore } from '@/stores';
 import { groupWorkspaces } from '@/lib/workspace-groups';
 import { loadCollapsedGroups, saveCollapsedGroups, toggleGroup } from '@/lib/collapsed-groups';
 import { loadSidebarCollapsed, saveSidebarCollapsed } from '@/lib/sidebar-collapse';
+import { cancelHoverPrefetch, hoverPrefetch } from '@/lib/prefetch';
 import type { BackupState, WorkspaceStatus } from '@/types';
 
 // Both only appear on a deliberate action (locating a moved workspace,
@@ -159,6 +160,7 @@ export function Sidebar() {
               )}
               {!isCollapsed && items.map((ws) => (
                 <button key={ws.id} type="button" draggable onDragStart={(e) => e.dataTransfer.setData(DRAG_MIME, ws.id)} onClick={() => void select(ws.id)} onContextMenu={(e) => { e.preventDefault(); setMenu({ ws, x: e.clientX, y: e.clientY }); }}
+                  onPointerEnter={() => { if (ws.status === 'ok' && ws.id !== active) hoverPrefetch(ws.id); }} onPointerLeave={cancelHoverPrefetch}
                   className={`flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-xs hover:bg-[hsl(var(--accent))] ${ws.id === active ? 'bg-[hsl(var(--accent))] font-medium' : ''}`}>
                   {ws.status === 'missing' ? <AlertTriangle size={12} className="text-[hsl(var(--status-amber))]" /> : <Circle size={6} className={ws.library ? 'fill-current text-[hsl(var(--muted-foreground))]' : 'text-[hsl(var(--status-blue))]'} />}
                   <span className="flex-1 truncate" title={ws.path}>{ws.name}</span>

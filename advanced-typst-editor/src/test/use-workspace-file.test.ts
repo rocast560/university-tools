@@ -81,7 +81,7 @@ describe('useWorkspaceFile text cache', () => {
   it('switching keys presents the new document in the same render and caches edits by key', async () => {
     textCache.set('w1:a.typ', { text: 'A', etag: '"a"' });
     textCache.set('w1:b.typ', { text: 'B', etag: '"b"' });
-    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
       if ((init?.method ?? 'GET') === 'PUT') return new Response(JSON.stringify({ ok: true, etag: 'saved' }), { status: 200 });
       return new Response(null, { status: 304 });
     }));

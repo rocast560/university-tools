@@ -4,6 +4,10 @@ import { useAppStore } from '@/stores';
 import { Sidebar } from '@/components/sidebar/Sidebar';
 import type { WorkspaceStatus } from '@/types';
 
+const hoverPrefetch = vi.fn();
+const cancelHoverPrefetch = vi.fn();
+vi.mock('@/lib/prefetch', () => ({ hoverPrefetch: (...a: unknown[]) => hoverPrefetch(...a), cancelHoverPrefetch: (...a: unknown[]) => cancelHoverPrefetch(...a) }));
+
 const ws = (id: string, group: string | null): WorkspaceStatus => ({ id, name: id, group, path: `C:/${id}`, library: true, createdAt: 0, openedAt: 0, status: 'ok' });
 
 /** A DataTransfer stand-in: jsdom's own DataTransfer doesn't retain data across separate fireEvent calls, so the test wires one plain object through dragStart and drop itself, exactly as the browser would. */
@@ -13,6 +17,8 @@ function fakeDataTransfer() {
 }
 
 beforeEach(() => {
+  hoverPrefetch.mockClear();
+  cancelHoverPrefetch.mockClear();
   localStorage.clear();
   useAppStore.setState({
     workspaces: [], groups: [], activeWorkspaceId: null, backup: null, mcp: null, online: true,
@@ -20,6 +26,17 @@ beforeEach(() => {
 });
 
 describe('Sidebar', () => {
+  it('prefetches a workspace the pointer rests on, not the active one', () => {
+    useAppStore.setState({ workspaces: [ws('a', null), ws('b', null)], activeWorkspaceId: 'a' });
+    render(<Sidebar />);
+    fireEvent.pointerEnter(screen.getByText('b'));
+    expect(hoverPrefetch).toHaveBeenCalledWith('b');
+    fireEvent.pointerLeave(screen.getByText('b'));
+    expect(cancelHoverPrefetch).toHaveBeenCalled();
+    fireEvent.pointerEnter(screen.getByText('a'));
+    expect(hoverPrefetch).toHaveBeenCalledTimes(1);
+  });
+
   it('has no way to open an arbitrary external folder as a workspace', () => {
     render(<Sidebar />);
     expect(screen.getByTitle('New workspace')).toBeInTheDocument();

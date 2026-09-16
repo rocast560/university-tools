@@ -16,11 +16,13 @@
 // page's DOM untouched when its markup did not change between compiles.
 // ─────────────────────────────────────────────────────────────────────────
 
-import { useEffect, useRef, useState, useCallback, useMemo, memo, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo, memo, type RefObject } from 'react';
 import { ZoomIn, ZoomOut, Maximize, Loader2, AlertTriangle } from 'lucide-react';
 import { compileTypstSvg, typstErrorMessage, type TypstDiagnostic } from '@/lib/typst-compiler';
 import { splitTypstPages, extractTextRuns, DEFAULT_PAGE_GAP, type SplitTypstSvg } from '@/lib/typst-pages';
 import { occurrenceIndex } from '@/lib/typst-source-map';
+import { renderCache } from '@/lib/workspace-cache';
+import { switchTrace } from '@/lib/perf';
 
 /** One guess at what a preview click corresponds to in the source. */
 export interface SourceCandidate {
@@ -250,6 +252,21 @@ function pageCardAt(host: HTMLElement, target: Element | null, clientY: number):
   return best;
 }
 
+/** What the preview shows for one document: its last good render. */
+interface DocRender {
+  key: string;
+  svg: string;
+  diagnostics: TypstDiagnostic[];
+  /** Scroll offset to restore once the pages are mounted; consumed once. */
+  restoreScroll: number | null;
+}
+
+/** The starting state for a document: its cached render, or nothing yet. */
+function docFromCache(key: string): DocRender {
+  const snap = renderCache.get(key);
+  return { key, svg: snap?.svg ?? '', diagnostics: snap?.diagnostics ?? [], restoreScroll: snap ? snap.scrollTop : null };
+}
+
 // Memoized so it only re-renders when `source` (or the asset revision)
 // actually changes: in particular it is skipped entirely while the user
 // drags the editor/preview divider (which only changes the parent's width
@@ -262,11 +279,26 @@ export const TypstPreview = memo(function TypstPreview({
   source,
   revision = 0,
   mainPath = '/main.typ',
+  docKey = 'doc',
+  ready = true,
   onRevealSource,
   onRevealImage,
 }: {
   source: string;
   revision?: number;
+  /**
+   * Identifies the document (`workspace:file`). A change means a switch: the
+   * outgoing render is kept in `renderCache`, the incoming document's cached
+   * render (if any) is shown at once, and the first compile runs without the
+   * typing debounce.
+   */
+  docKey?: string;
+  /**
+   * False while the document's text or mounted files are still arriving. No
+   * compile runs until it is true, so a switch never renders the previous
+   * text under the new path or a document with its images missing.
+   */
+  ready?: boolean;
   /**
    * Where `source` is mounted in the compiler's virtual filesystem: the
    * workspace-relative path of the file open in the editor, so a document
@@ -284,21 +316,41 @@ export const TypstPreview = memo(function TypstPreview({
    */
   onRevealImage?: (href: string) => void;
 }) {
-  const [svg, setSvg] = useState<string>('');
-  const [diagnostics, setDiagnostics] = useState<TypstDiagnostic[]>([]);
+  const [doc, setDoc] = useState<DocRender>(() => docFromCache(docKey));
   const [fatalError, setFatalError] = useState<string | null>(null);
   const [firstLoad, setFirstLoad] = useState(true);
   const [compiling, setCompiling] = useState(false);
   const [zoom, setZoom] = useState(1);
+  const pageAreaRef = useRef<HTMLDivElement>(null);
+  // Where the user scrolled to, read without a layout query at switch time.
+  const scrollTopRef = useRef(0);
+
+  // A different document: remember what the outgoing one looked like and
+  // show the incoming one's last render right away (derived state, so no
+  // frame ever shows the old pages under the new key). Saving here rather
+  // than in an effect keeps the scroll offset that belonged to the old pages.
+  if (doc.key !== docKey) {
+    if (doc.svg) renderCache.set(doc.key, { svg: doc.svg, diagnostics: doc.diagnostics, scrollTop: scrollTopRef.current });
+    setDoc(docFromCache(docKey));
+  }
+  const shown = doc.key === docKey ? doc : docFromCache(docKey);
+  const { svg, diagnostics } = shown;
 
   // Monotonic id so a slow compile that finishes after a newer one can't
   // overwrite the fresher result.
   const runId = useRef(0);
+  // The document the last dispatched compile was for: a new one compiles at
+  // once, the same one waits out the typing debounce.
+  const compiledKey = useRef<string | null>(null);
 
   useEffect(() => {
+    if (!ready) return;
     const id = ++runId.current;
     setCompiling(true);
+    const immediate = compiledKey.current !== docKey;
     const timer = setTimeout(() => {
+      compiledKey.current = docKey;
+      switchTrace.mark('compile');
       void compileTypstSvg(source, { coalesce: true }, mainPath)
         .then((res) => {
           if (id !== runId.current) return;
@@ -307,8 +359,9 @@ export const TypstPreview = memo(function TypstPreview({
           // before the real one arrives.
           if (res.superseded) return;
           setFatalError(null);
-          setDiagnostics(res.diagnostics);
-          if (res.svg) setSvg(res.svg); // keep last good render on error
+          switchTrace.mark('compiled');
+          // Keep the last good render on error; never write into another document's state.
+          setDoc((d) => (d.key !== docKey ? d : { ...d, diagnostics: res.diagnostics, svg: res.svg ?? d.svg }));
         })
         .catch((err) => {
           if (id !== runId.current) return;
@@ -319,10 +372,24 @@ export const TypstPreview = memo(function TypstPreview({
           setCompiling(false);
           setFirstLoad(false);
         });
-    }, DEBOUNCE_MS);
+    }, immediate ? 0 : DEBOUNCE_MS);
 
     return () => clearTimeout(timer);
-  }, [source, revision, mainPath]);
+  }, [source, revision, mainPath, docKey, ready]);
+
+  // The pages of this render are in the DOM: restore the offset the user left
+  // the document at (once), and close the switch trace.
+  useLayoutEffect(() => {
+    if (!svg) return;
+    const el = pageAreaRef.current;
+    if (el && shown.restoreScroll !== null) {
+      el.scrollTop = shown.restoreScroll;
+      scrollTopRef.current = shown.restoreScroll;
+      setDoc((d) => (d.key === docKey ? { ...d, restoreScroll: null } : d));
+    }
+    const frame = requestAnimationFrame(() => switchTrace.mark('painted'));
+    return () => cancelAnimationFrame(frame);
+  }, [svg, docKey, shown.restoreScroll]);
 
   const errors = diagnostics.filter((d) => d.severity === 'error');
 
@@ -345,8 +412,6 @@ export const TypstPreview = memo(function TypstPreview({
     }
     return out;
   }, [split, textRunCache]);
-
-  const pageAreaRef = useRef<HTMLDivElement>(null);
 
   const onPageClick = useCallback((e: React.MouseEvent) => {
     if (!onRevealSource && !onRevealImage) return;
@@ -427,7 +492,9 @@ export const TypstPreview = memo(function TypstPreview({
           the pane doesn't relayout them beyond this box. */}
       <div
         ref={pageAreaRef}
+        data-testid="preview-pages"
         onClick={onPageClick}
+        onScroll={(e) => { scrollTopRef.current = e.currentTarget.scrollTop; }}
         title={onRevealSource ? 'Click the page to jump to that spot in the code' : undefined}
         className={`relative flex-1 overflow-auto p-6 ${onRevealSource ? 'cursor-pointer' : ''}`}
         style={{ contain: 'layout paint' }}
@@ -436,9 +503,15 @@ export const TypstPreview = memo(function TypstPreview({
           <div className="flex h-full items-center justify-center text-center text-xs text-[hsl(var(--muted-foreground))]">
             <div className="flex flex-col items-center gap-2">
               <Loader2 size={18} className="animate-spin" />
-              Loading the Typst compiler…
-              <span className="text-[10px] opacity-70">(first render initializes the local WASM engine)</span>
+              {ready ? 'Loading the Typst compiler…' : 'Opening…'}
+              {ready && <span className="text-[10px] opacity-70">(first render initializes the local WASM engine)</span>}
             </div>
+          </div>
+        ) : !svg && (compiling || !ready) ? (
+          // A document never rendered this session: nothing to show until the
+          // compile lands, and the previous document's pages must not stand in.
+          <div className="flex h-full items-center justify-center text-xs text-[hsl(var(--muted-foreground))]">
+            <div className="flex flex-col items-center gap-2"><Loader2 size={18} className="animate-spin" />Rendering…</div>
           </div>
         ) : svg ? (
           // `will-change: transform` promotes the page stack to its own
