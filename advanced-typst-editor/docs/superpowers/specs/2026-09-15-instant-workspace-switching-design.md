@@ -124,7 +124,31 @@ UI (`vitest --project ui`):
 
 Manual, in Chrome with the tab in the foreground: switch between `cptc-report`, `ece-2300L-lab2` and `ccdc-inject-template`; read `window.__tfsPerf`; confirm revisits under 100 ms and one compile per switch; confirm typing produces no detail request beyond the conditional one after autosave. Then `docker compose up --build -d` and repeat against the container.
 
-## 6. Out of scope
+## 6. Results (2026-09-15, headless Chrome against the rebuilt container)
+
+Measured with a headless Chrome driven over the DevTools protocol (a headless page is never background-throttled), eight switches in a row, click to painted page:
+
+| Switch | Before | After |
+|---|---|---|
+| cptc-report (23 pages, 6 fonts), first visit | 3.3 s | 0.73 to 1.0 s (compile plus font swap bound) |
+| cptc-report, revisit | 2.1 to 3.6 s | 0.21 to 0.32 s |
+| ece-2300L-lab2 (8 images), first visit | 11.6 s | 0.39 s |
+| ece-2300L-lab2, revisit | 1.9 s | 0.09 s |
+| ccdc-inject-template | 8.1 s | 0.15 s |
+| cptc-inject-1 | 1.2 s | 0.10 s |
+| Longest main-thread task during or after a switch | 2.2 s | 0.29 s |
+| Requests per revisit | 3 to 10 | 0 |
+
+Two findings changed the design after phase 2 shipped:
+
+- **Style invalidation.** With a long report mounted, any full style recalculation cost 1.4 to 1.6 s, and the preview forced one on every compile by re-inserting typst.ts's `<style>`; replacing it with identical text still cost 1.07 s. The stylesheet is now rendered once and the glyph defs are reconciled by id (`reconcileDefs`, `splitSharedStyle` in `lib/typst-pages.ts`).
+- **The app stylesheet.** The remaining cost was the app's global stylesheet being matched against the ~26 000 SVG nodes of two mounted pages: disabling it made a full recalc 130 ms, and moving the pages into a shadow root made it 20 ms (Tailwind's `@property` rules were ruled out). The page stack now renders through a portal into a shadow root with its own small stylesheet; clicks are read from the composed path and React's duplicate dispatch for portals into shadow roots is dropped.
+
+Also fixed on the way: prefetch reads carry `x-tfs-prefetch` so they do not bump `openedAt` (the sidebar orders by it), and the file hook skips revalidation while a save of the cached text is still in flight.
+
+Remaining cost on a revisit of the long report is the CodeMirror remount of a 28 KB document plus the first style pass of the mounted pages (about 200 to 300 ms). Rendering pages to canvas (typst.ts `render_page_to_canvas`) would remove the page DOM entirely and is the next step if that matters.
+
+## 7. Out of scope
 
 - Font union or per-font-set resolver caching: fonts stay as they are.
 - Incremental compilation (`IncrServer`) and DOM-patching render: typing latency, not switching.
