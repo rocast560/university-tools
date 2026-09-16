@@ -54,9 +54,11 @@ export const api = {
    * The workspace detail, or null when `ifNoneMatch` (the etag of the copy the
    * caller already holds, unquoted) still matches and the server answered 304.
    */
-  async getWorkspace(id: string, ifNoneMatch: string | null = null): Promise<WorkspaceDetail | null> {
+  async getWorkspace(id: string, ifNoneMatch: string | null = null, opts: { prefetch?: boolean } = {}): Promise<WorkspaceDetail | null> {
     const headers: Record<string, string> = { 'x-client-id': CLIENT_ID };
     if (ifNoneMatch) headers['if-none-match'] = `"${ifNoneMatch}"`;
+    // A prefetch must not count as opening the workspace (see the server's detail route).
+    if (opts.prefetch) headers['x-tfs-prefetch'] = '1';
     const res = await fetch(wsUrl(id), { headers });
     if (res.status === 304) return null;
     if (!res.ok) {

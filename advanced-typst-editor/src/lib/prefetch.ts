@@ -37,7 +37,7 @@ export function prefetchWorkspace(id: string): Promise<number> {
   const p = (async () => {
     let detail = detailCache.get(id);
     if (!detail) {
-      const fresh = await api.getWorkspace(id);
+      const fresh = await api.getWorkspace(id, null, { prefetch: true });
       if (!fresh) return 0;
       // A switch may have cached it meanwhile; keep whichever landed first.
       detail = detailCache.get(id) ?? fresh;
