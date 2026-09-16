@@ -28,6 +28,43 @@ describe('settings store', () => {
     expect(s.listWorkspaces()).toEqual([]);
   });
 
+  it('serves reads from memory and still notices an edit made outside the process', () => {
+    const d = tmpDir(); dirs.push(d);
+    let clock = 0;
+    const s = createSettingsStore(d, { now: () => 5, clock: () => clock });
+    const w = s.addWorkspace({ path: path.join(d, 'ws', 'A'), name: 'A', group: null, library: true });
+    const file = path.join(d, 'settings.json');
+    // Another process rewrites the file (the container and the dev server share data/).
+    const edited = { ...JSON.parse(fs.readFileSync(file, 'utf8')) as object, groups: ['Outside'] };
+    fs.writeFileSync(file, JSON.stringify(edited));
+    fs.utimesSync(file, new Date(10_000_000), new Date(10_000_000));
+    // Inside the stat window the cached copy is what we get.
+    expect(s.listGroups()).toEqual([]);
+    clock = 1500;
+    expect(s.listGroups()).toEqual(['Outside']);
+    expect(s.getWorkspace(w.id)?.name).toBe('A');
+  });
+
+  it('touchWorkspace bumps openedAt in memory and writes it after the quiet period', async () => {
+    const d = tmpDir(); dirs.push(d);
+    let t = 5;
+    const s = createSettingsStore(d, { now: () => t, touchDelayMs: 20 });
+    const w = s.addWorkspace({ path: path.join(d, 'ws', 'A'), name: 'A', group: null, library: true });
+    const file = path.join(d, 'settings.json');
+    const onDisk = () => (JSON.parse(fs.readFileSync(file, 'utf8')) as { workspaces: Array<{ openedAt: number }> }).workspaces[0]!.openedAt;
+    t = 99;
+    expect(s.touchWorkspace(w.id)).toMatchObject({ id: w.id, openedAt: 99 });
+    expect(s.getWorkspace(w.id)?.openedAt).toBe(99);
+    expect(onDisk()).toBe(5);
+    await new Promise((r) => setTimeout(r, 60));
+    expect(onDisk()).toBe(99);
+    t = 120;
+    s.touchWorkspace(w.id);
+    s.flush();
+    expect(onDisk()).toBe(120);
+    expect(s.touchWorkspace('nope')).toBeNull();
+  });
+
   it('scans the library for unknown folders', () => {
     const d = tmpDir(); dirs.push(d);
     const lib = path.join(d, 'workspaces');
