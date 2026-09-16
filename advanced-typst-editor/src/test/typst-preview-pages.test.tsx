@@ -10,6 +10,7 @@ vi.mock('@/lib/typst-compiler', () => ({
 }));
 
 import { TypstPreview } from '@/components/typst/TypstPreview';
+import { clearWorkspaceCaches, renderCache } from '@/lib/workspace-cache';
 
 type IoCallback = (entries: Array<{ isIntersecting: boolean; target: Element }>, observer: unknown) => void;
 
@@ -47,6 +48,64 @@ async function settle() {
 
 const cards = (root: HTMLElement) => Array.from(root.querySelectorAll<HTMLElement>('[data-page-index]'));
 const mountedSvg = (card: HTMLElement) => card.querySelector('svg');
+
+describe('TypstPreview document switching', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    FakeIntersectionObserver.instances = [];
+    vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
+    compileTypstSvg.mockReset();
+    clearWorkspaceCaches();
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it('does not compile until ready, then compiles a new document at once and debounces edits', async () => {
+    compileTypstSvg.mockResolvedValue({ svg: FOUR_PAGES, diagnostics: [] });
+    const { rerender } = render(<TypstPreview source="a" docKey="w1:main.typ" ready={false} />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(compileTypstSvg).not.toHaveBeenCalled();
+
+    rerender(<TypstPreview source="a" docKey="w1:main.typ" ready />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(compileTypstSvg).toHaveBeenCalledTimes(1); // no 350 ms wait for a switch
+
+    rerender(<TypstPreview source="ab" docKey="w1:main.typ" ready />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    expect(compileTypstSvg).toHaveBeenCalledTimes(1); // typing still debounces
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    expect(compileTypstSvg).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows a cached render for a revisited document immediately and restores its scroll offset', async () => {
+    compileTypstSvg.mockResolvedValue({ svg: FOUR_PAGES, diagnostics: [] });
+    const { container, rerender } = render(<TypstPreview source="a" docKey="w1:main.typ" ready />);
+    await settle();
+    expect(cards(container)).toHaveLength(4);
+    const area = container.querySelector<HTMLElement>('[data-testid="preview-pages"]')!;
+    // The user scrolls down, then switches to a document never rendered before.
+    fireEvent.scroll(area, { target: { scrollTop: 240 } });
+    compileTypstSvg.mockResolvedValue({ svg: doc([page(1, 100, 'other')]), diagnostics: [] });
+    rerender(<TypstPreview source="z" docKey="w2:main.typ" ready />);
+    // No stale pages from w1 while w2 renders for the first time.
+    expect(cards(container)).toHaveLength(0);
+    expect(container.textContent).toContain('Rendering');
+    expect(renderCache.get('w1:main.typ')).toMatchObject({ scrollTop: 240 });
+    await settle();
+    expect(cards(container)).toHaveLength(1);
+
+    // Back to w1: its four pages are on screen before any compile runs.
+    compileTypstSvg.mockClear();
+    rerender(<TypstPreview source="a" docKey="w1:main.typ" ready />);
+    expect(cards(container)).toHaveLength(4);
+    expect(compileTypstSvg).not.toHaveBeenCalled();
+    expect(area.scrollTop).toBe(240);
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(compileTypstSvg).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe('TypstPreview page virtualization', () => {
   beforeEach(() => {

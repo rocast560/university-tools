@@ -12,7 +12,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback, lazy, Suspense } from 'react';
 import { PanelLeftClose, PanelLeftOpen, FileDown, Image, FileText, Images, Search } from 'lucide-react';
 import { useAppStore } from '@/stores';
-import { api } from '@/api/client';
 import { useWorkspaceFile } from '@/hooks/use-workspace-file';
 import {
   revealTypstRange, getTypstCaret, setTypstSearchRequest, setTypstEditorContent, setTypstDocKey,
@@ -35,12 +34,12 @@ import {
   setTypstFonts,
   setTypstShadowFiles,
   typstErrorMessage,
-  type TypstShadowFile,
 } from '@/lib/typst-compiler';
-import { assetPath, fetchAssetBytes, resolveAssetBytes } from '@/lib/typst-assets';
+import { resolveAssetBytes } from '@/lib/typst-assets';
+import { collectMounts } from '@/lib/typst-mount';
+import { switchTrace } from '@/lib/perf';
 import { matchAssetByHref } from '@/lib/asset-folders';
 import { findSourceRange, type SourceRange } from '@/lib/typst-source-map';
-import type { FileEntry } from '@/types';
 import {
   clampPaneWidth,
   fitPanes,
@@ -78,108 +77,42 @@ export function TypstView() {
 }
 
 /**
- * Files that are not assets but the document may still pull in: chapters it
- * `#include`s, a bibliography, data tables, a logo it never cropped.
- */
-const MOUNTABLE_EXTS = ['.typ', '.bib', '.csv', '.json', '.yaml', '.yml', '.toml', '.txt', '.svg', '.pdf'];
-
-/**
- * Anything larger than this is a stray download that happens to live in the
- * folder, not a document input: reading it and pushing it through wasm on
- * every workspace switch would cost more than the document itself.
- */
-const MAX_MOUNT_BYTES = 25 * 1024 * 1024;
-
-/**
- * Bytes of the workspace's plain (non-asset) files, keyed by workspace, path
- * and mtime. The server's mtime is the only thing that can make a mounted
- * file stale, so re-running the sync after an unrelated change hands back the
- * exact same arrays and `setTypstShadowFiles` sees no change at all.
- */
-const plainFileCache = new Map<string, Promise<Uint8Array>>();
-
-function readPlainFile(workspaceId: string, f: FileEntry): Promise<Uint8Array> {
-  const key = `${workspaceId}:${f.path}:${f.mtime}`;
-  const hit = plainFileCache.get(key);
-  if (hit) return hit;
-  const bytes = api.readBytes(workspaceId, f.path);
-  // Don't cache a rejection: a transient blip shouldn't unmount the file for
-  // the rest of the session.
-  bytes.catch(() => { plainFileCache.delete(key); });
-  plainFileCache.set(key, bytes);
-  return bytes;
-}
-
-/**
  * Push the workspace's files into the compiler's virtual filesystem and font
- * set, and report a revision that changes whenever they do, so the preview
- * recompiles after a drop or a crop, not just on a source edit.
+ * set. `revision` changes whenever they do, so the preview recompiles after a
+ * drop or a crop, not just on a source edit. `ready` is true once a sync has
+ * completed against a detail that belongs to *this* workspace: until then the
+ * preview must not compile, or the first render after a switch would run
+ * before the images are mounted and a second compile would follow.
  *
- * Images are resolved through `resolveAssetBytes`, which applies the crop
- * rectangle before the bytes ever reach Typst; fonts are installed at init.
- * Every other file is mounted verbatim at `/<workspace-relative path>`, so
- * `#include "/chapters/intro.typ"` and `#bibliography("/refs.bib")` resolve.
- * Everything is memoized (assets by id + crop, plain files by mtime), so this
- * is a no-op on re-renders where nothing moved.
- *
- * `mainFile` is skipped: what gets compiled at that path is the editor's
- * live, possibly-unsaved text, not the copy on disk.
+ * The byte resolution lives in lib/typst-mount so the prefetcher warms the
+ * very same caches; a sync whose inputs are already resident costs no request.
  */
-function useTypstAssetSync(workspaceId: string, mainFile: string): number {
+function useTypstAssetSync(workspaceId: string, mainFile: string): { revision: number; ready: boolean } {
+  const detail = useAppStore((s) => s.detail);
   const assets = useAppStore((s) => s.typstAssets);
-  const files = useAppStore((s) => s.detail?.files);
-  const loadTypstAssets = useAppStore((s) => s.loadTypstAssets);
-  const [revision, setRevision] = useState(0);
-
-  useEffect(() => { void loadTypstAssets(); }, [loadTypstAssets, workspaceId]);
+  const files = detail?.files;
+  const detailId = detail?.entry.id;
+  const [state, setState] = useState<{ revision: number; readyFor: string | null }>({ revision: 0, readyFor: null });
 
   useEffect(() => {
+    if (detailId !== workspaceId) return;
     let cancelled = false;
     void (async () => {
-      const images = assets.filter((a) => a.kind === 'image');
-      const fonts = assets.filter((a) => a.kind === 'font');
-      // Assets own their own bytes (cropped, redacted); everything else is
-      // mounted exactly as it sits on disk.
-      const assetIds = new Set(assets.map((a) => a.id));
-      const plain = (files ?? []).filter(
-        (f) => !assetIds.has(f.path)
-          && f.path !== mainFile
-          && f.size <= MAX_MOUNT_BYTES
-          && MOUNTABLE_EXTS.some((e) => f.path.toLowerCase().endsWith(e)),
-      );
-
-      // allSettled: one file whose bytes went missing (deleted out-of-band,
-      // renamed between the listing and the read) must not take down every
-      // other image in the document. Failures are simply left unmounted, and
-      // Typst reports the unresolved path against the exact line that
-      // referenced it.
-      const [imageResults, fontResults, plainResults] = await Promise.all([
-        Promise.allSettled(
-          images.map(async (a) => ({ path: assetPath(a), bytes: await resolveAssetBytes(a) })),
-        ),
-        Promise.allSettled(fonts.map((a) => fetchAssetBytes(a.id))),
-        Promise.allSettled(
-          plain.map(async (f) => ({ path: `/${f.path}`, bytes: await readPlainFile(workspaceId, f) })),
-        ),
-      ]);
+      const { shadow, fonts } = await collectMounts(workspaceId, assets, files, mainFile);
       if (cancelled) return;
-
-      const mounted = (results: PromiseSettledResult<TypstShadowFile>[]): TypstShadowFile[] =>
-        results
-          .filter((r): r is PromiseFulfilledResult<TypstShadowFile> => r.status === 'fulfilled')
-          .map((r) => r.value);
-      const fontBytes = fontResults
-        .filter((r): r is PromiseFulfilledResult<Uint8Array> => r.status === 'fulfilled')
-        .map((r) => r.value);
-
-      const filesChanged = setTypstShadowFiles([...mounted(imageResults), ...mounted(plainResults)]);
-      const fontsChanged = setTypstFonts(fontBytes);
-      if (filesChanged || fontsChanged) setRevision((r) => r + 1);
+      const filesChanged = setTypstShadowFiles(shadow);
+      const fontsChanged = setTypstFonts(fonts);
+      switchTrace.mark('assets');
+      setState((s) => {
+        const changed = filesChanged || fontsChanged;
+        if (!changed && s.readyFor === workspaceId) return s;
+        return { revision: changed ? s.revision + 1 : s.revision, readyFor: workspaceId };
+      });
     })();
     return () => { cancelled = true; };
-  }, [assets, files, mainFile, workspaceId]);
+  }, [assets, files, mainFile, workspaceId, detailId]);
 
-  return revision;
+  return { revision: state.revision, ready: state.readyFor === workspaceId };
 }
 
 function TypstWorkspaceView({ workspaceId }: { workspaceId: string }) {
@@ -189,12 +122,14 @@ function TypstWorkspaceView({ workspaceId }: { workspaceId: string }) {
   const { text: source, loading, dirty, externalChange, setText, reload, keepMine } =
     useWorkspaceFile(workspaceId, file);
   const detail = useAppStore((s) => s.detail);
-  // Derived from the (stable) detail object rather than selected directly: a
+  // Derived from the (stable) files array rather than selected directly: a
   // selector that builds a fresh array on every call has no stable snapshot
-  // for useSyncExternalStore and would re-render forever.
+  // for useSyncExternalStore and would re-render forever. Keyed on `files`,
+  // not `detail`, so a revalidation that only moved openedAt changes nothing.
+  const detailFiles = detail?.files;
   const typFiles = useMemo(
-    () => detail?.files.filter((f) => f.path.endsWith('.typ')).map((f) => f.path) ?? [],
-    [detail],
+    () => detailFiles?.filter((f) => f.path.endsWith('.typ')).map((f) => f.path) ?? [],
+    [detailFiles],
   );
   const detailName = detail?.entry.name ?? 'document';
   // A different workspace starts at its own main.typ, or the first .typ file
@@ -222,7 +157,7 @@ function TypstWorkspaceView({ workspaceId }: { workspaceId: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const editorPaneRef = useRef<HTMLDivElement>(null);
   const assetsPaneRef = useRef<HTMLDivElement>(null);
-  const assetRevision = useTypstAssetSync(workspaceId, file);
+  const { revision: assetRevision, ready: assetsReady } = useTypstAssetSync(workspaceId, file);
   // Mirrors `source` so the reveal callback can stay stable across keystrokes.
   const sourceRef = useRef(source);
   sourceRef.current = source;
@@ -603,7 +538,7 @@ function TypstWorkspaceView({ workspaceId }: { workspaceId: string }) {
         )}
 
         <div className="min-w-0 flex-1 overflow-hidden" style={{ contain: 'layout paint' }}>
-          <TypstPreview source={source} revision={assetRevision} mainPath={`/${file}`} onRevealSource={revealSource} onRevealImage={revealImage} />
+          <TypstPreview source={source} revision={assetRevision} mainPath={`/${file}`} docKey={docKey} ready={!loading && assetsReady} onRevealSource={revealSource} onRevealImage={revealImage} />
         </div>
 
         {showAssets && !assetsMax && (
