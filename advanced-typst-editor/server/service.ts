@@ -28,8 +28,8 @@ export interface WorkspaceService {
   list(): WorkspaceStatus[];
   entry(id: string): WorkspaceEntry;
   fs(id: string): WorkspaceFs;
-  /** Served from the in-memory index; the entry's openedAt is bumped lazily. */
-  detail(id: string): Promise<WorkspaceDetail>;
+  /** Served from the in-memory index. `touch` (default) bumps the entry's openedAt lazily; a prefetch passes false. */
+  detail(id: string, opts?: { touch?: boolean }): Promise<WorkspaceDetail>;
   create(input: { name: string; group: string | null; source: string | undefined }): WorkspaceEntry;
   openFolder(absPath: string, name: string | undefined): WorkspaceEntry;
   rename(id: string, name: string): WorkspaceEntry;
@@ -125,11 +125,11 @@ export function createWorkspaceService(deps: ServiceDeps): WorkspaceService {
     list: () => settings.listWorkspaces().map(status),
     entry,
     fs: liveFs,
-    async detail(id) {
+    async detail(id, opts) {
       const e = entry(id);
       if (!isDir(e.path)) throw new HttpError(409, `workspace folder is missing: ${e.path}`);
       const snap = await index.get(e.path);
-      const patched = settings.touchWorkspace(id) ?? e;
+      const patched = (opts?.touch ?? true) ? settings.touchWorkspace(id) ?? e : e;
       return { entry: patched, files: snap.files, meta: snap.meta, assets: snap.assets, folders: snap.folders, etag: snap.etag };
     },
     create({ name, group, source }) {

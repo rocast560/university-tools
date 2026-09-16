@@ -78,7 +78,9 @@ export function useWorkspaceFile(workspaceId: string, path: string) {
     });
     const cached = textCache.get(key);
     if (cached) switchTrace.mark('source');
-    void load(cached?.etag ?? null);
+    // A null etag means a save of this very text is still on its way to the
+    // server: what we hold is newer than anything a read could return.
+    if (!cached || cached.etag !== null) void load(cached?.etag ?? null);
     const s = saver.current;
     // pagehide is the last chance to save: ask for a keepalive request so the
     // browser is allowed to finish it after the document is gone. blur is not
