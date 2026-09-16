@@ -50,21 +50,47 @@ export const api = {
   openFolder: (path: string, name?: string) => req<{ workspace: WorkspaceEntry }>('POST', '/api/workspaces/open', { path, name }).then((r) => r.workspace),
   patchWorkspace: (id: string, patch: { name?: string; group?: string | null }) => req<{ workspace: WorkspaceEntry }>('PATCH', wsUrl(id), patch).then((r) => r.workspace),
   deleteWorkspace: (id: string) => req<{ ok: true }>('DELETE', wsUrl(id)),
-  getWorkspace: (id: string) => req<WorkspaceDetail>('GET', wsUrl(id)),
-  async readText(id: string, path: string): Promise<{ text: string; etag: string }> {
-    const res = await fetch(fileUrl(id, path), { headers: { 'x-client-id': CLIENT_ID } });
+  /**
+   * The workspace detail, or null when `ifNoneMatch` (the etag of the copy the
+   * caller already holds, unquoted) still matches and the server answered 304.
+   */
+  async getWorkspace(id: string, ifNoneMatch: string | null = null): Promise<WorkspaceDetail | null> {
+    const headers: Record<string, string> = { 'x-client-id': CLIENT_ID };
+    if (ifNoneMatch) headers['if-none-match'] = `"${ifNoneMatch}"`;
+    const res = await fetch(wsUrl(id), { headers });
+    if (res.status === 304) return null;
+    if (!res.ok) {
+      let msg = `GET ${wsUrl(id)} failed (${res.status})`;
+      try { msg = ((await res.json()) as { error?: string }).error ?? msg; } catch { /* keep */ }
+      throw new ApiError(res.status, msg);
+    }
+    return (await res.json()) as WorkspaceDetail;
+  },
+  /** A text file with its etag (as the header spells it), or null on a 304 for `ifNoneMatch`. */
+  async readText(id: string, path: string, ifNoneMatch: string | null = null): Promise<{ text: string; etag: string } | null> {
+    const headers: Record<string, string> = { 'x-client-id': CLIENT_ID };
+    if (ifNoneMatch) headers['if-none-match'] = ifNoneMatch;
+    const res = await fetch(fileUrl(id, path), { headers });
+    if (res.status === 304) return null;
     if (!res.ok) throw new ApiError(res.status, `cannot read ${path}`);
     return { text: await res.text(), etag: res.headers.get('etag') ?? '' };
   },
   readBytes: (id: string, path: string) => req<ArrayBuffer>('GET', fileUrl(id, path), undefined, true).then((b) => new Uint8Array(b)),
-  writeText: (id: string, path: string, text: string, keepalive = false) => {
+  /** Saves and resolves to the file's new etag (quoted, as `readText` reports it), or null when the server did not say. */
+  writeText: (id: string, path: string, text: string, keepalive = false): Promise<string | null> => {
     const body = new TextEncoder().encode(text);
     return fetch(fileUrl(id, path), {
       method: 'PUT',
       headers: { 'x-client-id': CLIENT_ID, 'content-type': 'application/octet-stream' },
       body,
       keepalive: keepalive && body.byteLength <= KEEPALIVE_MAX_BYTES,
-    }).then((r) => { if (!r.ok) throw new ApiError(r.status, `save failed (${r.status})`); });
+    }).then(async (r) => {
+      if (!r.ok) throw new ApiError(r.status, `save failed (${r.status})`);
+      try {
+        const etag = ((await r.json()) as { etag?: string }).etag;
+        return typeof etag === 'string' ? `"${etag}"` : null;
+      } catch { return null; }
+    });
   },
   deleteFile: (id: string, path: string) => req<{ ok: true }>('DELETE', fileUrl(id, path)),
   uploadAsset: (id: string, file: Blob, opts: { kind: TypstAssetKind; filename: string; folder: string | null; family?: string | null }) => {

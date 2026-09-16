@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useAppStore } from '@/stores';
+import { clearWorkspaceCaches, detailCache } from '@/lib/workspace-cache';
+import type { WorkspaceDetail } from '@/types';
 
 const calls: Array<{ method: string; url: string; body?: unknown }> = [];
 function mockFetch(routes: Record<string, unknown>) {
@@ -12,9 +14,9 @@ function mockFetch(routes: Record<string, unknown>) {
     return new Response(JSON.stringify(hit ?? {}), { status: hit === undefined ? 404 : 200, headers: { 'content-type': 'application/json' } });
   }));
 }
-const detail = { entry: { id: 'w1', name: 'A', path: 'C:/a', group: null, library: true, createdAt: 0, openedAt: 0 }, files: [], meta: { version: 1, assets: {}, fonts: {} }, assets: [], folders: [{ id: 'Findings/auth', name: 'auth', parentId: 'Findings', createdAt: 0, updatedAt: 0 }] };
+const detail: WorkspaceDetail = { entry: { id: 'w1', name: 'A', path: 'C:/a', group: null, library: true, createdAt: 0, openedAt: 0 }, files: [], meta: { version: 1, assets: {}, fonts: {} }, assets: [], folders: [{ id: 'Findings/auth', name: 'auth', parentId: 'Findings', createdAt: 0, updatedAt: 0 }], etag: 'e0' };
 
-beforeEach(() => { useAppStore.setState({ activeWorkspaceId: 'w1', detail: null, typstAssets: [], assetFolders: [] }); });
+beforeEach(() => { clearWorkspaceCaches(); useAppStore.setState({ activeWorkspaceId: 'w1', detail: null, typstAssets: [], assetFolders: [] }); });
 
 describe('store folder actions map to API paths', () => {
   it('create, rename, move, delete', async () => {
@@ -49,6 +51,61 @@ describe('store folder actions map to API paths', () => {
     await vi.advanceTimersByTimeAsync(200);
     expect(calls.filter((c) => c.url === '/api/workspaces/w1')).toHaveLength(1);
     vi.useRealTimers();
+  });
+});
+
+describe('store workspace switching cache', () => {
+  beforeEach(() => { clearWorkspaceCaches(); useAppStore.setState({ activeWorkspaceId: null, detail: null, typstAssets: [], assetFolders: [] }); });
+
+  it('applies a cached detail synchronously and only revalidates with If-None-Match', async () => {
+    const cached = { ...detail, etag: 'abc' };
+    detailCache.set('w1', cached);
+    let status = 304;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ method: init?.method ?? 'GET', url, body: (init?.headers as Record<string, string>)?.['if-none-match'] });
+      return status === 304 ? new Response(null, { status: 304 }) : new Response(JSON.stringify({ ...detail, etag: 'def', files: [{ path: 'main.typ', size: 1, mtime: 1 }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    calls.length = 0;
+    const p = useAppStore.getState().selectWorkspace('w1');
+    expect(useAppStore.getState().detail).toBe(cached); // before any response
+    expect(useAppStore.getState().assetFolders).toBe(cached.folders);
+    await p;
+    expect(calls[0]).toMatchObject({ url: '/api/workspaces/w1', body: '"abc"' });
+    expect(useAppStore.getState().detail).toBe(cached); // 304: untouched
+
+    status = 200;
+    await useAppStore.getState().selectWorkspace('w1');
+    const next = useAppStore.getState().detail!;
+    expect(next).not.toBe(cached);
+    expect(next.etag).toBe('def');
+    expect(next.folders).toBe(cached.folders); // structural sharing
+    expect(detailCache.get('w1')).toBe(next);
+  });
+
+  it('ignores a detail that arrives after the user switched away, but still caches it', async () => {
+    const resolvers: Array<(r: Response) => void> = [];
+    vi.stubGlobal('fetch', vi.fn((url: string) => new Promise<Response>((resolve) => {
+      if (url.endsWith('/w1')) resolvers.push((r) => resolve(r));
+      else resolve(new Response(JSON.stringify({ ...detail, entry: { ...detail.entry, id: 'w2' }, etag: 'w2' }), { status: 200, headers: { 'content-type': 'application/json' } }));
+    })));
+    const first = useAppStore.getState().selectWorkspace('w1');
+    await useAppStore.getState().selectWorkspace('w2');
+    expect(useAppStore.getState().detail?.entry.id).toBe('w2');
+    resolvers[0]!(new Response(JSON.stringify({ ...detail, etag: 'w1' }), { status: 200, headers: { 'content-type': 'application/json' } }));
+    await first;
+    expect(useAppStore.getState().detail?.entry.id).toBe('w2');
+    expect(detailCache.get('w1')?.etag).toBe('w1');
+  });
+
+  it('keeps caches for a workspace that changed off screen, clears them when the registry changes', () => {
+    detailCache.set('w1', { ...detail, etag: 'x' });
+    detailCache.set('w2', { ...detail, etag: 'y' });
+    useAppStore.setState({ activeWorkspaceId: 'w2' });
+    mockFetch({ 'GET /api/workspaces': { workspaces: [] }, 'GET /api/groups': { groups: [] }, 'GET /api/workspaces/w2': detail });
+    useAppStore.getState().handleEvent({ type: 'workspace.changed', id: 'w1', paths: ['main.typ'], origin: null });
+    expect(detailCache.has('w1')).toBe(true); // revalidated on the next visit
+    useAppStore.getState().handleEvent({ type: 'workspaces.changed' });
+    expect(detailCache.size).toBe(0);
   });
 });
 
