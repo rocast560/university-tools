@@ -19,7 +19,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo, memo, type RefObject } from 'react';
 import { ZoomIn, ZoomOut, Maximize, Loader2, AlertTriangle } from 'lucide-react';
 import { compileTypstSvg, typstErrorMessage, type TypstDiagnostic } from '@/lib/typst-compiler';
-import { splitTypstPages, extractTextRuns, DEFAULT_PAGE_GAP, type SplitTypstSvg } from '@/lib/typst-pages';
+import { splitTypstPages, extractTextRuns, reconcileDefs, splitSharedStyle, DEFAULT_PAGE_GAP, type SplitTypstSvg } from '@/lib/typst-pages';
 import { occurrenceIndex } from '@/lib/typst-source-map';
 import { renderCache } from '@/lib/workspace-cache';
 import { switchTrace } from '@/lib/perf';
@@ -159,20 +159,32 @@ const MOUNT_MARGIN = '150% 0px';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 /**
- * The document's stylesheet and glyph/clip-path <defs>, mounted once in a
- * zero-size <svg>. Every page's `<use href="#…">` resolves against the
- * document, so the defs need to exist exactly once, anywhere in it. Not
- * `display: none`: a referenced element inside a display:none subtree may
- * still render through <use>, but paint servers and clip paths are safer
- * with the subtree merely hidden by size.
+ * typst.ts's stylesheet. It is the same text for every compile, and React
+ * leaves a <style> alone while its text is unchanged, so the document's
+ * styles are never invalidated by a compile (which, with a long report on
+ * screen, costs a full second of style recalculation).
+ */
+const SharedStyle = memo(function SharedStyle({ css }: { css: string }) {
+  return <style>{css}</style>;
+});
+
+/**
+ * The glyph/clip-path <defs>, mounted once in a zero-size <svg>. Every
+ * page's `<use href="#…">` resolves against the document, so the defs need
+ * to exist exactly once, anywhere in it. Not `display: none`: a referenced
+ * element inside a display:none subtree may still render through <use>, but
+ * paint servers and clip paths are safer with the subtree merely hidden by
+ * size. Updated by `reconcileDefs`, so a glyph still in use keeps its node.
  */
 const SharedDefs = memo(function SharedDefs({ markup }: { markup: string }) {
+  const ref = useRef<SVGSVGElement>(null);
+  useLayoutEffect(() => { if (ref.current) reconcileDefs(ref.current, markup); }, [markup]);
   return (
     <svg
+      ref={ref}
       xmlns={SVG_NS}
       aria-hidden="true"
       style={{ position: 'absolute', width: 0, height: 0, overflow: 'hidden' }}
-      dangerouslySetInnerHTML={{ __html: markup }}
     />
   );
 });
@@ -218,7 +230,10 @@ const PageCard = memo(function PageCard({
       ref={ref}
       data-page-index={index}
       className="rounded-sm bg-white shadow-lg"
-      style={{ width: `${width}px`, height: `${height}px`, contain: 'layout' }}
+      // `content-visibility: auto`: a mounted page that has scrolled out of
+      // view costs nothing in style and layout passes; its size is explicit,
+      // so skipping it moves nothing.
+      style={{ width: `${width}px`, height: `${height}px`, contain: 'layout', contentVisibility: 'auto', containIntrinsicSize: `${width}px ${height}px` }}
     >
       {near && (
         <svg
@@ -396,6 +411,7 @@ export const TypstPreview = memo(function TypstPreview({
   // Per-page fragments (null: not a paged typst.ts document, mount as-is).
   // Recomputed only when the SVG changes; ~10 ms for a long report.
   const split: SplitTypstSvg | null = useMemo(() => splitTypstPages(svg), [svg]);
+  const shared = useMemo(() => (split ? splitSharedStyle(split.shared) : null), [split]);
 
   // Text runs of each page, parsed from its fragment on demand: click-to-
   // source counts occurrences from the start of the document, and the pages
@@ -528,9 +544,10 @@ export const TypstPreview = memo(function TypstPreview({
             {/* SVG is produced by the local WASM compiler from the operator's own
                 source (no remote input): consistent with the app's trusted-LAN
                 threat model. */}
-            {split ? (
+            {split && shared ? (
               <>
-                <SharedDefs markup={split.shared} />
+                <SharedStyle css={shared.css} />
+                <SharedDefs markup={shared.defs} />
                 <div className="flex flex-col items-center" style={{ gap: `${DEFAULT_PAGE_GAP}px` }}>
                   {split.pages.map((page, i) => (
                     <PageCard
