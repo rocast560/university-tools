@@ -46,7 +46,9 @@ async function settle() {
   await act(async () => { await vi.advanceTimersByTimeAsync(400); });
 }
 
-const cards = (root: HTMLElement) => Array.from(root.querySelectorAll<HTMLElement>('[data-page-index]'));
+/** The pages render inside the preview host's shadow root. */
+const shadow = (root: HTMLElement): ShadowRoot | null => root.querySelector('[data-testid="preview-shadow-host"]')?.shadowRoot ?? null;
+const cards = (root: HTMLElement) => Array.from(shadow(root)?.querySelectorAll<HTMLElement>('[data-page-index]') ?? []);
 const mountedSvg = (card: HTMLElement) => card.querySelector('svg');
 
 describe('TypstPreview document switching', () => {
@@ -140,8 +142,10 @@ describe('TypstPreview page virtualization', () => {
     compileTypstSvg.mockResolvedValue({ svg: FOUR_PAGES, diagnostics: [] });
     const { container } = render(<TypstPreview source="a" />);
     await settle();
-    expect(container.querySelectorAll('defs.glyph')).toHaveLength(1);
-    expect(container.querySelectorAll('style')).toHaveLength(1);
+    const root = shadow(container)!;
+    expect(root.querySelectorAll('defs.glyph')).toHaveLength(1);
+    expect(Array.from(root.querySelectorAll('style')).filter((s) => s.textContent?.includes('.tsel'))).toHaveLength(1);
+    expect(container.querySelectorAll('defs.glyph')).toHaveLength(0); // nothing leaks into the document
   });
 
   it('mounts a page when it scrolls near the viewport and unmounts it when it leaves', async () => {
@@ -189,7 +193,7 @@ describe('TypstPreview page virtualization', () => {
     const { container } = render(<TypstPreview source="a" />);
     await settle();
     expect(cards(container)).toHaveLength(0);
-    expect(container.querySelector('#lone')).not.toBeNull();
+    expect(shadow(container)!.querySelector('#lone')).not.toBeNull();
   });
 
   it('counts click-to-source occurrences across earlier pages, mounted or not', async () => {
