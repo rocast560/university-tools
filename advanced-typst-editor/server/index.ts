@@ -25,5 +25,10 @@ const mcp = createMcp({ service, compile, backup, settings, bus, token: config.t
 
 const handler = createHandler({ settings, service, bus, token: config.token, staticDir: config.staticDir, dataDir: config.dataDir, backup, compile, mcp, browse });
 
+// A pending `openedAt` touch is written lazily; make sure a stop still lands it.
+for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(sig, () => { try { settings.flush(); } catch { /* best effort */ } process.exit(0); });
+}
+
 Bun.serve({ hostname: config.host, port: config.port, maxRequestBodySize: 32 * 1024 * 1024, idleTimeout: 120, fetch: handler });
 console.log(`[tfs] listening on http://${config.host}:${config.port}  data=${config.dataDir}  static=${config.staticDir ?? '(api only)'}  auth=${config.token ? 'token' : 'open'}`);

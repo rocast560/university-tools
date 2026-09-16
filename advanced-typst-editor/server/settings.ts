@@ -21,6 +21,14 @@ export interface SettingsStore {
   findByPath(p: string): WorkspaceEntry | null;
   addWorkspace(input: { path: string; name: string; group: string | null; library: boolean }): WorkspaceEntry;
   patchWorkspace(id: string, patch: Partial<Pick<WorkspaceEntry, 'name' | 'group' | 'path' | 'openedAt'>>): WorkspaceEntry | null;
+  /**
+   * Record that a workspace was opened. The new `openedAt` is visible to every
+   * reader at once; the file is written after a quiet period, so a read path
+   * that calls this never pays for a disk write.
+   */
+  touchWorkspace(id: string): WorkspaceEntry | null;
+  /** Write any pending touch now. */
+  flush(): void;
   removeWorkspace(id: string): boolean;
   /** Register every folder under workspacesDir that is not yet known. Returns the new entries. */
   scanLibrary(workspacesDir: string): WorkspaceEntry[];
@@ -58,14 +66,60 @@ function normalise(raw: Partial<Settings>): Settings {
   };
 }
 
-export function createSettingsStore(dataDir: string, opts: { now?: () => number } = {}): SettingsStore {
+/** How often `get` is allowed to stat the file for an edit made by another process. */
+const STAT_EVERY_MS = 1000;
+/** Quiet period before a `touchWorkspace` reaches the disk. */
+const TOUCH_DELAY_MS = 2000;
+
+export function createSettingsStore(
+  dataDir: string,
+  opts: { now?: () => number; clock?: () => number; touchDelayMs?: number } = {},
+): SettingsStore {
   const now = opts.now ?? (() => Date.now());
+  // Wall clock for throttling, separate from `now` so tests can pin timestamps
+  // without freezing the stat window.
+  const clock = opts.clock ?? (() => Date.now());
+  const touchDelayMs = opts.touchDelayMs ?? TOUCH_DELAY_MS;
   const file = path.join(dataDir, 'settings.json');
   fs.mkdirSync(dataDir, { recursive: true });
 
-  const get = (): Settings => normalise(readJson<Partial<Settings>>(file, {}));
-  const write = (s: Settings): Settings => { const n = normalise(s); writeAtomic(file, JSON.stringify(n, null, 2)); return n; };
+  // The parsed file lives here between calls. Every read used to parse the
+  // file again, several times per request; on a Docker bind mount each of
+  // those reads costs milliseconds. An edit by another process is still
+  // picked up: the file's mtime is checked at most once a second.
+  let cache: Settings | null = null;
+  let cachedMtime = 0;
+  let lastStat = -Infinity;
+  const fileMtime = (): number => { try { return fs.statSync(file).mtimeMs; } catch { return 0; } };
+
+  const get = (): Settings => {
+    const t = clock();
+    if (cache && t - lastStat < STAT_EVERY_MS) return cache;
+    lastStat = t;
+    const m = fileMtime();
+    if (cache && m === cachedMtime) return cache;
+    cache = normalise(readJson<Partial<Settings>>(file, {}));
+    cachedMtime = m;
+    return cache;
+  };
+  const write = (s: Settings): Settings => {
+    const n = normalise(s);
+    writeAtomic(file, JSON.stringify(n, null, 2));
+    cache = n;
+    cachedMtime = fileMtime();
+    lastStat = clock();
+    return n;
+  };
   const update = (fn: (s: Settings) => Settings): Settings => write(fn(get()));
+
+  let touchTimer: ReturnType<typeof setTimeout> | null = null;
+  let touchPending = false;
+  const flush = (): void => {
+    if (touchTimer) { clearTimeout(touchTimer); touchTimer = null; }
+    if (!touchPending) return;
+    touchPending = false;
+    write(get());
+  };
 
   const store: SettingsStore = {
     get,
@@ -91,6 +145,20 @@ export function createSettingsStore(dataDir: string, opts: { now?: () => number 
       }));
       return out;
     },
+    touchWorkspace(id) {
+      const s = get();
+      const cur = s.workspaces.find((w) => w.id === id);
+      if (!cur) return null;
+      const entry: WorkspaceEntry = { ...cur, openedAt: now() };
+      cache = { ...s, workspaces: s.workspaces.map((w) => (w.id === id ? entry : w)) };
+      touchPending = true;
+      if (!touchTimer) {
+        touchTimer = setTimeout(() => { touchTimer = null; flush(); }, touchDelayMs);
+        (touchTimer as { unref?: () => void }).unref?.();
+      }
+      return entry;
+    },
+    flush,
     removeWorkspace(id) {
       let removed = false;
       update((s) => ({ ...s, workspaces: s.workspaces.filter((w) => { if (w.id === id) { removed = true; return false; } return true; }) }));
