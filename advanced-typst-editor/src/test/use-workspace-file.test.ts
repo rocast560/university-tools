@@ -3,6 +3,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { CLIENT_ID } from '@/api/client';
 import { useWorkspaceFile } from '@/hooks/use-workspace-file';
 import { useAppStore } from '@/stores';
+import { clearWorkspaceCaches, textCache } from '@/lib/workspace-cache';
 import type { ServerEvent } from '@/types';
 
 /**
@@ -29,6 +30,7 @@ let disk = BEFORE;
 const writes: string[] = [];
 
 beforeEach(() => {
+  clearWorkspaceCaches();
   disk = BEFORE;
   writes.length = 0;
   useAppStore.setState({ activeWorkspaceId: 'w1', lastChange: null, detail: null, typstAssets: [], assetFolders: [] });
@@ -48,6 +50,54 @@ afterEach(() => { vi.unstubAllGlobals(); });
 
 const emit = (ev: ServerEvent) => act(() => { useAppStore.getState().handleEvent(ev); });
 const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+
+describe('useWorkspaceFile text cache', () => {
+  beforeEach(() => clearWorkspaceCaches());
+
+  it('shows a cached document at once, revalidates with If-None-Match, and keeps it on a 304', async () => {
+    textCache.set('w1:main.typ', { text: 'cached text', etag: '"e1"' });
+    const seen: Array<string | undefined> = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).includes('/files/')) { seen.push((init?.headers as Record<string, string>)['if-none-match']); return new Response(null, { status: 304 }); }
+      return new Response(JSON.stringify(detail), { status: 200 });
+    }));
+    const { result } = renderHook(() => useWorkspaceFile('w1', 'main.typ'));
+    expect(result.current.loading).toBe(false);
+    expect(result.current.text).toBe('cached text');
+    await settle();
+    expect(seen).toEqual(['"e1"']);
+    expect(result.current.text).toBe('cached text');
+  });
+
+  it('replaces a cached document that changed on disk while the buffer is clean, and fills the cache on first load', async () => {
+    textCache.set('w1:main.typ', { text: 'stale', etag: '"old"' });
+    disk = 'fresh from disk';
+    const { result } = renderHook(() => useWorkspaceFile('w1', 'main.typ'));
+    expect(result.current.text).toBe('stale');
+    await waitFor(() => expect(result.current.text).toBe('fresh from disk'));
+    expect(textCache.get('w1:main.typ')).toEqual({ text: 'fresh from disk', etag: 'e1' });
+  });
+
+  it('switching keys presents the new document in the same render and caches edits by key', async () => {
+    textCache.set('w1:a.typ', { text: 'A', etag: '"a"' });
+    textCache.set('w1:b.typ', { text: 'B', etag: '"b"' });
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if ((init?.method ?? 'GET') === 'PUT') return new Response(JSON.stringify({ ok: true, etag: 'saved' }), { status: 200 });
+      return new Response(null, { status: 304 });
+    }));
+    const { result, rerender } = renderHook(({ path }) => useWorkspaceFile('w1', path), { initialProps: { path: 'a.typ' } });
+    expect(result.current.text).toBe('A');
+    act(() => { result.current.setText('A edited'); });
+    expect(textCache.get('w1:a.typ')).toEqual({ text: 'A edited', etag: null });
+    rerender({ path: 'b.typ' });
+    expect(result.current.text).toBe('B');
+    expect(result.current.dirty).toBe(false);
+    // The flush on the way out saved A and recorded the etag the server returned.
+    await waitFor(() => expect(textCache.get('w1:a.typ')).toEqual({ text: 'A edited', etag: '"saved"' }));
+    rerender({ path: 'a.typ' });
+    expect(result.current.text).toBe('A edited');
+  });
+});
 
 describe('useWorkspaceFile external-change handling', () => {
   it('reloads a clean buffer on a null-origin rewrite, even though this tab asked for it', async () => {
