@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { api } from '@/api/client';
 import { folderPathFor, movedFolderPath, renamedFolderPath } from '@/lib/folder-paths';
+import { switchTrace } from '@/lib/perf';
+import { detailCache, forgetWorkspace, mergeDetail } from '@/lib/workspace-cache';
 import type { AssetFolder, BackupState, BlurRegion, CropRect, ID, McpStatus, RedactionDefaults, ServerEvent, TypstAsset, TypstAssetKind, WorkspaceDetail, WorkspaceStatus } from '@/types';
 
 export interface ChangeNotice { id: ID; paths: string[]; origin: string | null; seq: number }
@@ -58,11 +60,28 @@ let seq = 0;
 let reloadTimer: ReturnType<typeof setTimeout> | null = null;
 
 export const useAppStore = create<AppState>((set, get) => {
-  const applyDetail = (detail: WorkspaceDetail) => set({ detail, typstAssets: detail.assets, assetFolders: detail.folders });
+  const applyDetail = (detail: WorkspaceDetail) => {
+    if (get().detail === detail) return;
+    set({ detail, typstAssets: detail.assets, assetFolders: detail.folders });
+  };
+  /**
+   * Fetch the active workspace's detail, conditionally: the server answers
+   * 304 when the cached copy is still current. The result is merged into the
+   * cached one so unchanged records keep their identity. A response that
+   * lands after the user moved on updates the cache but not the screen.
+   */
   const reloadDetail = async () => {
     const id = get().activeWorkspaceId;
     if (!id) return;
-    try { applyDetail(await api.getWorkspace(id)); } catch { /* missing: the sidebar shows it */ }
+    const cached = detailCache.get(id);
+    let fresh: WorkspaceDetail | null;
+    try { fresh = await api.getWorkspace(id, cached?.etag ?? null); } catch { return; /* missing: the sidebar shows it */ }
+    const merged = fresh ? mergeDetail(cached, fresh) : cached;
+    if (!merged) return;
+    detailCache.set(id, merged);
+    if (get().activeWorkspaceId !== id) return;
+    applyDetail(merged);
+    switchTrace.mark('detail');
   };
   return {
     workspaces: [], groups: [], activeWorkspaceId: null, detail: null, typstAssets: [], assetFolders: [],
@@ -70,9 +89,14 @@ export const useAppStore = create<AppState>((set, get) => {
 
     async loadWorkspaces() { set({ workspaces: await api.listWorkspaces() }); },
     async selectWorkspace(id) {
-      set({ activeWorkspaceId: id, detail: null, typstAssets: [], assetFolders: [] });
-      if (id) await reloadDetail();
+      switchTrace.start(id ?? 'none');
+      // A workspace seen before is on screen at once; the server is only
+      // asked whether anything changed.
+      const cached = id ? detailCache.get(id) : undefined;
+      set({ activeWorkspaceId: id, detail: cached ?? null, typstAssets: cached?.assets ?? [], assetFolders: cached?.folders ?? [] });
+      if (cached) switchTrace.mark('detail');
       try { localStorage.setItem('tfs-active-workspace', id ?? ''); } catch { /* ignore */ }
+      if (id) await reloadDetail();
     },
     async createWorkspace(name, group) {
       const w = await api.createWorkspace({ name, group: group ?? null });
@@ -81,9 +105,9 @@ export const useAppStore = create<AppState>((set, get) => {
       return get().workspaces.find((x) => x.id === w.id) ?? null;
     },
     async openFolder(path) { const w = await api.openFolder(path); await get().loadWorkspaces(); await get().selectWorkspace(w.id); },
-    async renameWorkspace(id, name) { await api.patchWorkspace(id, { name }); await get().loadWorkspaces(); if (get().activeWorkspaceId === id) await reloadDetail(); },
-    async setWorkspaceGroup(id, group) { await api.patchWorkspace(id, { group }); await get().loadWorkspaces(); },
-    async removeWorkspace(id) { await api.deleteWorkspace(id); if (get().activeWorkspaceId === id) await get().selectWorkspace(null); await get().loadWorkspaces(); },
+    async renameWorkspace(id, name) { await api.patchWorkspace(id, { name }); detailCache.delete(id); await get().loadWorkspaces(); if (get().activeWorkspaceId === id) await reloadDetail(); },
+    async setWorkspaceGroup(id, group) { await api.patchWorkspace(id, { group }); detailCache.delete(id); await get().loadWorkspaces(); },
+    async removeWorkspace(id) { await api.deleteWorkspace(id); forgetWorkspace(id); if (get().activeWorkspaceId === id) await get().selectWorkspace(null); await get().loadWorkspaces(); },
     async loadGroups() { set({ groups: await api.listGroups() }); },
     async createGroup(name) { set({ groups: await api.createGroup(name) }); },
     async renameGroup(name, newName) { set({ groups: await api.renameGroup(name, newName) }); await get().loadWorkspaces(); },
@@ -118,10 +142,16 @@ export const useAppStore = create<AppState>((set, get) => {
     setOnline: (online) => set({ online }),
     handleEvent(ev) {
       switch (ev.type) {
-        case 'workspaces.changed': void get().loadWorkspaces(); void get().loadGroups(); break;
+        case 'workspaces.changed':
+          // Names and groups live in the cached entries; cheaper to refetch than to patch.
+          detailCache.clear();
+          void get().loadWorkspaces(); void get().loadGroups(); void reloadDetail();
+          break;
         case 'backup.state': set({ backup: ev.state }); break;
         case 'mcp.clients': set((s) => ({ mcp: { endpoint: s.mcp?.endpoint ?? '/mcp', authRequired: s.mcp?.authRequired ?? false, stdioBridge: s.mcp?.stdioBridge ?? null, clients: ev.clients } })); break;
         case 'workspace.changed':
+          // Not on screen: the caches stay (they are revalidated on the next
+          // visit anyway), so switching back is still instant.
           if (ev.id !== get().activeWorkspaceId) return;
           set({ lastChange: { id: ev.id, paths: ev.paths, origin: ev.origin, seq: ++seq } });
           if (reloadTimer) clearTimeout(reloadTimer);
