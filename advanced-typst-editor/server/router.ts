@@ -126,7 +126,9 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
       const id = seg[2]!;
       if (seg.length === 3) {
         if (method === 'GET') {
-          const detail = await service.detail(id);
+          // A prefetch reads the workspace without "opening" it: the sidebar
+          // orders by openedAt, and warming a cache must not reorder it.
+          const detail = await service.detail(id, { touch: req.headers.get('x-tfs-prefetch') !== '1' });
           const etag = `"${detail.etag}"`;
           if (req.headers.get('if-none-match') === etag) return new Response(null, { status: 304, headers: { etag } });
           return json(200, detail, { etag, 'cache-control': 'no-cache' });

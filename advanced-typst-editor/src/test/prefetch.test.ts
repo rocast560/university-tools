@@ -33,6 +33,7 @@ afterEach(() => { cancelHoverPrefetch(); vi.useRealTimers(); });
 describe('prefetchWorkspace', () => {
   it('fills the detail and text caches and warms the mounts, skipping what is already cached', async () => {
     expect(await prefetchWorkspace('a')).toBe(100);
+    expect(getWorkspace).toHaveBeenCalledWith('a', null, { prefetch: true });
     expect(detailCache.get('a')?.entry.id).toBe('a');
     expect(textCache.get('a:main.typ')).toEqual({ text: '= doc', etag: '"t"' });
     expect(collectMounts).toHaveBeenCalledWith('a', [], detail('a').files, 'main.typ');
@@ -70,7 +71,7 @@ describe('hoverPrefetch', () => {
     hoverPrefetch('b'); // moved on: only the row the pointer rests on counts
     vi.advanceTimersByTime(80);
     expect(getWorkspace).toHaveBeenCalledTimes(1);
-    expect(getWorkspace).toHaveBeenCalledWith('b');
+    expect(getWorkspace).toHaveBeenCalledWith('b', null, { prefetch: true });
   });
 });
 
@@ -90,9 +91,9 @@ describe('idle sweep', () => {
     const cancel = schedulePrefetchAll(() => [ws('a', 3), ws('b', 2), ws('c', 1)], () => null, { idle, maxBytes: 100 });
     expect(getWorkspace).not.toHaveBeenCalled();
     await runIdle();
-    expect(getWorkspace).toHaveBeenCalledWith('a');
+    expect(getWorkspace).toHaveBeenCalledWith('a', null, { prefetch: true });
     await runIdle();
-    expect(getWorkspace).toHaveBeenCalledWith('b');
+    expect(getWorkspace).toHaveBeenCalledWith('b', null, { prefetch: true });
     await runIdle(); // 120 bytes: over budget, c is never fetched
     expect(getWorkspace).toHaveBeenCalledTimes(2);
     cancel();

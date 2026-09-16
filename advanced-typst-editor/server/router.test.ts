@@ -44,6 +44,10 @@ describe('router detail caching', () => {
 
     const put = await call('PUT', `/api/workspaces/${id}/files/main.typ`, new TextEncoder().encode('= Longer than the template was'), { 'x-client-id': 'c1' });
     expect(((await put.json()) as { etag: string }).etag).toMatch(/^\d+-\d+$/);
+    // A prefetch read leaves openedAt alone; an ordinary read bumps it.
+    const before = ((await (await call('GET', `/api/workspaces/${id}`, undefined, { 'x-tfs-prefetch': '1' })).json()) as { entry: { openedAt: number } }).entry.openedAt;
+    const list = await (await call('GET', '/api/workspaces')).json() as { workspaces: Array<{ openedAt: number }> };
+    expect(list.workspaces[0]!.openedAt).toBe(before);
     const second = await call('GET', `/api/workspaces/${id}`, undefined, { 'if-none-match': etag });
     expect(second.status).toBe(200);
     expect(second.headers.get('etag')).not.toBe(etag);
