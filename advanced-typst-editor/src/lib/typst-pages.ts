@@ -119,6 +119,78 @@ export function splitTypstPages(svg: string): SplitTypstSvg | null {
   return { shared, pages };
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// The shared prelude, mounted without invalidating the document's styles.
+//
+// Measured on a 23-page report with two pages mounted: any full-document
+// style recalculation costs 1.0 to 1.5 s (thousands of <use> glyph
+// instances and position:fixed selection runs), and inserting or replacing a
+// <style> element, even with identical text, forces exactly that. Replacing
+// the glyph <defs> wholesale costs about 90 ms because every <use> is
+// re-instantiated. So the stylesheet is split out and rendered once, and the
+// defs are reconciled child by child, keyed by id.
+// ─────────────────────────────────────────────────────────────────────────
+
+const STYLE_RE = /<style\b[^>]*>([\s\S]*?)<\/style>/g;
+
+/** The CSS of every <style> block in the prelude, and the prelude without them. */
+export function splitSharedStyle(shared: string): { css: string; defs: string } {
+  const css: string[] = [];
+  const defs = shared.replace(STYLE_RE, (_m, body: string) => { if (body.trim()) css.push(body); return ''; });
+  return { css: css.join('\n'), defs: defs.trim() };
+}
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/**
+ * Same tag, attributes and content. Compared attribute by attribute rather
+ * than through outerHTML: an element parsed as XML and one living in the
+ * HTML document serialize differently even when they are the same.
+ */
+function sameElement(a: Element, b: Element): boolean {
+  if (a.tagName !== b.tagName || a.attributes.length !== b.attributes.length) return false;
+  for (const attr of Array.from(a.attributes)) if (b.getAttribute(attr.name) !== attr.value) return false;
+  return a.childNodes.length === b.childNodes.length && a.textContent === b.textContent;
+}
+
+/**
+ * Make `host`'s children match `markup` (a sequence of `<defs class="…">`
+ * blocks) with the fewest DOM changes: a block's children are diffed by id,
+ * so a glyph that is still in use keeps its element and the <use> instances
+ * pointing at it are left alone. A block whose children carry no ids is
+ * replaced as a whole.
+ */
+export function reconcileDefs(host: Element, markup: string): void {
+  const parsed = new DOMParser().parseFromString(`<svg xmlns="${SVG_NS}">${markup}</svg>`, 'image/svg+xml');
+  const next = parsed.documentElement;
+  if (parsed.querySelector('parsererror')) { host.innerHTML = markup; return; }
+  const keyOf = (el: Element) => `${el.tagName}|${el.getAttribute('class') ?? ''}`;
+  const current = new Map<string, Element>();
+  for (const el of Array.from(host.children)) current.set(keyOf(el), el);
+  const seen = new Set<string>();
+  for (const block of Array.from(next.children)) {
+    const key = keyOf(block);
+    seen.add(key);
+    const existing = current.get(key);
+    if (!existing) { host.appendChild(host.ownerDocument.importNode(block, true)); continue; }
+    const wanted = Array.from(block.children);
+    const have = Array.from(existing.children);
+    if (wanted.some((c) => !c.id) || have.some((c) => !c.id)) {
+      if (existing.innerHTML !== block.innerHTML) existing.innerHTML = block.innerHTML;
+      continue;
+    }
+    const wantIds = new Map(wanted.map((c) => [c.id, c] as const));
+    const haveIds = new Map(have.map((c) => [c.id, c] as const));
+    for (const c of have) if (!wantIds.has(c.id)) c.remove();
+    for (const c of wanted) {
+      const h = haveIds.get(c.id);
+      if (!h) existing.appendChild(host.ownerDocument.importNode(c, true));
+      else if (!sameElement(h, c)) h.replaceWith(host.ownerDocument.importNode(c, true));
+    }
+  }
+  for (const [key, el] of current) if (!seen.has(key)) el.remove();
+}
+
 /**
  * The text of every selection run (`<foreignObject>` → `.tsel`) in a page
  * fragment, in document order, as the live DOM's `textContent` would report

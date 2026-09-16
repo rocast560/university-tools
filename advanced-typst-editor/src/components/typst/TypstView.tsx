@@ -317,8 +317,11 @@ function TypstWorkspaceView({ workspaceId }: { workspaceId: string }) {
       ? (visibleRef.current.assets ? widthsRef.current.assets : 0)
       : (visibleRef.current.editor ? widthsRef.current.editor : 0);
 
-    document.body.style.userSelect = 'none';
-    document.body.style.cursor = 'col-resize';
+    // On the container, not <body>: an inherited property changed on <body>
+    // forces a style recalculation of the whole document, which with a long
+    // report mounted costs over a second before the drag even starts.
+    container.style.userSelect = 'none';
+    container.style.cursor = 'col-resize';
 
     let frame = 0;
     let next = startWidth;
@@ -339,8 +342,8 @@ function TypstWorkspaceView({ workspaceId }: { workspaceId: string }) {
 
     const cleanup = () => {
       if (frame) { cancelAnimationFrame(frame); frame = 0; }
-      document.body.style.userSelect = '';
-      document.body.style.cursor = '';
+      container.style.userSelect = '';
+      container.style.cursor = '';
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onUp);
