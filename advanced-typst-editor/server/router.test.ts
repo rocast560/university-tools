@@ -30,6 +30,28 @@ function app(token: string | null = null) {
   return { call, service, bus };
 }
 
+describe('router detail caching', () => {
+  it('sends an ETag, answers 304 to it, and moves it when a file changes', async () => {
+    const { call } = app();
+    const created = await (await call('POST', '/api/workspaces', { name: 'R', group: null })).json() as { workspace: { id: string } };
+    const id = created.workspace.id;
+    const first = await call('GET', `/api/workspaces/${id}`);
+    expect(first.status).toBe(200);
+    const etag = first.headers.get('etag')!;
+    expect(etag).toMatch(/^"[0-9a-f]{16}"$/);
+    expect(((await first.json()) as { etag: string }).etag).toBe(etag.slice(1, -1));
+    expect((await call('GET', `/api/workspaces/${id}`, undefined, { 'if-none-match': etag })).status).toBe(304);
+
+    const put = await call('PUT', `/api/workspaces/${id}/files/main.typ`, new TextEncoder().encode('= Longer than the template was'), { 'x-client-id': 'c1' });
+    expect(((await put.json()) as { etag: string }).etag).toMatch(/^\d+-\d+$/);
+    const second = await call('GET', `/api/workspaces/${id}`, undefined, { 'if-none-match': etag });
+    expect(second.status).toBe(200);
+    expect(second.headers.get('etag')).not.toBe(etag);
+    const body = await second.json() as { files: Array<{ path: string; size: number }> };
+    expect(body.files.find((f) => f.path === 'main.typ')?.size).toBe('= Longer than the template was'.length);
+  });
+});
+
 describe('router', () => {
   it('health, create, detail, file round trip, asset upload and patch', async () => {
     const { call } = app();
