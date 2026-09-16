@@ -24,6 +24,16 @@ export function readJson<T>(file: string, fallback: T): T {
   } catch { return fallback; }
 }
 
+/** `readJson` without blocking the event loop; same fallback rules. */
+export async function readJsonAsync<T>(file: string, fallback: T): Promise<T> {
+  let raw: string;
+  try { raw = await fs.promises.readFile(file, 'utf8'); } catch { return fallback; }
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? (parsed as T) : fallback;
+  } catch { return fallback; }
+}
+
 export function isDir(p: string): boolean { try { return fs.statSync(p).isDirectory(); } catch { return false; } }
 export function isFile(p: string): boolean { try { return fs.statSync(p).isFile(); } catch { return false; } }
 export function ensureDir(p: string): void { fs.mkdirSync(p, { recursive: true }); }

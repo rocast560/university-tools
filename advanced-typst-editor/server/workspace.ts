@@ -10,7 +10,7 @@ import { normalizeRel, resolveInside } from './paths';
 export const META_FILE = 'workspace.json';
 export const ASSETS_DIR = 'assets';
 export const FONTS_DIR = 'fonts';
-const SKIP_DIRS = new Set(['node_modules', '.git', 'target', '__pycache__']);
+export const SKIP_DIRS = new Set(['node_modules', '.git', 'target', '__pycache__']);
 
 export const EMPTY_META: WorkspaceJson = { version: 1, assets: {}, fonts: {} };
 
@@ -65,7 +65,43 @@ function walk(root: string, rel: string, out: FileEntry[]): void {
   }
 }
 
-function normaliseMeta(raw: Partial<WorkspaceJson>): WorkspaceJson {
+/**
+ * The asset record for a listed file, or null when the file is not an asset
+ * (outside assets/ and fonts/, or an extension the app does not handle).
+ * Pure: the same inputs always give the same record, which is what lets the
+ * async index (workspace-index.ts) and the synchronous listing agree.
+ */
+export function assetFromFile(f: FileEntry, meta: WorkspaceJson, birthtimeMs: number | null): TypstAsset | null {
+  const top = f.path.split('/')[0];
+  const kind = top === ASSETS_DIR ? 'image' : top === FONTS_DIR ? 'font' : null;
+  if (!kind) return null;
+  const ext = extensionOf(f.path);
+  if (!ALLOWED_EXTENSIONS[kind].includes(ext)) return null;
+  const filename = path.posix.basename(f.path);
+  const dirRel = path.posix.dirname(f.path);
+  const folderId = kind === 'image' && dirRel !== ASSETS_DIR ? dirRel.slice(ASSETS_DIR.length + 1) : null;
+  const createdAt = birthtimeMs ? Math.round(birthtimeMs) || f.mtime : f.mtime;
+  const m = kind === 'image' ? meta.assets[f.path] : undefined;
+  const fm = kind === 'font' ? meta.fonts[f.path] : undefined;
+  return {
+    id: f.path,
+    kind,
+    filename,
+    mime: mimeFor(kind, filename) ?? 'application/octet-stream',
+    size: f.size,
+    etag: `${f.mtime}-${f.size}`,
+    width: m?.width ?? null,
+    height: m?.height ?? null,
+    crop: m?.crop ?? null,
+    blurs: m?.blurs ?? null,
+    fontFamily: fm?.family ?? null,
+    folderId,
+    createdAt,
+    updatedAt: f.mtime,
+  };
+}
+
+export function normaliseMeta(raw: Partial<WorkspaceJson>): WorkspaceJson {
   return {
     version: 1,
     assets: raw.assets && typeof raw.assets === 'object' ? raw.assets : {},
@@ -93,34 +129,10 @@ export function openWorkspace(root: string, opts: { now?: () => number } = {}): 
     const meta = readMeta();
     const out: TypstAsset[] = [];
     for (const f of listFiles()) {
-      const top = f.path.split('/')[0];
-      const kind = top === ASSETS_DIR ? 'image' : top === FONTS_DIR ? 'font' : null;
-      if (!kind) continue;
-      const ext = extensionOf(f.path);
-      if (!ALLOWED_EXTENSIONS[kind].includes(ext)) continue;
-      const filename = path.posix.basename(f.path);
-      const dirRel = path.posix.dirname(f.path);
-      const folderId = kind === 'image' && dirRel !== ASSETS_DIR ? dirRel.slice(ASSETS_DIR.length + 1) : null;
-      let createdAt = f.mtime;
-      try { createdAt = Math.round(fs.statSync(path.join(rootAbs, ...f.path.split('/'))).birthtimeMs) || f.mtime; } catch { /* keep mtime */ }
-      const m = kind === 'image' ? meta.assets[f.path] : undefined;
-      const fm = kind === 'font' ? meta.fonts[f.path] : undefined;
-      out.push({
-        id: f.path,
-        kind,
-        filename,
-        mime: mimeFor(kind, filename) ?? 'application/octet-stream',
-        size: f.size,
-        etag: `${f.mtime}-${f.size}`,
-        width: m?.width ?? null,
-        height: m?.height ?? null,
-        crop: m?.crop ?? null,
-        blurs: m?.blurs ?? null,
-        fontFamily: fm?.family ?? null,
-        folderId,
-        createdAt,
-        updatedAt: f.mtime,
-      });
+      let birth: number | null = null;
+      try { birth = fs.statSync(path.join(rootAbs, ...f.path.split('/'))).birthtimeMs; } catch { /* keep mtime */ }
+      const a = assetFromFile(f, meta, birth);
+      if (a) out.push(a);
     }
     return out;
   };
