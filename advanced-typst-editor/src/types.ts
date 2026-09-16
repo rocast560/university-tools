@@ -67,6 +67,8 @@ export interface WorkspaceDetail {
   meta: WorkspaceJson;
   assets: TypstAsset[];
   folders: AssetFolder[];
+  /** Changes whenever files or meta change; send it back as If-None-Match to get a 304. */
+  etag: string;
 }
 
 export interface BackupDestination { id: ID; path: string; mirror: boolean; snapshots: boolean }

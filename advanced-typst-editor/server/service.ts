@@ -7,6 +7,7 @@ import { HttpError } from './http';
 import type { SettingsStore } from './settings';
 import type { Watcher } from './watcher';
 import { openWorkspace, type WorkspaceFs } from './workspace';
+import { createWorkspaceIndex, type WorkspaceIndex } from './workspace-index';
 
 export interface ServiceDeps {
   settings: SettingsStore;
@@ -17,6 +18,8 @@ export interface ServiceDeps {
   /** Source of a new workspace's main.typ when none is given. */
   template: string;
   now?: () => number;
+  /** The folder index; one is created when not given. */
+  index?: WorkspaceIndex;
 }
 
 const MAX_ENTRIES = 5000;
@@ -25,7 +28,8 @@ export interface WorkspaceService {
   list(): WorkspaceStatus[];
   entry(id: string): WorkspaceEntry;
   fs(id: string): WorkspaceFs;
-  detail(id: string): WorkspaceDetail;
+  /** Served from the in-memory index; the entry's openedAt is bumped lazily. */
+  detail(id: string): Promise<WorkspaceDetail>;
   create(input: { name: string; group: string | null; source: string | undefined }): WorkspaceEntry;
   openFolder(absPath: string, name: string | undefined): WorkspaceEntry;
   rename(id: string, name: string): WorkspaceEntry;
@@ -38,7 +42,7 @@ export interface WorkspaceService {
   /** Register every library folder not yet known and start watching everything that exists. */
   boot(): void;
   // writes: all emit workspace.changed with `origin`
-  writeFile(id: string, rel: string, bytes: Uint8Array, origin: string | null): void;
+  writeFile(id: string, rel: string, bytes: Uint8Array, origin: string | null): { etag: string };
   deleteFile(id: string, rel: string, origin: string | null): boolean;
   addAsset(id: string, input: { kind: TypstAssetKind; filename: string; bytes: Uint8Array; folder: string | null; family?: string | null }, origin: string | null): TypstAsset;
   patchAsset(id: string, assetId: string, patch: Record<string, unknown>, origin: string | null): TypstAsset;
@@ -53,6 +57,16 @@ export interface WorkspaceService {
 export function createWorkspaceService(deps: ServiceDeps): WorkspaceService {
   const now = deps.now ?? (() => Date.now());
   const { settings, bus, watcher } = deps;
+  const index = deps.index ?? createWorkspaceIndex({ now });
+
+  // Every change, whether the server wrote it or the watcher saw it on disk,
+  // reaches the bus; that is the one place the index needs to listen.
+  bus.subscribe((ev) => {
+    if (ev.type !== 'workspace.changed') return;
+    const e = settings.getWorkspace(ev.id);
+    if (!e) return;
+    for (const p of ev.paths) index.touch(e.path, p);
+  });
 
   const entry = (id: string): WorkspaceEntry => {
     const e = settings.getWorkspace(id);
@@ -111,12 +125,12 @@ export function createWorkspaceService(deps: ServiceDeps): WorkspaceService {
     list: () => settings.listWorkspaces().map(status),
     entry,
     fs: liveFs,
-    detail(id) {
+    async detail(id) {
       const e = entry(id);
       if (!isDir(e.path)) throw new HttpError(409, `workspace folder is missing: ${e.path}`);
-      const ws = openWorkspace(e.path, { now });
-      const patched = settings.patchWorkspace(id, { openedAt: now() }) ?? e;
-      return { entry: patched, files: ws.listFiles(), meta: ws.readMeta(), assets: ws.listAssets(), folders: ws.listFolders() };
+      const snap = await index.get(e.path);
+      const patched = settings.touchWorkspace(id) ?? e;
+      return { entry: patched, files: snap.files, meta: snap.meta, assets: snap.assets, folders: snap.folders, etag: snap.etag };
     },
     create({ name, group, source }) {
       const clean = name.trim() || 'Untitled report';
@@ -163,6 +177,7 @@ export function createWorkspaceService(deps: ServiceDeps): WorkspaceService {
         const target = path.join(parent, uniqueDirName(parent, safeDirName(clean)));
         if (target !== e.path) {
           watcher?.unwatch(id);
+          index.invalidate(e.path);
           fs.renameSync(e.path, target);
           newPath = target;
           watcher?.watch(id, target);
@@ -204,6 +219,7 @@ export function createWorkspaceService(deps: ServiceDeps): WorkspaceService {
     remove(id) {
       const e = entry(id);
       watcher?.unwatch(id);
+      index.invalidate(e.path);
       if (e.library && isDir(e.path)) {
         const trash = path.join(deps.dataDir, 'trash', stamp(now()));
         ensureDir(trash);
@@ -215,12 +231,18 @@ export function createWorkspaceService(deps: ServiceDeps): WorkspaceService {
     boot() {
       ensureDir(deps.workspacesDir);
       settings.scanLibrary(deps.workspacesDir);
-      for (const e of settings.listWorkspaces()) if (isDir(e.path)) watcher?.watch(e.id, e.path);
+      for (const e of settings.listWorkspaces()) {
+        if (!isDir(e.path)) continue;
+        watcher?.watch(e.id, e.path);
+        // Warm the index so the first click after a start is as fast as the rest.
+        void index.get(e.path).catch(() => { /* the request path reports it */ });
+      }
     },
     writeFile(id, rel, bytes, origin) {
       const ws = liveFs(id);
       const f = ws.writeFile(rel, bytes);
       changed(id, [f.path], origin);
+      return { etag: `${f.mtime}-${f.size}` };
     },
     deleteFile(id, rel, origin) {
       const ws = liveFs(id);

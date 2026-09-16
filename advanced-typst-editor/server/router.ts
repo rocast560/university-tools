@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { promises as fsp } from 'node:fs';
 import type { BackupState, DirListing, McpStatus, SnapshotInfo, CompileResult, Diagnostic } from '../src/types';
 import type { EventBus } from './events';
 import { HttpError, json, optionalString, readJsonObject, requireString } from './http';
@@ -7,6 +8,7 @@ import type { WorkspaceService } from './service';
 import { serveStatic } from './static';
 import { MAX_ASSET_BYTES, extensionOf } from './assets';
 import { fontFamily, fontFamilyViaTypst } from './fonts';
+import { etagOf } from './workspace';
 
 /** Filled in by later tasks; null => the route answers 503. */
 export interface BackupApi {
@@ -123,7 +125,12 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
       }
       const id = seg[2]!;
       if (seg.length === 3) {
-        if (method === 'GET') return json(200, service.detail(id));
+        if (method === 'GET') {
+          const detail = await service.detail(id);
+          const etag = `"${detail.etag}"`;
+          if (req.headers.get('if-none-match') === etag) return new Response(null, { status: 304, headers: { etag } });
+          return json(200, detail, { etag, 'cache-control': 'no-cache' });
+        }
         if (method === 'PATCH') {
           const body = await readJsonObject(req);
           let entry = service.entry(id);
@@ -141,13 +148,18 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
       const rest = seg.slice(4).join('/');
       if (seg[3] === 'files' && rest) {
         if (method === 'GET' || method === 'HEAD') {
-          const f = service.fs(id).readFile(rest);
-          if (!f) return json(404, { error: 'file not found' });
-          const etag = `"${f.etag}"`;
+          // Read without blocking the loop: on a bind mount a single read can
+          // take tens of milliseconds, and every other request would wait.
+          const abs = service.fs(id).abs(rest);
+          let st: Awaited<ReturnType<typeof fsp.stat>>;
+          try { st = await fsp.stat(abs); } catch { return json(404, { error: 'file not found' }); }
+          if (!st.isFile()) return json(404, { error: 'file not found' });
+          const etag = `"${etagOf(st)}"`;
           if (req.headers.get('if-none-match') === etag) return new Response(null, { status: 304, headers: { etag } });
-          return new Response(method === 'HEAD' ? null : f.bytes, { status: 200, headers: { etag, 'cache-control': 'no-cache', 'content-type': 'application/octet-stream' } });
+          const bytes = method === 'HEAD' ? null : new Uint8Array(await fsp.readFile(abs));
+          return new Response(bytes, { status: 200, headers: { etag, 'cache-control': 'no-cache', 'content-type': 'application/octet-stream' } });
         }
-        if (method === 'PUT') { service.writeFile(id, rest, await readBody(req), origin); return json(200, { ok: true }); }
+        if (method === 'PUT') { const { etag } = service.writeFile(id, rest, await readBody(req), origin); return json(200, { ok: true, etag }); }
         if (method === 'DELETE') return json(service.deleteFile(id, rest, origin) ? 200 : 404, { ok: true });
       }
       if (seg[3] === 'assets') {

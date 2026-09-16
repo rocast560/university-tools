@@ -26,6 +26,31 @@ function setup() {
   return { dataDir, bus, events, settings, svc };
 }
 
+describe('workspace service detail index', () => {
+  it('reflects the service`s own writes and asset changes on the next detail', async () => {
+    const { svc } = setup();
+    const w = svc.create({ name: 'Idx', group: null, source: '= One\n' });
+    const d1 = await svc.detail(w.id);
+    expect(d1.files.map((f) => f.path)).toEqual(['main.typ']);
+    expect(d1.etag).toMatch(/^[0-9a-f]{16}$/);
+    svc.writeFile(w.id, 'chapters/intro.typ', Buffer.from('intro'), 'c1');
+    const d2 = await svc.detail(w.id);
+    expect(d2.files.map((f) => f.path)).toEqual(['chapters/intro.typ', 'main.typ']);
+    expect(d2.etag).not.toBe(d1.etag);
+    expect(d2.assets).toBe(d1.assets);
+    svc.addAsset(w.id, { kind: 'image', filename: 'shot.png', bytes: PNG_1x1, folder: 'f', family: null }, 'c1');
+    const d3 = await svc.detail(w.id);
+    expect(d3.assets.map((a) => a.id)).toEqual(['assets/f/shot.png']);
+    expect(d3.folders.map((f) => f.id)).toEqual(['f']);
+    svc.patchAsset(w.id, 'assets/f/shot.png', { crop: { x: 0, y: 0, w: 1, h: 0.5 } }, 'c1');
+    expect((await svc.detail(w.id)).assets[0]?.crop).toEqual({ x: 0, y: 0, w: 1, h: 0.5 });
+    // Two reads with nothing in between hand back the very same arrays.
+    const a = await svc.detail(w.id);
+    const b = await svc.detail(w.id);
+    expect(b.files).toBe(a.files);
+  });
+});
+
 describe('workspace service', () => {
   it('creates a library workspace from the template and lists it', () => {
     const { svc, dataDir, events } = setup();
@@ -87,17 +112,17 @@ describe('workspace service', () => {
     expect(() => svc.createGroup('CPTC')).toThrow(/exists/);
   });
 
-  it('reports a missing external workspace instead of dropping it', () => {
+  it('reports a missing external workspace instead of dropping it', async () => {
     const { svc } = setup();
     const ext = tmpDir();
     put(ext, 'main.typ', '');
     const w = svc.openFolder(ext, undefined);
     rmDir(ext);
     expect(svc.list()[0]).toMatchObject({ id: w.id, status: 'missing' });
-    expect(() => svc.detail(w.id)).toThrow(/missing/);
+    await expect(svc.detail(w.id)).rejects.toThrow(/missing/);
   });
 
-  it('writes go through the service and emit with the origin', () => {
+  it('writes go through the service and emit with the origin', async () => {
     const { svc, events } = setup();
     const w = svc.create({ name: 'A', group: null, source: undefined });
     events.length = 0;
@@ -105,13 +130,13 @@ describe('workspace service', () => {
     expect(events.at(-1)).toEqual({ type: 'workspace.changed', id: w.id, paths: ['main.typ'], origin: 'client-1' });
     const a = svc.addAsset(w.id, { kind: 'image', filename: 'x.png', bytes: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64'), folder: 'shots' }, 'mcp');
     expect(events.at(-1)).toMatchObject({ type: 'workspace.changed', id: w.id, paths: ['assets/shots/x.png'], origin: 'mcp' });
-    const d = svc.detail(w.id);
+    const d = await svc.detail(w.id);
     expect(d.assets.map((x) => x.id)).toEqual([a.id]);
     expect(d.folders.map((f) => f.id)).toEqual(['shots']);
     expect(d.files.map((f) => f.path).sort()).toEqual(['assets/shots/x.png', 'main.typ']);
   });
 
-  it('detail() returns a freshly bumped openedAt, not the stale pre-patch value', () => {
+  it('detail() returns a freshly bumped openedAt, not the stale pre-patch value', async () => {
     const dataDir = tmpDir(); dirs.push(dataDir);
     const bus = createEventBus();
     let clock = 1000;
@@ -120,7 +145,7 @@ describe('workspace service', () => {
     const w = svc.create({ name: 'A', group: null, source: undefined });
     expect(w.openedAt).toBe(1000);
     clock = 2000;
-    const d = svc.detail(w.id);
+    const d = await svc.detail(w.id);
     expect(d.entry.openedAt).toBe(2000);
     expect(d.entry.openedAt).toBeGreaterThanOrEqual(w.createdAt);
   });
