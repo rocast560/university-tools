@@ -898,7 +898,22 @@ Add to `src/test/store.test.ts`:
   });
 ```
 
-Match the file's existing import style; it already imports `api` from `@/api/client` and `useAppStore` from `@/stores`. Add `import type { FolderMeta } from '@/types';` only if you reference the type directly.
+This test uses `vi.spyOn`, while the rest of `store.test.ts` mocks at the
+`fetch` boundary via its `mockFetch()` helper. That file has no `afterEach`
+and the vitest config sets no `restoreMocks`, so **the spies must be cleaned
+up explicitly** or they leak into any test added after this one. Add, beside
+the existing top-level `beforeEach`:
+
+```ts
+afterEach(() => { vi.restoreAllMocks(); });
+```
+
+`restoreAllMocks` only undoes `vi.spyOn`; `vi.stubGlobal` is undone by
+`unstubAllGlobals`, so the existing fetch-boundary tests are unaffected.
+
+Add `afterEach` to the `vitest` import. The file imports `useAppStore` from
+`@/stores` but **does not** import `api` — add
+`import { api } from '@/api/client';` for the spies.
 
 - [ ] **Step 2: Run the test to verify it fails**
 
