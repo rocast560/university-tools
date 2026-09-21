@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { useAppStore } from '@/stores';
 import { api } from '@/api/client';
 import { clearWorkspaceCaches, detailCache } from '@/lib/workspace-cache';
@@ -18,6 +18,7 @@ function mockFetch(routes: Record<string, unknown>) {
 const detail: WorkspaceDetail = { entry: { id: 'w1', name: 'A', path: 'C:/a', group: null, library: true, createdAt: 0, openedAt: 0 }, files: [], meta: { version: 1, assets: {}, fonts: {} }, assets: [], folders: [{ id: 'Findings/auth', name: 'auth', parentId: 'Findings', createdAt: 0, updatedAt: 0 }], etag: 'e0' };
 
 beforeEach(() => { clearWorkspaceCaches(); useAppStore.setState({ activeWorkspaceId: 'w1', detail: null, typstAssets: [], assetFolders: [] }); });
+afterEach(() => { vi.restoreAllMocks(); });
 
 describe('store folder actions map to API paths', () => {
   it('create, rename, move, delete', async () => {
