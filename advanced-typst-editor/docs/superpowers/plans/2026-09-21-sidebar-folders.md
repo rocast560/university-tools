@@ -375,14 +375,19 @@ Add `folderMeta: {}` to `DEFAULT_SETTINGS` (after `groups: []`).
 In `normalise`, replace the `groups:` line with a groups-then-meta pair. `withAncestors` both sorts and dedupes, so it replaces the old `new Set(...)`:
 
 ```ts
-  const groups = withAncestors(
-    Array.isArray(raw.groups)
-      ? raw.groups
-          .filter((g): g is string => typeof g === 'string')
-          .map((g) => g.split('/').map((s) => s.trim()).filter(Boolean).join('/'))
-          .filter((g) => g.length > 0)
-      : [],
-  );
+  const clean = (g: string): string => g.split('/').map((s) => s.trim()).filter(Boolean).join('/');
+  const workspaces = Array.isArray(raw.workspaces)
+    ? raw.workspaces.filter((w): w is WorkspaceEntry => !!w && typeof w.id === 'string' && typeof w.path === 'string')
+    : [];
+  const groups = withAncestors([
+    ...(Array.isArray(raw.groups) ? raw.groups.filter((g): g is string => typeof g === 'string').map(clean) : []),
+    // A group a workspace REFERENCES must exist, or that workspace renders in
+    // no folder at all and silently vanishes from the sidebar: the tree
+    // enumerates folders from `groups`, and the empty state only appears when
+    // there are no workspaces at all. Real settings.json files in the wild
+    // carry group names the groups array never listed.
+    ...workspaces.map((w) => w.group).filter((g): g is string => typeof g === 'string' && g.length > 0).map(clean),
+  ].filter((g) => g.length > 0));
   const known = new Set(groups);
   const folderMeta: Record<string, FolderMeta> = {};
   for (const [k, v] of Object.entries(raw.folderMeta ?? {})) {
@@ -396,7 +401,15 @@ In `normalise`, replace the `groups:` line with a groups-then-meta pair. `withAn
   }
 ```
 
-and return `groups,` and `folderMeta,` in place of the old inline `groups:` entry.
+and return `groups,`, `folderMeta,` and the lifted `workspaces,` const in
+place of the old inline entries.
+
+**Invariant 6, added after review:** every group a workspace references is
+itself in `groups`. The sidebar tree enumerates folders from `groups` alone,
+so without this a workspace referencing an unlisted group renders in no folder
+and disappears with no empty-state message. Real files have this shape — the
+development `data/settings.json` had `groups: ["idk"]` while all nine
+workspaces sat in `CPTC` / `ECE-2300L`.
 
 - [ ] **Step 5: Extend the `SettingsStore` interface**
 
