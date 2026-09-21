@@ -58,8 +58,8 @@ describe('Sidebar', () => {
     useAppStore.setState({ workspaces: [ws('a', null)], groups: ['CPTC'], setWorkspaceGroup });
     render(<Sidebar />);
     const dt = fakeDataTransfer();
-    fireEvent.dragStart(screen.getByText('a'), { dataTransfer: dt });
-    fireEvent.drop(screen.getByText('CPTC'), { dataTransfer: dt });
+    fireEvent.dragStart(screen.getByTestId('workspace-a'), { dataTransfer: dt });
+    fireEvent.drop(screen.getByTestId('folder-CPTC'), { dataTransfer: dt });
     expect(setWorkspaceGroup).toHaveBeenCalledWith('a', 'CPTC');
   });
 
@@ -68,7 +68,7 @@ describe('Sidebar', () => {
     useAppStore.setState({ workspaces: [ws('a', 'CPTC')], groups: ['CPTC'], setWorkspaceGroup });
     render(<Sidebar />);
     const dt = fakeDataTransfer();
-    fireEvent.dragStart(screen.getByText('a'), { dataTransfer: dt });
+    fireEvent.dragStart(screen.getByTestId('workspace-a'), { dataTransfer: dt });
     fireEvent.drop(screen.getByTestId('sidebar-workspace-list'), { dataTransfer: dt });
     expect(setWorkspaceGroup).toHaveBeenCalledWith('a', null);
   });
@@ -112,8 +112,71 @@ describe('Sidebar', () => {
     useAppStore.setState({ workspaces: [ws('a', null)], groups: ['CPTC'], setWorkspaceGroup });
     render(<Sidebar />);
     const dt = fakeDataTransfer();
-    fireEvent.dragStart(screen.getByText('a'), { dataTransfer: dt });
-    fireEvent.drop(screen.getByText('CPTC'), { dataTransfer: dt });
+    fireEvent.dragStart(screen.getByTestId('workspace-a'), { dataTransfer: dt });
+    fireEvent.drop(screen.getByTestId('folder-CPTC'), { dataTransfer: dt });
+    expect(setWorkspaceGroup).toHaveBeenCalledWith('a', 'CPTC');
+  });
+
+  it('dragging a folder onto another folder nests it', () => {
+    const moveGroup = vi.fn();
+    useAppStore.setState({ workspaces: [], groups: ['CPTC', 'School'], moveGroup });
+    render(<Sidebar />);
+    const dt = fakeDataTransfer();
+    fireEvent.dragStart(screen.getByTestId('folder-CPTC'), { dataTransfer: dt });
+    fireEvent.drop(screen.getByTestId('folder-School'), { dataTransfer: dt });
+    expect(moveGroup).toHaveBeenCalledWith('CPTC', 'School');
+  });
+
+  it('ignores a folder dropped into its own subtree', () => {
+    const moveGroup = vi.fn();
+    useAppStore.setState({ workspaces: [], groups: ['CPTC', 'CPTC/inject'], moveGroup });
+    render(<Sidebar />);
+    const dt = fakeDataTransfer();
+    fireEvent.dragStart(screen.getByTestId('folder-CPTC'), { dataTransfer: dt });
+    fireEvent.drop(screen.getByTestId('folder-CPTC/inject'), { dataTransfer: dt });
+    expect(moveGroup).not.toHaveBeenCalled();
+  });
+
+  it('dragging a folder onto the loose area lifts it to the top level', () => {
+    const moveGroup = vi.fn();
+    useAppStore.setState({ workspaces: [], groups: ['CPTC', 'CPTC/inject'], moveGroup });
+    render(<Sidebar />);
+    const dt = fakeDataTransfer();
+    fireEvent.dragStart(screen.getByTestId('folder-CPTC/inject'), { dataTransfer: dt });
+    fireEvent.drop(screen.getByTestId('sidebar-workspace-list'), { dataTransfer: dt });
+    expect(moveGroup).toHaveBeenCalledWith('CPTC/inject', null);
+  });
+
+  it('marks a legal hovered target and not an illegal one', () => {
+    useAppStore.setState({ workspaces: [], groups: ['CPTC', 'CPTC/inject', 'School'] });
+    render(<Sidebar />);
+    const dt = fakeDataTransfer();
+    fireEvent.dragStart(screen.getByTestId('folder-CPTC'), { dataTransfer: dt });
+
+    fireEvent.dragOver(screen.getByTestId('folder-School'), { dataTransfer: dt });
+    expect(screen.getByTestId('folder-School')).toHaveAttribute('data-drop-active', 'true');
+
+    fireEvent.dragOver(screen.getByTestId('folder-CPTC/inject'), { dataTransfer: dt });
+    expect(screen.getByTestId('folder-CPTC/inject')).not.toHaveAttribute('data-drop-active', 'true');
+  });
+
+  it('files a workspace dragged into a subfolder, not just a top-level one', () => {
+    const setWorkspaceGroup = vi.fn();
+    useAppStore.setState({ workspaces: [ws('a', null)], groups: ['CPTC', 'CPTC/inject'], setWorkspaceGroup });
+    render(<Sidebar />);
+    const dt = fakeDataTransfer();
+    fireEvent.dragStart(screen.getByTestId('workspace-a'), { dataTransfer: dt });
+    fireEvent.drop(screen.getByTestId('folder-CPTC/inject'), { dataTransfer: dt });
+    expect(setWorkspaceGroup).toHaveBeenCalledWith('a', 'CPTC/inject');
+  });
+
+  it('dropping onto a workspace row inside a folder files the drag in that folder, not the top level', () => {
+    const setWorkspaceGroup = vi.fn();
+    useAppStore.setState({ workspaces: [ws('a', null), ws('b', 'CPTC')], groups: ['CPTC'], setWorkspaceGroup });
+    render(<Sidebar />);
+    const dt = fakeDataTransfer();
+    fireEvent.dragStart(screen.getByTestId('workspace-a'), { dataTransfer: dt });
+    fireEvent.drop(screen.getByTestId('workspace-b'), { dataTransfer: dt });
     expect(setWorkspaceGroup).toHaveBeenCalledWith('a', 'CPTC');
   });
 

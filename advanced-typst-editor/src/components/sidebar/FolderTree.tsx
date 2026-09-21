@@ -1,6 +1,7 @@
 import { FolderRow } from '@/components/sidebar/FolderRow';
 import { WorkspaceRow } from '@/components/sidebar/WorkspaceRow';
 import { childPaths } from '@/lib/folder-tree';
+import type { DragPayload } from '@/lib/sidebar-dnd';
 import { subtreeCount } from '@/lib/workspace-groups';
 import type { WorkspaceStatus, FolderMeta } from '@/types';
 
@@ -16,7 +17,12 @@ export interface FolderTreeProps {
   onSelect: (id: string) => void;
   onFolderMenu: (path: string, x: number, y: number) => void;
   onWorkspaceMenu: (ws: WorkspaceStatus, x: number, y: number) => void;
-  onDrop: (e: React.DragEvent, path: string) => void;
+  dropTarget: string | null;
+  onDragStart: (p: DragPayload) => void;
+  onDragOver: (e: React.DragEvent, path: string) => void;
+  onDragLeave: (path: string) => void;
+  /** `path` is null when the drop lands on a top-level workspace row. */
+  onDrop: (e: React.DragEvent, path: string | null) => void;
 }
 
 /**
@@ -37,8 +43,12 @@ export function FolderTree(props: FolderTreeProps) {
               collapsed={isCollapsed}
               count={subtreeCount(byFolder, path)}
               indent={depth}
+              dropActive={props.dropTarget === path}
               onToggle={props.onToggle}
               onMenu={props.onFolderMenu}
+              onDragStart={props.onDragStart}
+              onDragOver={props.onDragOver}
+              onDragLeave={props.onDragLeave}
               onDrop={props.onDrop}
             />
             {!isCollapsed && <FolderTree {...props} parent={path} depth={depth + 1} />}
@@ -51,8 +61,11 @@ export function FolderTree(props: FolderTreeProps) {
           ws={ws}
           active={ws.id === activeId}
           indent={depth}
+          folder={parent}
           onSelect={props.onSelect}
           onMenu={props.onWorkspaceMenu}
+          onDragStart={props.onDragStart}
+          onDrop={props.onDrop}
         />
       ))}
     </>

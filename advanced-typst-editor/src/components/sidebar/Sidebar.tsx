@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, lazy, Suspense } from 'react';
+import { useState, useCallback, useEffect, useRef, lazy, Suspense } from 'react';
 import {
   FolderPlus, Plus, Settings,
   PanelLeftClose, PanelLeftOpen,
@@ -8,7 +8,7 @@ import { FolderTree } from '@/components/sidebar/FolderTree';
 import { workspacesByFolder } from '@/lib/workspace-groups';
 import { loadCollapsedGroups, saveCollapsedGroups, toggleGroup } from '@/lib/collapsed-groups';
 import { loadSidebarCollapsed, saveSidebarCollapsed } from '@/lib/sidebar-collapse';
-import { parseDrag, SIDEBAR_DRAG_MIME } from '@/lib/sidebar-dnd';
+import { canDrop, parseDrag, SIDEBAR_DRAG_MIME, type DragPayload } from '@/lib/sidebar-dnd';
 import type { BackupState, WorkspaceStatus } from '@/types';
 
 // Both only appear on a deliberate action (locating a moved workspace,
@@ -47,6 +47,7 @@ export function Sidebar() {
   const remove = useAppStore((s) => s.removeWorkspace);
   const createGroup = useAppStore((s) => s.createGroup);
   const renameGroup = useAppStore((s) => s.renameGroup);
+  const moveGroup = useAppStore((s) => s.moveGroup);
   const deleteGroup = useAppStore((s) => s.deleteGroup);
   const setSettingsOpen = useAppStore((s) => s.setSettingsOpen);
   const backup = useAppStore((s) => s.backup);
@@ -84,12 +85,48 @@ export function Sidebar() {
 
   const mcpConnected = !!mcp?.clients.some((c) => c.connected);
   const byFolder = workspacesByFolder(workspaces);
-  const dropOnGroup = (e: React.DragEvent, group: string | null) => {
+
+  // What is being dragged right now. Held here rather than read back from the
+  // DataTransfer because browsers only expose its data on drop, never on
+  // dragover -- and dragover is what decides the highlight.
+  const [dragging, setDragging] = useState<DragPayload | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const springTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearSpring = () => { if (springTimer.current) { clearTimeout(springTimer.current); springTimer.current = null; } };
+
+  /** Apply a drop onto `target` (null = the top level), if the rules allow it. */
+  const applyDrop = (e: React.DragEvent, target: string | null) => {
     e.preventDefault();
     e.stopPropagation();
-    const payload = parseDrag(e.dataTransfer.getData(SIDEBAR_DRAG_MIME));
-    if (payload?.kind === 'workspace') void setGroup(payload.id, group);
+    clearSpring();
+    setDropTarget(null);
+    // On drop the DataTransfer is readable, so prefer it; `dragging` covers a
+    // drag whose payload another handler already consumed.
+    const payload = parseDrag(e.dataTransfer.getData(SIDEBAR_DRAG_MIME)) ?? dragging;
+    setDragging(null);
+    if (!payload || !canDrop(payload, target, knownGroups)) return;
+    if (payload.kind === 'workspace') void setGroup(payload.id, target);
+    else void moveGroup(payload.path, target);
   };
+
+  const onFolderDragOver = (e: React.DragEvent, path: string) => {
+    if (dragging && !canDrop(dragging, path, knownGroups)) return; // no preventDefault: refuses the drop
+    e.preventDefault();
+    e.stopPropagation();
+    if (dropTarget === path) return;
+    setDropTarget(path);
+    clearSpring();
+    // Spring-loaded: resting on a shut folder opens it, so a drag can reach a
+    // subfolder without being dropped first.
+    if (collapsed.has(path)) springTimer.current = setTimeout(() => toggle(path), 600);
+  };
+
+  const onFolderDragLeave = (path: string) => {
+    clearSpring();
+    setDropTarget((cur) => (cur === path ? null : cur));
+  };
+
+  useEffect(() => clearSpring, []);
 
   if (railed) {
     return (
@@ -134,7 +171,9 @@ export function Sidebar() {
           <input autoFocus value={folderDraft} onChange={(e) => setFolderDraft(e.target.value)} onBlur={() => setCreatingFolder(false)} placeholder="Folder name" className="w-full rounded-md border border-[hsl(var(--input))] bg-transparent px-2 py-1 text-xs" />
         </form>
       )}
-      <div data-testid="sidebar-workspace-list" className="min-h-0 flex-1 overflow-auto px-2 pb-2" onDragOver={(e) => e.preventDefault()} onDrop={(e) => dropOnGroup(e, null)}>
+      <div data-testid="sidebar-workspace-list" className="min-h-0 flex-1 overflow-auto px-2 pb-2"
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => applyDrop(e, null)}>
         <FolderTree
           parent={null}
           depth={0}
@@ -147,7 +186,11 @@ export function Sidebar() {
           onSelect={(id) => void select(id)}
           onFolderMenu={(name, x, y) => setFolderMenu({ name, x, y })}
           onWorkspaceMenu={(w, x, y) => setMenu({ ws: w, x, y })}
-          onDrop={dropOnGroup}
+          dropTarget={dropTarget}
+          onDragStart={setDragging}
+          onDragOver={onFolderDragOver}
+          onDragLeave={onFolderDragLeave}
+          onDrop={applyDrop}
         />
         {workspaces.length === 0 && <div className="px-2 py-6 text-center text-xs text-[hsl(var(--muted-foreground))]">No workspaces yet. Create one to get started.</div>}
       </div>

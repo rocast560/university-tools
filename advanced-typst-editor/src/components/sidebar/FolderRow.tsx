@@ -1,17 +1,21 @@
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { folderColorVar, folderIcon } from '@/components/sidebar/folder-icons';
 import { folderName } from '@/lib/folder-tree';
-import { encodeDrag, SIDEBAR_DRAG_MIME } from '@/lib/sidebar-dnd';
+import { encodeDrag, SIDEBAR_DRAG_MIME, type DragPayload } from '@/lib/sidebar-dnd';
 import type { FolderMeta } from '@/types';
 
-export function FolderRow({ path, meta, collapsed, count, indent, onToggle, onMenu, onDrop }: {
+export function FolderRow({ path, meta, collapsed, count, indent, dropActive, onToggle, onMenu, onDragStart, onDragOver, onDragLeave, onDrop }: {
   path: string;
   meta: FolderMeta | undefined;
   collapsed: boolean;
   count: number;
   indent: number;
+  dropActive: boolean;
   onToggle: (path: string) => void;
   onMenu: (path: string, x: number, y: number) => void;
+  onDragStart: (p: DragPayload) => void;
+  onDragOver: (e: React.DragEvent, path: string) => void;
+  onDragLeave: (path: string) => void;
   onDrop: (e: React.DragEvent, path: string) => void;
 }) {
   const Icon = folderIcon(meta?.icon);
@@ -22,9 +26,16 @@ export function FolderRow({ path, meta, collapsed, count, indent, onToggle, onMe
       draggable
       data-testid={`folder-${path}`}
       aria-expanded={!collapsed}
-      style={{ paddingLeft: `${4 + indent * 12}px` }}
-      onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData(SIDEBAR_DRAG_MIME, encodeDrag({ kind: 'folder', path })); }}
-      onDragOver={(e) => e.preventDefault()}
+      style={{ paddingLeft: `${4 + indent * 12}px`, boxShadow: dropActive ? `inset 0 0 0 2px ${color ?? 'hsl(var(--ring))'}` : undefined }}
+      onDragStart={(e) => {
+        e.stopPropagation();
+        const payload = { kind: 'folder', path } as const;
+        e.dataTransfer.setData(SIDEBAR_DRAG_MIME, encodeDrag(payload));
+        onDragStart(payload);
+      }}
+      data-drop-active={dropActive ? 'true' : undefined}
+      onDragOver={(e) => onDragOver(e, path)}
+      onDragLeave={() => onDragLeave(path)}
       onDrop={(e) => onDrop(e, path)}
       onClick={() => onToggle(path)}
       onContextMenu={(e) => { e.preventDefault(); onMenu(path, e.clientX, e.clientY); }}
