@@ -162,6 +162,19 @@ describe('settings store', () => {
     expect(s.listGroups()).toEqual(['School', 'School/ECE-2300L']);
   });
 
+  it('adopts a group a workspace references but the file never listed', () => {
+    const d = tmpDir(); dirs.push(d);
+    const file = path.join(d, 'settings.json');
+    fs.writeFileSync(file, JSON.stringify({
+      version: 1,
+      groups: ['idk'],
+      workspaces: [{ id: 'w1', path: path.join(d, 'ws', 'A'), name: 'A', group: 'CPTC', library: true, createdAt: 0, openedAt: 0 }],
+    }));
+    const s = createSettingsStore(d);
+    expect(s.listGroups()).toContain('CPTC');
+    expect(s.getWorkspace('w1')?.group).toBe('CPTC');
+  });
+
   it('renames a folder, its subtree, its members and its appearance in one write', () => {
     const d = tmpDir(); dirs.push(d);
     const s = createSettingsStore(d);

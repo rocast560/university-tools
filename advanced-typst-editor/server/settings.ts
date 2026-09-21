@@ -53,16 +53,24 @@ function samePath(a: string, b: string): boolean {
   return path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
 }
 
+/** The same per-segment trim/blank-drop cleanup applied to any raw group path, from settings.json or from a workspace's own `group` field. */
+const cleanGroups = (raw: unknown[]): string[] =>
+  raw
+    .filter((g): g is string => typeof g === 'string')
+    .map((g) => g.split('/').map((s) => s.trim()).filter(Boolean).join('/'))
+    .filter((g) => g.length > 0);
+
 function normalise(raw: Partial<Settings>): Settings {
   const b = raw.backup ?? DEFAULT_SETTINGS.backup;
-  const groups = withAncestors(
-    Array.isArray(raw.groups)
-      ? raw.groups
-          .filter((g): g is string => typeof g === 'string')
-          .map((g) => g.split('/').map((s) => s.trim()).filter(Boolean).join('/'))
-          .filter((g) => g.length > 0)
-      : [],
-  );
+  const workspaces = Array.isArray(raw.workspaces)
+    ? raw.workspaces.filter((w): w is WorkspaceEntry => !!w && typeof w.id === 'string' && typeof w.path === 'string')
+    : [];
+  const groups = withAncestors([
+    ...cleanGroups(Array.isArray(raw.groups) ? raw.groups : []),
+    // A group a workspace references must exist, or that workspace would
+    // render in no folder at all and silently vanish from the sidebar.
+    ...cleanGroups(workspaces.map((w) => w.group)),
+  ]);
   const known = new Set(groups);
   const folderMeta: Record<string, FolderMeta> = {};
   for (const [k, v] of Object.entries(raw.folderMeta ?? {})) {
@@ -76,9 +84,7 @@ function normalise(raw: Partial<Settings>): Settings {
   }
   return {
     version: 1,
-    workspaces: Array.isArray(raw.workspaces)
-      ? raw.workspaces.filter((w): w is WorkspaceEntry => !!w && typeof w.id === 'string' && typeof w.path === 'string')
-      : [],
+    workspaces,
     groups,
     folderMeta,
     backup: {
