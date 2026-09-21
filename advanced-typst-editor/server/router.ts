@@ -3,7 +3,7 @@ import { promises as fsp } from 'node:fs';
 import type { BackupState, DirListing, McpStatus, SnapshotInfo, CompileResult, Diagnostic, FolderMeta } from '../src/types';
 import type { EventBus } from './events';
 import { HttpError, json, optionalString, readJsonObject, requireString } from './http';
-import { joinPath, parentPath } from '../src/lib/folder-tree';
+import { folderName, joinPath, parentPath } from '../src/lib/folder-tree';
 import type { SettingsStore } from './settings';
 import type { WorkspaceService } from './service';
 import { serveStatic } from './static';
@@ -121,8 +121,12 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
           if ('icon' in body) appearance.icon = body.icon === null ? null : requireString(body, 'icon');
           if ('color' in body) appearance.color = body.color === null ? null : requireString(body, 'color');
           if ('icon' in body || 'color' in body) {
-            // A rename above moved the folder, so apply appearance at its new path.
-            const at = 'name' in body ? joinPath(parentPath(path), requireString(body, 'name')) : path;
+            // A rename or move above relocated the folder, so apply appearance at its new path.
+            const at = 'name' in body
+              ? joinPath(parentPath(path), requireString(body, 'name'))
+              : 'parent' in body
+                ? joinPath(body.parent === null ? null : requireString(body, 'parent'), folderName(path))
+                : path;
             service.setFolderAppearance(at, appearance);
           }
           return json(200, state());

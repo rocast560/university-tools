@@ -228,6 +228,17 @@ describe('nested sidebar folders', () => {
     expect((await call('PATCH', '/api/groups/nope', { parent: null })).status).toBe(404);
   });
 
+  it('moves and restyles a folder in the same request, applying appearance at the new path', async () => {
+    const { call } = app();
+    await call('POST', '/api/groups', { name: 'CPTC' });
+    await call('POST', '/api/groups', { name: 'School' });
+    const res = await call('PATCH', '/api/groups/CPTC', { parent: 'School', icon: 'shield' });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { groups: string[]; folderMeta: Record<string, { icon?: string; color?: string }> };
+    expect(body.groups).toEqual(['School', 'School/CPTC']);
+    expect(body.folderMeta).toEqual({ 'School/CPTC': { icon: 'shield' } });
+  });
+
   it('sets and clears icon and color together', async () => {
     const { call } = app();
     await call('POST', '/api/groups', { name: 'CPTC' });
