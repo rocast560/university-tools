@@ -21,7 +21,7 @@ beforeEach(() => {
   cancelHoverPrefetch.mockClear();
   localStorage.clear();
   useAppStore.setState({
-    workspaces: [], groups: [], activeWorkspaceId: null, backup: null, mcp: null, online: true,
+    workspaces: [], groups: [], folderMeta: {}, activeWorkspaceId: null, backup: null, mcp: null, online: true,
   });
 });
 
@@ -125,6 +125,30 @@ describe('Sidebar', () => {
     fireEvent.click(screen.getByText(/Backup: not set up/));
     expect(setSettingsOpen).toHaveBeenCalledTimes(2);
     expect(setSettingsOpen).toHaveBeenCalledWith(true);
+  });
+
+  it('renders subfolders under their parent, indented', () => {
+    useAppStore.setState({ workspaces: [ws('a', 'CPTC/inject')], groups: ['CPTC', 'CPTC/inject'] });
+    render(<Sidebar />);
+    expect(screen.getByText('CPTC')).toBeInTheDocument();
+    expect(screen.getByText('inject')).toBeInTheDocument();
+    expect(screen.getByText('a')).toBeInTheDocument();
+    expect(screen.getByTestId('folder-CPTC/inject')).toHaveStyle({ paddingLeft: '16px' });
+  });
+
+  it('shows a folder icon and colour from folderMeta', () => {
+    useAppStore.setState({ workspaces: [], groups: ['CPTC'], folderMeta: { CPTC: { icon: 'shield', color: 'blue' } } });
+    render(<Sidebar />);
+    const row = screen.getByTestId('folder-CPTC');
+    expect(row.querySelector('[data-folder-icon="shield"]')).toBeTruthy();
+    expect(row.querySelector('[data-folder-stripe]')).toHaveStyle({ backgroundColor: 'hsl(var(--folder-blue))' });
+  });
+
+  it('counts the whole subtree on a collapsed folder', () => {
+    useAppStore.setState({ workspaces: [ws('a', 'CPTC'), ws('b', 'CPTC/inject')], groups: ['CPTC', 'CPTC/inject'] });
+    render(<Sidebar />);
+    fireEvent.click(screen.getByRole('button', { name: /CPTC/ }));
+    expect(screen.getByText('2')).toBeInTheDocument();
   });
 });
 

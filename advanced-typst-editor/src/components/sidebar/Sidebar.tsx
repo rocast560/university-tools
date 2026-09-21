@@ -1,22 +1,20 @@
 import { useState, useCallback, useEffect, lazy, Suspense } from 'react';
 import {
-  AlertTriangle, ChevronDown, ChevronRight, FolderPlus, Plus, Settings, Circle,
+  FolderPlus, Plus, Settings,
   PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react';
 import { useAppStore } from '@/stores';
-import { groupWorkspaces } from '@/lib/workspace-groups';
+import { FolderTree } from '@/components/sidebar/FolderTree';
+import { workspacesByFolder } from '@/lib/workspace-groups';
 import { loadCollapsedGroups, saveCollapsedGroups, toggleGroup } from '@/lib/collapsed-groups';
 import { loadSidebarCollapsed, saveSidebarCollapsed } from '@/lib/sidebar-collapse';
-import { cancelHoverPrefetch, hoverPrefetch } from '@/lib/prefetch';
+import { parseDrag, SIDEBAR_DRAG_MIME } from '@/lib/sidebar-dnd';
 import type { BackupState, WorkspaceStatus } from '@/types';
 
 // Both only appear on a deliberate action (locating a moved workspace,
 // confirming a destructive one), so they stay off the app's first-paint chunk.
 const FolderBrowserDialog = lazy(() => import('@/components/ui/FolderBrowserDialog').then((m) => ({ default: m.FolderBrowserDialog })));
 const ConfirmDialog = lazy(() => import('@/components/ui/ConfirmDialog').then((m) => ({ default: m.ConfirmDialog })));
-
-/** The dragged workspace's id, as a browser drag-and-drop payload. */
-const DRAG_MIME = 'text/plain';
 
 /**
  * Whether a keystroke belongs to something the user is typing into, so the
@@ -39,6 +37,7 @@ function backupLabel(b: BackupState | null): string {
 export function Sidebar() {
   const workspaces = useAppStore((s) => s.workspaces);
   const knownGroups = useAppStore((s) => s.groups);
+  const folderMeta = useAppStore((s) => s.folderMeta);
   const active = useAppStore((s) => s.activeWorkspaceId);
   const select = useAppStore((s) => s.selectWorkspace);
   const create = useAppStore((s) => s.createWorkspace);
@@ -84,12 +83,12 @@ export function Sidebar() {
   }, [toggleRail]);
 
   const mcpConnected = !!mcp?.clients.some((c) => c.connected);
-  const grouped = groupWorkspaces(workspaces, knownGroups);
+  const byFolder = workspacesByFolder(workspaces);
   const dropOnGroup = (e: React.DragEvent, group: string | null) => {
     e.preventDefault();
     e.stopPropagation();
-    const id = e.dataTransfer.getData(DRAG_MIME);
-    if (id) void setGroup(id, group);
+    const payload = parseDrag(e.dataTransfer.getData(SIDEBAR_DRAG_MIME));
+    if (payload?.kind === 'workspace') void setGroup(payload.id, group);
   };
 
   if (railed) {
@@ -136,39 +135,20 @@ export function Sidebar() {
         </form>
       )}
       <div data-testid="sidebar-workspace-list" className="min-h-0 flex-1 overflow-auto px-2 pb-2" onDragOver={(e) => e.preventDefault()} onDrop={(e) => dropOnGroup(e, null)}>
-        {grouped.map(({ group, items }) => {
-          const isCollapsed = group !== null && collapsed.has(group);
-          return (
-            <div key={group ?? '__loose'} className="mb-2">
-              {group && (
-                <div
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={(e) => dropOnGroup(e, group)}
-                  onContextMenu={(e) => { e.preventDefault(); setFolderMenu({ name: group, x: e.clientX, y: e.clientY }); }}
-                >
-                  <button
-                    type="button"
-                    aria-expanded={!isCollapsed}
-                    onClick={() => toggle(group)}
-                    className="flex w-full items-center gap-1 rounded px-1 py-1 text-left text-[10px] font-semibold uppercase tracking-wider text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--accent))]"
-                  >
-                    {isCollapsed ? <ChevronRight size={12} className="shrink-0" aria-hidden="true" /> : <ChevronDown size={12} className="shrink-0" aria-hidden="true" />}
-                    <span className="flex-1 truncate">{group}</span>
-                    {isCollapsed && <span className="text-[9px] font-normal normal-case tracking-normal">{items.length}</span>}
-                  </button>
-                </div>
-              )}
-              {!isCollapsed && items.map((ws) => (
-                <button key={ws.id} type="button" draggable onDragStart={(e) => e.dataTransfer.setData(DRAG_MIME, ws.id)} onClick={() => void select(ws.id)} onContextMenu={(e) => { e.preventDefault(); setMenu({ ws, x: e.clientX, y: e.clientY }); }}
-                  onPointerEnter={() => { if (ws.status === 'ok' && ws.id !== active) hoverPrefetch(ws.id); }} onPointerLeave={cancelHoverPrefetch}
-                  className={`flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-xs hover:bg-[hsl(var(--accent))] ${ws.id === active ? 'bg-[hsl(var(--accent))] font-medium' : ''}`}>
-                  {ws.status === 'missing' ? <AlertTriangle size={12} className="text-[hsl(var(--status-amber))]" /> : <Circle size={6} className={ws.library ? 'fill-current text-[hsl(var(--muted-foreground))]' : 'text-[hsl(var(--status-blue))]'} />}
-                  <span className="flex-1 truncate" title={ws.path}>{ws.name}</span>
-                </button>
-              ))}
-            </div>
-          );
-        })}
+        <FolderTree
+          parent={null}
+          depth={0}
+          groups={knownGroups}
+          folderMeta={folderMeta}
+          byFolder={byFolder}
+          collapsed={collapsed}
+          activeId={active}
+          onToggle={toggle}
+          onSelect={(id) => void select(id)}
+          onFolderMenu={(name, x, y) => setFolderMenu({ name, x, y })}
+          onWorkspaceMenu={(w, x, y) => setMenu({ ws: w, x, y })}
+          onDrop={dropOnGroup}
+        />
         {workspaces.length === 0 && <div className="px-2 py-6 text-center text-xs text-[hsl(var(--muted-foreground))]">No workspaces yet. Create one to get started.</div>}
       </div>
       <div className="shrink-0 border-t border-[hsl(var(--border))] px-2 py-1.5 text-[10px] text-[hsl(var(--muted-foreground))]">
