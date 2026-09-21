@@ -31,6 +31,36 @@ describe('planMirror', () => {
     expect(plan.dirOf.get('second')).toBe('CPTC/Report (2)');
     expect(plan.dirs).toContain('CPTC');
   });
+
+  it('plans an unchanged tree for a one-segment group', () => {
+    const plan = planMirror([item('Report', 'CPTC', { 'main.typ': 'a' })]);
+    expect(plan.files.map((f) => f.path).sort()).toEqual(['CPTC/Report/main.typ', 'README.txt']);
+    expect(plan.dirs).toContain('CPTC');
+  });
+
+  it('nests a folder path into nested directories', () => {
+    const plan = planMirror([item('Lab1', 'School/ECE-2300L', { 'main.typ': 'a' })]);
+    expect(plan.files.map((f) => f.path).sort()).toEqual(['README.txt', 'School/ECE-2300L/Lab1/main.typ']);
+    expect(plan.dirs).toContain('School');
+    expect(plan.dirs).toContain('School/ECE-2300L');
+    expect(plan.dirOf.get('Lab1')).toBe('School/ECE-2300L/Lab1');
+  });
+
+  it('scopes name collisions per level, not globally', () => {
+    const plan = planMirror([
+      item('A', 'School/Labs', { 'main.typ': 'a' }, 'a'),
+      item('B', 'CPTC/Labs', { 'main.typ': 'b' }, 'b'),
+    ]);
+    expect(plan.dirOf.get('a')).toBe('School/Labs/A');
+    expect(plan.dirOf.get('b')).toBe('CPTC/Labs/B');
+  });
+
+  it('sanitises each segment separately so a separator cannot escape', () => {
+    const plan = planMirror([item('R', 'A:B/C*D', { 'main.typ': 'a' })]);
+    expect(plan.dirOf.get('R')).toBe('A_B/C_D/R');
+    expect(plan.dirs).toContain('A_B');
+    expect(plan.dirs).toContain('A_B/C_D');
+  });
 });
 
 describe('runMirror', () => {

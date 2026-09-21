@@ -31,7 +31,8 @@ function readme(groups: number, workspaces: number): string {
     '',
     'This folder is rewritten automatically whenever a workspace changes. Every',
     'workspace is a folder holding main.typ, assets/, fonts/ and workspace.json,',
-    'grouped by the groups you made in the app. Loose workspaces sit at the top level.',
+    'filed under the folders you made in the app, nested exactly as the sidebar',
+    'shows them. Loose workspaces sit at the top level.',
     '',
     `${groups} group${groups === 1 ? '' : 's'}, ${workspaces} workspace${workspaces === 1 ? '' : 's'}.`,
     '',
@@ -52,7 +53,27 @@ export function planMirror(items: MirrorItem[]): MirrorPlan {
   const taken = new Set<string>(RESERVED);
   const sorted = [...items].sort((a, b) => a.entry.createdAt - b.entry.createdAt || a.entry.id.localeCompare(b.entry.id));
   const groups = [...new Set(sorted.map((i) => i.entry.group).filter((g): g is string => !!g))].sort();
-  const groupDirs = uniqueNames(groups, (g) => g, taken);
+  // Directory name chosen for each group path, resolved one segment at a time.
+  const groupDirs = new Map<string, string>();
+  // Names already used inside a given parent directory ('' = the mirror root).
+  const takenIn = new Map<string, Set<string>>([['', taken]]);
+  const dirFor = (groupPath: string): string => {
+    const cached = groupDirs.get(groupPath);
+    if (cached) return cached;
+    const parent = groupPath.includes('/') ? groupPath.slice(0, groupPath.lastIndexOf('/')) : '';
+    const parentDir = parent ? dirFor(parent) : '';
+    const siblings = takenIn.get(parentDir) ?? new Set<string>();
+    takenIn.set(parentDir, siblings);
+    const base = safeDirName(groupPath.slice(groupPath.lastIndexOf('/') + 1));
+    let candidate = base;
+    for (let n = 2; siblings.has(candidate.toLowerCase()); n++) candidate = `${base} (${n})`;
+    siblings.add(candidate.toLowerCase());
+    const full = parentDir ? `${parentDir}/${candidate}` : candidate;
+    groupDirs.set(groupPath, full);
+    return full;
+  };
+  // Ancestors first, so a parent claims its name before a child asks for one.
+  for (const g of groups) dirFor(g);
   const loose = sorted.filter((i) => !i.entry.group);
   const looseDirs = uniqueNames(loose, (i) => i.entry.name, taken);
   const dirs: string[] = [...groupDirs.values()];
