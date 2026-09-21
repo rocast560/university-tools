@@ -156,21 +156,21 @@ describe('router', () => {
 
   it('lists, creates, renames and deletes sidebar groups', async () => {
     const { call } = app();
-    expect(await (await call('GET', '/api/groups')).json()).toEqual({ groups: [] });
+    expect(await (await call('GET', '/api/groups')).json()).toEqual({ groups: [], folderMeta: {} });
     const created = await call('POST', '/api/groups', { name: 'CPTC' });
     expect(created.status).toBe(201);
-    expect(await created.json()).toEqual({ groups: ['CPTC'] });
+    expect(await created.json()).toEqual({ groups: ['CPTC'], folderMeta: {} });
     expect((await call('POST', '/api/groups', { name: 'CPTC' })).status).toBe(409);
     expect((await call('POST', '/api/groups', { name: '  ' })).status).toBe(400);
 
     const renamed = await call('PATCH', '/api/groups/CPTC', { name: 'CPTC 2026' });
     expect(renamed.status).toBe(200);
-    expect(await renamed.json()).toEqual({ groups: ['CPTC 2026'] });
+    expect(await renamed.json()).toEqual({ groups: ['CPTC 2026'], folderMeta: {} });
     expect((await call('PATCH', '/api/groups/nope', { name: 'X' })).status).toBe(404);
 
     const deleted = await call('DELETE', `/api/groups/${encodeURIComponent('CPTC 2026')}`);
     expect(deleted.status).toBe(200);
-    expect(await deleted.json()).toEqual({ groups: [] });
+    expect(await deleted.json()).toEqual({ groups: [], folderMeta: {} });
   });
 
   it('configures, runs, lists and browses backups', async () => {
@@ -185,5 +185,72 @@ describe('router', () => {
     expect(snaps.snapshots).toHaveLength(1);
     const browse = await (await call('GET', `/api/fs/browse?path=${encodeURIComponent(dest)}`)).json() as { entries: Array<{ name: string }> };
     expect(browse.entries.map((e) => e.name)).toContain('snapshots');
+  });
+});
+
+describe('nested sidebar folders', () => {
+  it('creates a subfolder, back-filling the parent', async () => {
+    const { call } = app();
+    await call('POST', '/api/groups', { name: 'School' });
+    const made = await call('POST', '/api/groups', { name: 'ECE-2300L', parent: 'School' });
+    expect(made.status).toBe(201);
+    expect(await made.json()).toEqual({ groups: ['School', 'School/ECE-2300L'], folderMeta: {} });
+
+    const deep = await call('POST', '/api/groups', { name: 'Lab3', parent: 'School/ECE-2300L/Labs' });
+    expect(deep.status).toBe(201);
+    expect(((await deep.json()) as { groups: string[] }).groups).toContain('School/ECE-2300L/Labs/Lab3');
+  });
+
+  it('refuses a fifth level, a duplicate sibling and an empty name', async () => {
+    const { call } = app();
+    await call('POST', '/api/groups', { name: 'Lab3', parent: 'School/ECE-2300L/Labs' });
+    expect((await call('POST', '/api/groups', { name: 'Deep', parent: 'School/ECE-2300L/Labs/Lab3' })).status).toBe(400);
+    expect((await call('POST', '/api/groups', { name: 'Labs', parent: 'School/ECE-2300L' })).status).toBe(409);
+    expect((await call('POST', '/api/groups', { name: '  ', parent: 'School' })).status).toBe(400);
+  });
+
+  it('renames a nested folder through a percent-encoded path', async () => {
+    const { call } = app();
+    await call('POST', '/api/groups', { name: 'inject', parent: 'CPTC' });
+    const res = await call('PATCH', `/api/groups/${encodeURIComponent('CPTC/inject')}`, { name: 'inject-2026' });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { groups: string[] }).groups).toEqual(['CPTC', 'CPTC/inject-2026']);
+  });
+
+  it('re-parents a folder and refuses a move into its own subtree', async () => {
+    const { call } = app();
+    await call('POST', '/api/groups', { name: 'inject', parent: 'CPTC' });
+    await call('POST', '/api/groups', { name: 'School' });
+    const moved = await call('PATCH', '/api/groups/CPTC', { parent: 'School' });
+    expect(((await moved.json()) as { groups: string[] }).groups).toEqual(['School', 'School/CPTC', 'School/CPTC/inject']);
+
+    expect((await call('PATCH', `/api/groups/${encodeURIComponent('School/CPTC')}`, { parent: 'School/CPTC/inject' })).status).toBe(400);
+    expect((await call('PATCH', '/api/groups/nope', { parent: null })).status).toBe(404);
+  });
+
+  it('sets and clears icon and color together', async () => {
+    const { call } = app();
+    await call('POST', '/api/groups', { name: 'CPTC' });
+    const set = await call('PATCH', '/api/groups/CPTC', { icon: 'shield', color: 'blue' });
+    expect(await set.json()).toEqual({ groups: ['CPTC'], folderMeta: { CPTC: { icon: 'shield', color: 'blue' } } });
+
+    const cleared = await call('PATCH', '/api/groups/CPTC', { color: null });
+    expect(await cleared.json()).toEqual({ groups: ['CPTC'], folderMeta: { CPTC: { icon: 'shield' } } });
+  });
+
+  it('refuses name and parent in the same request', async () => {
+    const { call } = app();
+    await call('POST', '/api/groups', { name: 'CPTC' });
+    expect((await call('PATCH', '/api/groups/CPTC', { name: 'X', parent: null })).status).toBe(400);
+  });
+
+  it('deleting a parent loosens every workspace in its subtree', async () => {
+    const { call } = app();
+    await call('POST', '/api/groups', { name: 'inject', parent: 'CPTC' });
+    const made = await (await call('POST', '/api/workspaces', { name: 'R', group: 'CPTC/inject' })).json() as { workspace: { id: string } };
+    const res = await call('DELETE', '/api/groups/CPTC');
+    expect(await res.json()).toEqual({ groups: [], folderMeta: {} });
+    const list = await (await call('GET', '/api/workspaces')).json() as { workspaces: Array<{ id: string; group: string | null }> };
+    expect(list.workspaces.find((w) => w.id === made.workspace.id)?.group).toBeNull();
   });
 });

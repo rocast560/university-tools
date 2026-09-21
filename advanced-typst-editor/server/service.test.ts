@@ -93,7 +93,7 @@ describe('workspace service', () => {
 
   it('creates, renames and deletes sidebar groups, notifying workspaces.changed', () => {
     const { svc, events } = setup();
-    svc.createGroup('CPTC');
+    svc.createGroup('CPTC', null);
     expect(svc.listGroups()).toEqual(['CPTC']);
     expect(events.filter((e) => e.type === 'workspaces.changed').length).toBeGreaterThan(0);
     const w = svc.create({ name: 'A', group: 'CPTC', source: undefined });
@@ -107,9 +107,9 @@ describe('workspace service', () => {
 
   it('rejects an empty or duplicate group name', () => {
     const { svc } = setup();
-    expect(() => svc.createGroup('  ')).toThrow(/empty/);
-    svc.createGroup('CPTC');
-    expect(() => svc.createGroup('CPTC')).toThrow(/exists/);
+    expect(() => svc.createGroup('  ', null)).toThrow(/empty/);
+    svc.createGroup('CPTC', null);
+    expect(() => svc.createGroup('CPTC', null)).toThrow(/exists/);
   });
 
   it('reports a missing external workspace instead of dropping it', async () => {

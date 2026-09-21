@@ -4,6 +4,8 @@ import type { AssetFolder, TypstAsset, TypstAssetKind, WorkspaceDetail, Workspac
 import type { EventBus } from './events';
 import { ensureDir, isDir, safeDirName, stamp, uniqueDirName } from './fsx';
 import { HttpError } from './http';
+import { MAX_FOLDER_DEPTH, depth, descendantsOf, folderName, isDescendant, joinPath, parentPath, sanitiseSegment } from '../src/lib/folder-tree';
+import type { FolderMeta } from '../src/types';
 import type { SettingsStore } from './settings';
 import type { Watcher } from './watcher';
 import { openWorkspace, type WorkspaceFs } from './workspace';
@@ -36,9 +38,12 @@ export interface WorkspaceService {
   setGroup(id: string, group: string | null): WorkspaceEntry;
   remove(id: string): void;
   listGroups(): string[];
-  createGroup(name: string): string[];
-  renameGroup(oldName: string, newName: string): string[];
-  deleteGroup(name: string): string[];
+  folderMeta(): Record<string, FolderMeta>;
+  createGroup(name: string, parent: string | null): string[];
+  renameGroup(path: string, name: string): string[];
+  moveGroup(path: string, parent: string | null): string[];
+  deleteGroup(path: string): string[];
+  setFolderAppearance(path: string, patch: FolderMeta): Record<string, FolderMeta>;
   /** Register every library folder not yet known and start watching everything that exists. */
   boot(): void;
   // writes: all emit workspace.changed with `origin`
@@ -194,25 +199,48 @@ export function createWorkspaceService(deps: ServiceDeps): WorkspaceService {
       return out;
     },
     listGroups: () => settings.listGroups(),
-    createGroup(name) {
-      const clean = name.trim();
-      if (!clean) throw new HttpError(400, 'group name cannot be empty');
-      if (settings.listGroups().includes(clean)) throw new HttpError(409, `a group named "${clean}" already exists`);
-      const out = settings.addGroup(clean);
+    folderMeta: () => settings.folderMeta(),
+    createGroup(name, parent) {
+      const target = joinPath(parent, name);
+      if (!sanitiseSegment(name)) throw new HttpError(400, 'folder name cannot be empty');
+      if (depth(target) > MAX_FOLDER_DEPTH) throw new HttpError(400, `folders nest at most ${MAX_FOLDER_DEPTH} levels deep`);
+      if (settings.listGroups().includes(target)) throw new HttpError(409, `a folder named "${sanitiseSegment(name)}" already exists here`);
+      const out = settings.addGroup(target);
       registryChanged();
       return out;
     },
-    renameGroup(oldName, newName) {
-      const clean = newName.trim();
-      if (!clean) throw new HttpError(400, 'group name cannot be empty');
-      if (!settings.listGroups().includes(oldName)) throw new HttpError(404, `no group named "${oldName}"`);
-      if (clean !== oldName && settings.listGroups().includes(clean)) throw new HttpError(409, `a group named "${clean}" already exists`);
-      const out = settings.renameGroup(oldName, clean);
+    renameGroup(path, name) {
+      const clean = sanitiseSegment(name);
+      if (!clean) throw new HttpError(400, 'folder name cannot be empty');
+      if (!settings.listGroups().includes(path)) throw new HttpError(404, `no folder at "${path}"`);
+      const target = joinPath(parentPath(path), clean);
+      if (target !== path && settings.listGroups().includes(target)) throw new HttpError(409, `a folder named "${clean}" already exists here`);
+      const out = settings.renameGroup(path, target);
       registryChanged();
       return out;
     },
-    deleteGroup(name) {
-      const out = settings.removeGroup(name);
+    moveGroup(path, parent) {
+      if (!settings.listGroups().includes(path)) throw new HttpError(404, `no folder at "${path}"`);
+      if (parent !== null && !settings.listGroups().includes(parent)) throw new HttpError(404, `no folder at "${parent}"`);
+      if (parent !== null && isDescendant(parent, path)) throw new HttpError(400, 'a folder cannot move inside itself');
+      const target = joinPath(parent, folderName(path));
+      if (target === path) return settings.listGroups();
+      if (settings.listGroups().includes(target)) throw new HttpError(409, `a folder named "${folderName(path)}" already exists there`);
+      // The subtree travels with it, so the deepest descendant sets the limit.
+      const deepest = Math.max(...[path, ...descendantsOf(settings.listGroups(), path)].map(depth));
+      if (deepest - depth(path) + depth(target) > MAX_FOLDER_DEPTH) throw new HttpError(400, `folders nest at most ${MAX_FOLDER_DEPTH} levels deep`);
+      const out = settings.moveGroup(path, parent);
+      registryChanged();
+      return out;
+    },
+    deleteGroup(path) {
+      const out = settings.removeGroup(path);
+      registryChanged();
+      return out;
+    },
+    setFolderAppearance(path, patch) {
+      if (!settings.listGroups().includes(path)) throw new HttpError(404, `no folder at "${path}"`);
+      const out = settings.setFolderMeta(path, patch);
       registryChanged();
       return out;
     },

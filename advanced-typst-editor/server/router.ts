@@ -1,8 +1,9 @@
 import crypto from 'node:crypto';
 import { promises as fsp } from 'node:fs';
-import type { BackupState, DirListing, McpStatus, SnapshotInfo, CompileResult, Diagnostic } from '../src/types';
+import type { BackupState, DirListing, McpStatus, SnapshotInfo, CompileResult, Diagnostic, FolderMeta } from '../src/types';
 import type { EventBus } from './events';
 import { HttpError, json, optionalString, readJsonObject, requireString } from './http';
+import { joinPath, parentPath } from '../src/lib/folder-tree';
 import type { SettingsStore } from './settings';
 import type { WorkspaceService } from './service';
 import { serveStatic } from './static';
@@ -99,13 +100,34 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
     if (seg[1] === 'events' && seg.length === 2 && method === 'GET') return openEventStream(deps.bus);
 
     if (seg[1] === 'groups') {
+      const state = () => ({ groups: service.listGroups(), folderMeta: service.folderMeta() });
       if (seg.length === 2) {
-        if (method === 'GET') return json(200, { groups: service.listGroups() });
-        if (method === 'POST') return json(201, { groups: service.createGroup(requireString(await readJsonObject(req), 'name')) });
+        if (method === 'GET') return json(200, state());
+        if (method === 'POST') {
+          const body = await readJsonObject(req);
+          const parent = body.parent === undefined || body.parent === null ? null : requireString(body, 'parent');
+          service.createGroup(requireString(body, 'name'), parent);
+          return json(201, state());
+        }
       }
       if (seg.length === 3) {
-        if (method === 'PATCH') return json(200, { groups: service.renameGroup(seg[2]!, requireString(await readJsonObject(req), 'name')) });
-        if (method === 'DELETE') return json(200, { groups: service.deleteGroup(seg[2]!) });
+        const path = seg[2]!;
+        if (method === 'PATCH') {
+          const body = await readJsonObject(req);
+          if ('name' in body && 'parent' in body) throw new HttpError(400, 'send either name or parent, not both');
+          if ('name' in body) service.renameGroup(path, requireString(body, 'name'));
+          else if ('parent' in body) service.moveGroup(path, body.parent === null ? null : requireString(body, 'parent'));
+          const appearance: FolderMeta = {};
+          if ('icon' in body) appearance.icon = body.icon === null ? null : requireString(body, 'icon');
+          if ('color' in body) appearance.color = body.color === null ? null : requireString(body, 'color');
+          if ('icon' in body || 'color' in body) {
+            // A rename above moved the folder, so apply appearance at its new path.
+            const at = 'name' in body ? joinPath(parentPath(path), requireString(body, 'name')) : path;
+            service.setFolderAppearance(at, appearance);
+          }
+          return json(200, state());
+        }
+        if (method === 'DELETE') { service.deleteGroup(path); return json(200, state()); }
       }
     }
 
