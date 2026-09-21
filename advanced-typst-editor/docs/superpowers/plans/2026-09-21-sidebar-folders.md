@@ -1462,7 +1462,7 @@ import { folderName } from '@/lib/folder-tree';
 import { encodeDrag, SIDEBAR_DRAG_MIME } from '@/lib/sidebar-dnd';
 import type { FolderMeta } from '@/types';
 
-export function FolderRow({ path, meta, collapsed, count, indent, onToggle, onMenu }: {
+export function FolderRow({ path, meta, collapsed, count, indent, onToggle, onMenu, onDrop }: {
   path: string;
   meta: FolderMeta | undefined;
   collapsed: boolean;
@@ -1470,6 +1470,11 @@ export function FolderRow({ path, meta, collapsed, count, indent, onToggle, onMe
   indent: number;
   onToggle: (path: string) => void;
   onMenu: (path: string, x: number, y: number) => void;
+  /** The old sidebar's drop target lived on a div wrapping this button; it
+      has to live here now, or a drop on a folder bubbles to the root list
+      and CLEARS the workspace's group instead of setting it. Task 9 extends
+      this with legality checks and highlighting. */
+  onDrop: (e: React.DragEvent, path: string) => void;
 }) {
   const Icon = folderIcon(meta?.icon);
   const color = folderColorVar(meta?.color);
@@ -1481,6 +1486,8 @@ export function FolderRow({ path, meta, collapsed, count, indent, onToggle, onMe
       aria-expanded={!collapsed}
       style={{ paddingLeft: `${4 + indent * 12}px` }}
       onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData(SIDEBAR_DRAG_MIME, encodeDrag({ kind: 'folder', path })); }}
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => onDrop(e, path)}
       onClick={() => onToggle(path)}
       onContextMenu={(e) => { e.preventDefault(); onMenu(path, e.clientX, e.clientY); }}
       className="flex w-full items-center gap-1 rounded py-1 pr-1 text-left text-[10px] font-semibold uppercase tracking-wider text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--accent))]"
@@ -1520,6 +1527,7 @@ export interface FolderTreeProps {
   onSelect: (id: string) => void;
   onFolderMenu: (path: string, x: number, y: number) => void;
   onWorkspaceMenu: (ws: WorkspaceStatus, x: number, y: number) => void;
+  onDrop: (e: React.DragEvent, path: string) => void;
 }
 
 /**
@@ -1542,6 +1550,7 @@ export function FolderTree(props: FolderTreeProps) {
               indent={depth}
               onToggle={props.onToggle}
               onMenu={props.onFolderMenu}
+              onDrop={props.onDrop}
             />
             {!isCollapsed && <FolderTree {...props} parent={path} depth={depth + 1} />}
           </div>
@@ -1600,6 +1609,7 @@ Replace the entire `{grouped.map(({ group, items }) => { ... })}` expression ins
           onSelect={(id) => void select(id)}
           onFolderMenu={(name, x, y) => setFolderMenu({ name, x, y })}
           onWorkspaceMenu={(w, x, y) => setMenu({ ws: w, x, y })}
+          onDrop={dropOnGroup}
         />
 ```
 
