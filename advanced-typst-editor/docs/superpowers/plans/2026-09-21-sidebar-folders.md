@@ -1880,7 +1880,17 @@ In `src/components/sidebar/Sidebar.tsx`, replace the `DRAG_MIME` constant and th
     setDropTarget((cur) => (cur === path ? null : cur));
   };
 
-  useEffect(() => clearSpring, []);
+  // A cancelled drag (Esc, or released outside any drop target) fires no
+  // drop and no dragleave, so without this an armed spring timer still
+  // expands a folder the user never dropped into, and the highlight ring
+  // stays lit. dragend fires on the drag SOURCE and bubbles to window, so
+  // one listener covers folder rows, workspace rows and drags released
+  // outside the sidebar alike.
+  useEffect(() => {
+    const onDragEnd = () => { clearSpring(); setDropTarget(null); setDragging(null); };
+    window.addEventListener('dragend', onDragEnd);
+    return () => { window.removeEventListener('dragend', onDragEnd); clearSpring(); };
+  }, []);
 ```
 
 Extend the existing React import to `import { useState, useCallback, useEffect, useRef, lazy, Suspense } from 'react';` and add:
