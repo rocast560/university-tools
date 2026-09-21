@@ -771,7 +771,13 @@ Add to `server/backup/mirror.test.ts`, inside `describe('planMirror', ...)`:
 
   it('sanitises each segment separately so a separator cannot escape', () => {
     const plan = planMirror([item('R', 'A:B/C*D', { 'main.typ': 'a' })]);
-    expect(plan.dirOf.get('R')).toBe('A_B/C_D');
+    // dirOf holds the WORKSPACE's directory, so its own name is appended.
+    expect(plan.dirOf.get('R')).toBe('A_B/C_D/R');
+    // The point of the test: two nested dirs, not the single 'A_B_C_D' the
+    // old whole-string sanitising produced. This also covers the
+    // intermediate parent being present for runMirror to create.
+    expect(plan.dirs).toContain('A_B');
+    expect(plan.dirs).toContain('A_B/C_D');
   });
 ```
 
