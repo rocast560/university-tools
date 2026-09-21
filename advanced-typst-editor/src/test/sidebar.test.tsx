@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import { useAppStore } from '@/stores';
 import { Sidebar } from '@/components/sidebar/Sidebar';
 import type { WorkspaceStatus } from '@/types';
@@ -158,6 +158,45 @@ describe('Sidebar', () => {
 
     fireEvent.dragOver(screen.getByTestId('folder-CPTC/inject'), { dataTransfer: dt });
     expect(screen.getByTestId('folder-CPTC/inject')).not.toHaveAttribute('data-drop-active', 'true');
+  });
+
+  it('cancels a pending spring-load expansion when the drag ends without a drop', async () => {
+    vi.useFakeTimers();
+    localStorage.setItem('tfs-collapsed-groups', JSON.stringify(['CPTC']));
+    useAppStore.setState({ workspaces: [ws('a', null), ws('b', 'CPTC')], groups: ['CPTC'] });
+    render(<Sidebar />);
+    const dt = fakeDataTransfer();
+    fireEvent.dragStart(screen.getByTestId('workspace-a'), { dataTransfer: dt });
+    fireEvent.dragOver(screen.getByTestId('folder-CPTC'), { dataTransfer: dt });
+    fireEvent.dragEnd(screen.getByTestId('workspace-a'), { dataTransfer: dt });
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(700); });
+
+    expect(screen.getByTestId('folder-CPTC')).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('b')).not.toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it('clears the highlight when the drag ends without a drop', () => {
+    useAppStore.setState({ workspaces: [ws('a', null)], groups: ['CPTC'] });
+    render(<Sidebar />);
+    const dt = fakeDataTransfer();
+    fireEvent.dragStart(screen.getByTestId('workspace-a'), { dataTransfer: dt });
+    fireEvent.dragOver(screen.getByTestId('folder-CPTC'), { dataTransfer: dt });
+    expect(screen.getByTestId('folder-CPTC')).toHaveAttribute('data-drop-active', 'true');
+
+    fireEvent.dragEnd(screen.getByTestId('workspace-a'), { dataTransfer: dt });
+    expect(screen.getByTestId('folder-CPTC')).not.toHaveAttribute('data-drop-active', 'true');
+  });
+
+  it('dragging a folder onto a workspace row files it in that row\'s containing folder', () => {
+    const moveGroup = vi.fn();
+    useAppStore.setState({ workspaces: [ws('b', 'School')], groups: ['CPTC', 'School'], moveGroup });
+    render(<Sidebar />);
+    const dt = fakeDataTransfer();
+    fireEvent.dragStart(screen.getByTestId('folder-CPTC'), { dataTransfer: dt });
+    fireEvent.drop(screen.getByTestId('workspace-b'), { dataTransfer: dt });
+    expect(moveGroup).toHaveBeenCalledWith('CPTC', 'School');
   });
 
   it('files a workspace dragged into a subfolder, not just a top-level one', () => {

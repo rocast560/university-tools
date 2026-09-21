@@ -126,7 +126,18 @@ export function Sidebar() {
     setDropTarget((cur) => (cur === path ? null : cur));
   };
 
-  useEffect(() => clearSpring, []);
+  // A drag that never drops -- Esc mid-hover, or a release outside any wired
+  // target -- still fires `dragend` on its source, which always bubbles to
+  // window. One listener here catches every case (folder or workspace source,
+  // dropped inside or outside the sidebar) without threading a new prop
+  // through FolderTree/FolderRow/WorkspaceRow, and runs the same cleanup a
+  // completed drop already does -- otherwise a pending spring timer would
+  // still fire and expand a folder the user never actually dropped into.
+  useEffect(() => {
+    const onDragEnd = () => { clearSpring(); setDropTarget(null); setDragging(null); };
+    window.addEventListener('dragend', onDragEnd);
+    return () => { window.removeEventListener('dragend', onDragEnd); clearSpring(); };
+  }, []);
 
   if (railed) {
     return (
