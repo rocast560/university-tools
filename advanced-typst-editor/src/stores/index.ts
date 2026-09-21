@@ -3,13 +3,14 @@ import { api } from '@/api/client';
 import { folderPathFor, movedFolderPath, renamedFolderPath } from '@/lib/folder-paths';
 import { switchTrace } from '@/lib/perf';
 import { detailCache, forgetWorkspace, mergeDetail } from '@/lib/workspace-cache';
-import type { AssetFolder, BackupState, BlurRegion, CropRect, ID, McpStatus, RedactionDefaults, ServerEvent, TypstAsset, TypstAssetKind, WorkspaceDetail, WorkspaceStatus } from '@/types';
+import type { AssetFolder, BackupState, BlurRegion, CropRect, FolderMeta, ID, McpStatus, RedactionDefaults, ServerEvent, TypstAsset, TypstAssetKind, WorkspaceDetail, WorkspaceStatus } from '@/types';
 
 export interface ChangeNotice { id: ID; paths: string[]; origin: string | null; seq: number }
 
 export interface AppState {
   workspaces: WorkspaceStatus[];
   groups: string[];
+  folderMeta: Record<string, FolderMeta>;
   activeWorkspaceId: ID | null;
   detail: WorkspaceDetail | null;
   typstAssets: TypstAsset[];
@@ -30,9 +31,11 @@ export interface AppState {
   setWorkspaceGroup(id: ID, group: string | null): Promise<void>;
   removeWorkspace(id: ID): Promise<void>;
   loadGroups(): Promise<void>;
-  createGroup(name: string): Promise<void>;
-  renameGroup(name: string, newName: string): Promise<void>;
-  deleteGroup(name: string): Promise<void>;
+  createGroup(name: string, parent?: string | null): Promise<void>;
+  renameGroup(path: string, name: string): Promise<void>;
+  moveGroup(path: string, parent: string | null): Promise<void>;
+  deleteGroup(path: string): Promise<void>;
+  setFolderAppearance(path: string, patch: FolderMeta): Promise<void>;
 
   // BTCT-compatible asset slice
   loadTypstAssets(): Promise<void>;
@@ -84,7 +87,7 @@ export const useAppStore = create<AppState>((set, get) => {
     switchTrace.mark('detail');
   };
   return {
-    workspaces: [], groups: [], activeWorkspaceId: null, detail: null, typstAssets: [], assetFolders: [],
+    workspaces: [], groups: [], folderMeta: {}, activeWorkspaceId: null, detail: null, typstAssets: [], assetFolders: [],
     redaction: { style: 'gaussian', strength: 1 }, typstCli: null, backup: null, mcp: null, online: false, lastChange: null, settingsOpen: false,
 
     async loadWorkspaces() { set({ workspaces: await api.listWorkspaces() }); },
@@ -108,10 +111,12 @@ export const useAppStore = create<AppState>((set, get) => {
     async renameWorkspace(id, name) { await api.patchWorkspace(id, { name }); detailCache.delete(id); await get().loadWorkspaces(); if (get().activeWorkspaceId === id) await reloadDetail(); },
     async setWorkspaceGroup(id, group) { await api.patchWorkspace(id, { group }); detailCache.delete(id); await get().loadWorkspaces(); },
     async removeWorkspace(id) { await api.deleteWorkspace(id); forgetWorkspace(id); if (get().activeWorkspaceId === id) await get().selectWorkspace(null); await get().loadWorkspaces(); },
-    async loadGroups() { set({ groups: await api.listGroups() }); },
-    async createGroup(name) { set({ groups: await api.createGroup(name) }); },
-    async renameGroup(name, newName) { set({ groups: await api.renameGroup(name, newName) }); await get().loadWorkspaces(); },
-    async deleteGroup(name) { set({ groups: await api.deleteGroup(name) }); await get().loadWorkspaces(); },
+    async loadGroups() { set(await api.listGroups()); },
+    async createGroup(name, parent) { set(await api.createGroup(name, parent ?? null)); },
+    async renameGroup(path, name) { set(await api.renameGroup(path, name)); await get().loadWorkspaces(); },
+    async moveGroup(path, parent) { set(await api.moveGroup(path, parent)); await get().loadWorkspaces(); },
+    async deleteGroup(path) { set(await api.deleteGroup(path)); await get().loadWorkspaces(); },
+    async setFolderAppearance(path, patch) { set(await api.setFolderAppearance(path, patch)); },
 
     loadTypstAssets: reloadDetail,
     async addTypstAsset(file, kind, folderId) {

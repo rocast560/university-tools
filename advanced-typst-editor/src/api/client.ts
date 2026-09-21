@@ -1,4 +1,4 @@
-import type { BackupState, CompileResult, DirListing, McpStatus, RedactionDefaults, SnapshotInfo, TypstAsset, TypstAssetKind, WorkspaceDetail, WorkspaceEntry, WorkspaceStatus, AssetFolder } from '@/types';
+import type { BackupState, CompileResult, DirListing, FolderMeta, McpStatus, RedactionDefaults, SnapshotInfo, TypstAsset, TypstAssetKind, WorkspaceDetail, WorkspaceEntry, WorkspaceStatus, AssetFolder } from '@/types';
 
 export const CLIENT_ID: string = (() => {
   try {
@@ -39,13 +39,18 @@ const wsUrl = (id: string) => `/api/workspaces/${enc(id)}`;
 const fileUrl = (id: string, p: string) => `${wsUrl(id)}/files/${p.split('/').map(enc).join('/')}`;
 const assetUrl = (id: string, a: string) => `${wsUrl(id)}/assets/${a.split('/').map(enc).join('/')}`;
 
+/** Every folder route answers with the whole folder state, so one call resyncs both. */
+export interface GroupState { groups: string[]; folderMeta: Record<string, FolderMeta> }
+
 export const api = {
   health: () => req<{ ok: boolean }>('GET', '/api/health'),
   listWorkspaces: () => req<{ workspaces: WorkspaceStatus[] }>('GET', '/api/workspaces').then((r) => r.workspaces),
-  listGroups: () => req<{ groups: string[] }>('GET', '/api/groups').then((r) => r.groups),
-  createGroup: (name: string) => req<{ groups: string[] }>('POST', '/api/groups', { name }).then((r) => r.groups),
-  renameGroup: (name: string, newName: string) => req<{ groups: string[] }>('PATCH', `/api/groups/${enc(name)}`, { name: newName }).then((r) => r.groups),
-  deleteGroup: (name: string) => req<{ groups: string[] }>('DELETE', `/api/groups/${enc(name)}`).then((r) => r.groups),
+  listGroups: () => req<GroupState>('GET', '/api/groups'),
+  createGroup: (name: string, parent: string | null = null) => req<GroupState>('POST', '/api/groups', { name, parent }),
+  renameGroup: (path: string, name: string) => req<GroupState>('PATCH', `/api/groups/${enc(path)}`, { name }),
+  moveGroup: (path: string, parent: string | null) => req<GroupState>('PATCH', `/api/groups/${enc(path)}`, { parent }),
+  setFolderAppearance: (path: string, patch: FolderMeta) => req<GroupState>('PATCH', `/api/groups/${enc(path)}`, patch),
+  deleteGroup: (path: string) => req<GroupState>('DELETE', `/api/groups/${enc(path)}`),
   createWorkspace: (input: { name: string; group?: string | null; source?: string }) => req<{ workspace: WorkspaceEntry }>('POST', '/api/workspaces', input).then((r) => r.workspace),
   openFolder: (path: string, name?: string) => req<{ workspace: WorkspaceEntry }>('POST', '/api/workspaces/open', { path, name }).then((r) => r.workspace),
   patchWorkspace: (id: string, patch: { name?: string; group?: string | null }) => req<{ workspace: WorkspaceEntry }>('PATCH', wsUrl(id), patch).then((r) => r.workspace),

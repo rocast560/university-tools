@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useAppStore } from '@/stores';
+import { api } from '@/api/client';
 import { clearWorkspaceCaches, detailCache } from '@/lib/workspace-cache';
 import type { WorkspaceDetail } from '@/types';
 
@@ -124,5 +125,22 @@ describe('store group actions', () => {
     expect(calls.some((c) => c.method === 'GET' && c.url === '/api/workspaces')).toBe(true);
     await useAppStore.getState().deleteGroup('CPTC 2026');
     expect(useAppStore.getState().groups).toEqual(['ECE']);
+  });
+
+  it('loads folders with their appearance and moves one under a new parent', async () => {
+    const listGroups = vi.fn().mockResolvedValue({ groups: ['CPTC', 'School'], folderMeta: { CPTC: { icon: 'shield' } } });
+    const moveGroup = vi.fn().mockResolvedValue({ groups: ['School', 'School/CPTC'], folderMeta: { 'School/CPTC': { icon: 'shield' } } });
+    vi.spyOn(api, 'listGroups').mockImplementation(listGroups);
+    vi.spyOn(api, 'moveGroup').mockImplementation(moveGroup);
+    vi.spyOn(api, 'listWorkspaces').mockResolvedValue([]);
+
+    await useAppStore.getState().loadGroups();
+    expect(useAppStore.getState().groups).toEqual(['CPTC', 'School']);
+    expect(useAppStore.getState().folderMeta).toEqual({ CPTC: { icon: 'shield' } });
+
+    await useAppStore.getState().moveGroup('CPTC', 'School');
+    expect(moveGroup).toHaveBeenCalledWith('CPTC', 'School');
+    expect(useAppStore.getState().groups).toEqual(['School', 'School/CPTC']);
+    expect(useAppStore.getState().folderMeta).toEqual({ 'School/CPTC': { icon: 'shield' } });
   });
 });
