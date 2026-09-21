@@ -50,7 +50,43 @@ describe('Sidebar', () => {
     fireEvent.click(screen.getByTitle('New folder'));
     fireEvent.change(screen.getByPlaceholderText('Folder name'), { target: { value: 'CPTC' } });
     fireEvent.submit(screen.getByPlaceholderText('Folder name').closest('form')!);
-    expect(createGroup).toHaveBeenCalledWith('CPTC');
+    expect(createGroup).toHaveBeenCalledWith('CPTC', null);
+  });
+
+  it('creates a subfolder from a folder context menu', async () => {
+    const createGroup = vi.fn();
+    useAppStore.setState({ workspaces: [], groups: ['CPTC'], createGroup });
+    render(<Sidebar />);
+    fireEvent.contextMenu(screen.getByTestId('folder-CPTC'));
+    fireEvent.click(screen.getByText('New subfolder'));
+    fireEvent.change(screen.getByPlaceholderText('Subfolder name'), { target: { value: 'inject' } });
+    fireEvent.submit(screen.getByPlaceholderText('Subfolder name').closest('form')!);
+    expect(createGroup).toHaveBeenCalledWith('inject', 'CPTC');
+  });
+
+  it('moves a workspace from its context menu without a prompt', () => {
+    const setWorkspaceGroup = vi.fn();
+    const promptSpy = vi.spyOn(window, 'prompt');
+    useAppStore.setState({ workspaces: [ws('a', null)], groups: ['CPTC', 'CPTC/inject'], setWorkspaceGroup });
+    render(<Sidebar />);
+    fireEvent.contextMenu(screen.getByTestId('workspace-a'));
+    fireEvent.click(screen.getByText('Move to…'));
+    fireEvent.click(screen.getByText('CPTC/inject'));
+    expect(setWorkspaceGroup).toHaveBeenCalledWith('a', 'CPTC/inject');
+    expect(promptSpy).not.toHaveBeenCalled();
+    promptSpy.mockRestore();
+  });
+
+  it('sets an icon and a colour from the appearance popover', async () => {
+    const setFolderAppearance = vi.fn();
+    useAppStore.setState({ workspaces: [], groups: ['CPTC'], setFolderAppearance });
+    render(<Sidebar />);
+    fireEvent.contextMenu(screen.getByTestId('folder-CPTC'));
+    fireEvent.click(screen.getByText('Appearance…'));
+    fireEvent.click(await screen.findByTitle('blue'));
+    expect(setFolderAppearance).toHaveBeenCalledWith('CPTC', { color: 'blue' });
+    fireEvent.click(screen.getByTitle('shield'));
+    expect(setFolderAppearance).toHaveBeenCalledWith('CPTC', { icon: 'shield' });
   });
 
   it('dragging a workspace onto a folder files it there', () => {

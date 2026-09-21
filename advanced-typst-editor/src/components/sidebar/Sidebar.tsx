@@ -9,12 +9,15 @@ import { workspacesByFolder } from '@/lib/workspace-groups';
 import { loadCollapsedGroups, saveCollapsedGroups, toggleGroup } from '@/lib/collapsed-groups';
 import { loadSidebarCollapsed, saveSidebarCollapsed } from '@/lib/sidebar-collapse';
 import { canDrop, parseDrag, SIDEBAR_DRAG_MIME, type DragPayload } from '@/lib/sidebar-dnd';
+import { folderName } from '@/lib/folder-tree';
 import type { BackupState, WorkspaceStatus } from '@/types';
 
-// Both only appear on a deliberate action (locating a moved workspace,
-// confirming a destructive one), so they stay off the app's first-paint chunk.
+// All three only appear on a deliberate action (locating a moved workspace,
+// confirming a destructive one, picking a folder's look), so they stay off
+// the app's first-paint chunk.
 const FolderBrowserDialog = lazy(() => import('@/components/ui/FolderBrowserDialog').then((m) => ({ default: m.FolderBrowserDialog })));
 const ConfirmDialog = lazy(() => import('@/components/ui/ConfirmDialog').then((m) => ({ default: m.ConfirmDialog })));
+const FolderAppearance = lazy(() => import('@/components/sidebar/FolderAppearance').then((m) => ({ default: m.FolderAppearance })));
 
 /**
  * Whether a keystroke belongs to something the user is typing into, so the
@@ -49,6 +52,7 @@ export function Sidebar() {
   const renameGroup = useAppStore((s) => s.renameGroup);
   const moveGroup = useAppStore((s) => s.moveGroup);
   const deleteGroup = useAppStore((s) => s.deleteGroup);
+  const setFolderAppearance = useAppStore((s) => s.setFolderAppearance);
   const setSettingsOpen = useAppStore((s) => s.setSettingsOpen);
   const backup = useAppStore((s) => s.backup);
   const mcp = useAppStore((s) => s.mcp);
@@ -61,6 +65,10 @@ export function Sidebar() {
   const [removing, setRemoving] = useState<WorkspaceStatus | null>(null);
   const [menu, setMenu] = useState<{ ws: WorkspaceStatus; x: number; y: number } | null>(null);
   const [folderMenu, setFolderMenu] = useState<{ name: string; x: number; y: number } | null>(null);
+  const [appearance, setAppearance] = useState<{ path: string; x: number; y: number } | null>(null);
+  const [subfolderOf, setSubfolderOf] = useState<string | null>(null);
+  const [subfolderDraft, setSubfolderDraft] = useState('');
+  const [movingWs, setMovingWs] = useState<WorkspaceStatus | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => loadCollapsedGroups());
   const toggle = (group: string) => setCollapsed((prev) => { const next = toggleGroup(prev, group); saveCollapsedGroups(next); return next; });
 
@@ -178,8 +186,13 @@ export function Sidebar() {
         </form>
       )}
       {creatingFolder && (
-        <form className="px-3 pb-2" onSubmit={(e) => { e.preventDefault(); if (folderDraft.trim()) void createGroup(folderDraft.trim()); setCreatingFolder(false); }}>
+        <form className="px-3 pb-2" onSubmit={(e) => { e.preventDefault(); if (folderDraft.trim()) void createGroup(folderDraft.trim(), null); setCreatingFolder(false); }}>
           <input autoFocus value={folderDraft} onChange={(e) => setFolderDraft(e.target.value)} onBlur={() => setCreatingFolder(false)} placeholder="Folder name" className="w-full rounded-md border border-[hsl(var(--input))] bg-transparent px-2 py-1 text-xs" />
+        </form>
+      )}
+      {subfolderOf && (
+        <form className="px-3 pb-2" onSubmit={(e) => { e.preventDefault(); if (subfolderDraft.trim()) void createGroup(subfolderDraft.trim(), subfolderOf); setSubfolderOf(null); }}>
+          <input autoFocus value={subfolderDraft} onChange={(e) => setSubfolderDraft(e.target.value)} onBlur={() => setSubfolderOf(null)} placeholder="Subfolder name" className="w-full rounded-md border border-[hsl(var(--input))] bg-transparent px-2 py-1 text-xs" />
         </form>
       )}
       <div data-testid="sidebar-workspace-list" className="min-h-0 flex-1 overflow-auto px-2 pb-2"
@@ -217,10 +230,18 @@ export function Sidebar() {
       </div>
 
       {menu && (
-        <div className="fixed inset-0 z-40" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }}>
+        <div className="fixed inset-0 z-40" onClick={() => { setMenu(null); setMovingWs(null); }} onContextMenu={(e) => { e.preventDefault(); setMenu(null); setMovingWs(null); }}>
           <div className="absolute w-44 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--popover))] p-1 text-xs shadow-lg" style={{ left: menu.x, top: menu.y }}>
             <button type="button" className="block w-full rounded px-2 py-1 text-left hover:bg-[hsl(var(--accent))]" onClick={() => { const n = window.prompt('Rename workspace', menu.ws.name); if (n) void rename(menu.ws.id, n); }}>Rename</button>
-            <button type="button" className="block w-full rounded px-2 py-1 text-left hover:bg-[hsl(var(--accent))]" onClick={() => { const g = window.prompt('Group (empty for none)', menu.ws.group ?? ''); if (g !== null) void setGroup(menu.ws.id, g.trim() || null); }}>Set group</button>
+            <button type="button" className="block w-full rounded px-2 py-1 text-left hover:bg-[hsl(var(--accent))]" onClick={(e) => { e.stopPropagation(); setMovingWs(menu.ws); }}>Move to…</button>
+            {movingWs?.id === menu.ws.id && (
+              <div className="max-h-48 overflow-auto border-t border-[hsl(var(--border))] pt-1">
+                <button type="button" className="block w-full rounded px-2 py-1 text-left hover:bg-[hsl(var(--accent))]" onClick={() => { void setGroup(menu.ws.id, null); setMovingWs(null); setMenu(null); }}>Top level</button>
+                {knownGroups.map((g) => (
+                  <button key={g} type="button" className="block w-full truncate rounded px-2 py-1 text-left hover:bg-[hsl(var(--accent))]" onClick={() => { void setGroup(menu.ws.id, g); setMovingWs(null); setMenu(null); }}>{g}</button>
+                ))}
+              </div>
+            )}
             {menu.ws.status === 'missing' && <button type="button" className="block w-full rounded px-2 py-1 text-left hover:bg-[hsl(var(--accent))]" onClick={() => setBrowsing({ locate: menu.ws })}>Locate folder</button>}
             <button type="button" className="block w-full rounded px-2 py-1 text-left text-[hsl(var(--status-red))] hover:bg-[hsl(var(--accent))]" onClick={() => setRemoving(menu.ws)}>{menu.ws.library ? 'Move to trash' : 'Forget'}</button>
           </div>
@@ -229,10 +250,23 @@ export function Sidebar() {
       {folderMenu && (
         <div className="fixed inset-0 z-40" onClick={() => setFolderMenu(null)} onContextMenu={(e) => { e.preventDefault(); setFolderMenu(null); }}>
           <div className="absolute w-44 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--popover))] p-1 text-xs shadow-lg" style={{ left: folderMenu.x, top: folderMenu.y }}>
-            <button type="button" className="block w-full rounded px-2 py-1 text-left hover:bg-[hsl(var(--accent))]" onClick={() => { const n = window.prompt('Rename folder', folderMenu.name); if (n && n.trim()) void renameGroup(folderMenu.name, n.trim()); }}>Rename folder</button>
+            <button type="button" className="block w-full rounded px-2 py-1 text-left hover:bg-[hsl(var(--accent))]" onClick={() => { setSubfolderOf(folderMenu.name); setSubfolderDraft(''); setFolderMenu(null); }}>New subfolder</button>
+            <button type="button" className="block w-full rounded px-2 py-1 text-left hover:bg-[hsl(var(--accent))]" onClick={() => { const n = window.prompt('Rename folder', folderName(folderMenu.name)); if (n && n.trim()) void renameGroup(folderMenu.name, n.trim()); }}>Rename folder</button>
+            <button type="button" className="block w-full rounded px-2 py-1 text-left hover:bg-[hsl(var(--accent))]" onClick={() => { setAppearance({ path: folderMenu.name, x: folderMenu.x, y: folderMenu.y }); setFolderMenu(null); }}>Appearance…</button>
             <button type="button" className="block w-full rounded px-2 py-1 text-left text-[hsl(var(--status-red))] hover:bg-[hsl(var(--accent))]" onClick={() => void deleteGroup(folderMenu.name)}>Delete folder</button>
           </div>
         </div>
+      )}
+      {appearance && (
+        <Suspense fallback={null}>
+          <FolderAppearance
+            meta={folderMeta[appearance.path]}
+            x={appearance.x}
+            y={appearance.y}
+            onPick={(patch) => void setFolderAppearance(appearance.path, patch)}
+            onClose={() => setAppearance(null)}
+          />
+        </Suspense>
       )}
       {browsing && (
         <Suspense fallback={null}>
