@@ -280,7 +280,8 @@ Append to `server/settings.test.ts`, inside the existing `describe('settings sto
     s.setFolderMeta('CPTC/inject', { color: 'red' });
     const w = s.addWorkspace({ path: path.join(d, 'ws', 'A'), name: 'A', group: 'CPTC/inject', library: true });
 
-    expect(s.renameGroup('CPTC', 'Comp')).toEqual(['CPTC-old', 'Comp', 'Comp/inject']);
+    // localeCompare orders 'Comp' before 'CPTC-old' (second letter o < p).
+    expect(s.renameGroup('CPTC', 'Comp')).toEqual(['Comp', 'Comp/inject', 'CPTC-old']);
     expect(s.getWorkspace(w.id)?.group).toBe('Comp/inject');
     expect(s.folderMeta()).toEqual({ Comp: { icon: 'shield', color: 'blue' }, 'Comp/inject': { color: 'red' } });
   });
