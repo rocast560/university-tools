@@ -2106,7 +2106,11 @@ Add `import { folderName } from '@/lib/folder-tree';` for the rename prompt's de
 In the workspace context menu, replace the `Set group` button with a **Move to…** toggle and its list:
 
 ```tsx
-            <button type="button" className="block w-full rounded px-2 py-1 text-left hover:bg-[hsl(var(--accent))]" onClick={() => setMovingWs(menu.ws)}>Move to…</button>
+            {/* stopPropagation on THIS button only: the backdrop's onClick now
+                also clears movingWs, so without it the whole menu closes
+                before the submenu can render. The other items still bubble to
+                the backdrop to close, which is what they want. */}
+            <button type="button" className="block w-full rounded px-2 py-1 text-left hover:bg-[hsl(var(--accent))]" onClick={(e) => { e.stopPropagation(); setMovingWs(menu.ws); }}>Move to…</button>
             {movingWs?.id === menu.ws.id && (
               <div className="max-h-48 overflow-auto border-t border-[hsl(var(--border))] pt-1">
                 <button type="button" className="block w-full rounded px-2 py-1 text-left hover:bg-[hsl(var(--accent))]" onClick={() => { void setGroup(menu.ws.id, null); setMovingWs(null); setMenu(null); }}>Top level</button>
