@@ -38,6 +38,19 @@
   --status-amber:       38 91% 55%;
   --status-red:          0 76% 60%;
 
+  /* Sidebar folder tints. Same hues as --status-*, extended to ten, so a
+     folder colour is theme-aware rather than a hard-coded hex. */
+  --folder-slate:      215 16% 52%;
+  --folder-blue:       213 87% 55%;
+  --folder-teal:       174 62% 40%;
+  --folder-green:      142 60% 42%;
+  --folder-amber:       38 91% 50%;
+  --folder-orange:      25 90% 52%;
+  --folder-red:          0 76% 56%;
+  --folder-pink:       330 75% 58%;
+  --folder-purple:     258 70% 60%;
+  --folder-indigo:     243 62% 60%;
+
   --radius:            10px;
   --radius-pill:       9999px;
   --radius-sm:         6px;
@@ -89,6 +102,17 @@
   --status-purple:     258 80% 70%;
   --status-amber:       38 91% 60%;
   --status-red:          0 76% 66%;
+
+  --folder-slate:      215 18% 65%;
+  --folder-blue:       213 87% 68%;
+  --folder-teal:       174 55% 55%;
+  --folder-green:      142 52% 58%;
+  --folder-amber:       38 91% 62%;
+  --folder-orange:      25 90% 64%;
+  --folder-red:          0 76% 66%;
+  --folder-pink:       330 75% 68%;
+  --folder-purple:     258 70% 72%;
+  --folder-indigo:     243 70% 72%;
 }
 
 * {
