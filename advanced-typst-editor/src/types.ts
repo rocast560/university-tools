@@ -83,10 +83,17 @@ export interface BackupState extends BackupSettings {
 export interface SnapshotInfo { destinationId: ID; name: string; createdAt: number; bytes: number; workspaces: number }
 
 export interface RedactionDefaults { style: BlurStyle; strength: number }
+
+/** Appearance of one sidebar folder, keyed by its path in Settings.folderMeta. */
+export interface FolderMeta { icon?: string | null; color?: string | null }
+
 export interface Settings {
   version: 1;
   workspaces: WorkspaceEntry[];
+  /** Folder paths ("CPTC", "CPTC/inject"). Every ancestor is itself stored. */
   groups: string[];
+  /** Keyed by folder path; an absent key means the default look. */
+  folderMeta: Record<string, FolderMeta>;
   backup: BackupSettings;
   typstCli: string | null;
   redaction: RedactionDefaults;
