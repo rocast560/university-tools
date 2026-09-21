@@ -689,8 +689,15 @@ In `server/router.ts`, replace the whole `if (seg[1] === 'groups') { ... }` bloc
           if ('icon' in body) appearance.icon = body.icon === null ? null : requireString(body, 'icon');
           if ('color' in body) appearance.color = body.color === null ? null : requireString(body, 'color');
           if ('icon' in body || 'color' in body) {
-            // A rename above moved the folder, so apply appearance at its new path.
-            const at = 'name' in body ? joinPath(parentPath(path), requireString(body, 'name')) : path;
+            // A rename or a move above relocated the folder, so appearance must
+            // be applied at its NEW path -- the old one no longer exists, and
+            // setFolderAppearance would 404 on it after the move already
+            // committed, failing a request that half-succeeded.
+            const at = 'name' in body
+              ? joinPath(parentPath(path), requireString(body, 'name'))
+              : 'parent' in body
+                ? joinPath(body.parent === null ? null : requireString(body, 'parent'), folderName(path))
+                : path;
             service.setFolderAppearance(at, appearance);
           }
           return json(200, state());
@@ -703,7 +710,7 @@ In `server/router.ts`, replace the whole `if (seg[1] === 'groups') { ... }` bloc
 Add to `server/router.ts`'s imports:
 
 ```ts
-import { joinPath, parentPath } from '../src/lib/folder-tree';
+import { folderName, joinPath, parentPath } from '../src/lib/folder-tree';
 import type { FolderMeta } from '../src/types';
 ```
 
