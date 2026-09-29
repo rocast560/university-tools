@@ -60,7 +60,11 @@ export const WIRE_R = 4;
 export const WIRE_D = 2 * WIRE_R;
 /** Lane pitch: one wire diameter and a hair of air, which is half a hole pitch, so every lane sits on one grid. */
 export const LANE = P / 2;
-/** Expanded states before a search gives up and the simple router takes over, so a drag never stalls. */
+/**
+ * Expanded states before a search gives up and the simple router takes over.
+ * The lattice's own (node, heading) state space is the real bound (about 19k on
+ * a full board, so this never binds there); the cap is a safety net.
+ */
 export const MAX_EXPAND = 30000;
 
 // A* weights, in SVG units of length (a pitch is 18).
@@ -196,7 +200,9 @@ export function planToPath(w: Wire, plan: Point[]): WirePath | null {
     for (let i = 1; i < GAPS.length; i++) if (Math.abs(y - GAPS[i].y) < Math.abs(y - GAPS[g].y)) g = i;
     const lane = Math.round((y - GAPS[g].y) / LANE);
     if (Math.abs(GAPS[g].y + lane * LANE - y) > 0.01 || Math.abs(lane) > 4) return null;
-    points.push({ col: Math.round(((x - X0) / P + 1) * 1e6) / 1e6, gap: GAPS[g].name, lane });
+    const half = Math.round((x - X0) / LANE);
+    if (Math.abs(X0 + half * LANE - x) > 0.01) return null;
+    points.push({ col: 1 + half / 2, gap: GAPS[g].name, lane });
   }
   if (holeKey(w.a) > holeKey(w.b)) points.reverse();
   return { points };
@@ -388,7 +394,7 @@ class Grid {
         const ts = t * 4 + m;
         const nc = c + step;
         const nb = bends[s] + (turn ? 1 : 0);
-        if (nc < cost[ts] || (nc === cost[ts] && nb < bends[ts])) {
+        if (!closed[ts] && (nc < cost[ts] || (nc === cost[ts] && nb < bends[ts]))) {
           cost[ts] = nc;
           bends[ts] = nb;
           from[ts] = s;
@@ -448,13 +454,15 @@ export function routeWires(input: RouteInput, saved: Record<string, WirePath> = 
       warnings.push(`hand-shaped jumper for ${keyNet(key)} (${keyHoles(key)}) no longer matches a wire; dropped`);
       continue;
     }
-    const plan = pathToPlan(input.wires[i], path);
+    const raw = pathToPlan(input.wires[i], path);
+    // Simplify first: a bend sitting on its own hole would otherwise pass the column check and then vanish.
+    const plan = raw && simplify(raw);
     const why = plan ? checkPlan(plan, input.packages, input.board) : 'it names a corridor this board does not have';
     if (!plan || why) {
       warnings.push(`hand-shaped jumper for ${keyNet(key)} (${keyHoles(key)}) no longer fits (${why}); re-routed`);
       continue;
     }
-    plans[i] = simplify(plan);
+    plans[i] = plan;
     routes[i] = { plan: plans[i], lifts: [], locked: true };
     grid.claim(plans[i]);
     fixed.push(i);

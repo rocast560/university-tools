@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { holeKey } from '../src/layout/board.ts';
 import { pt } from '../src/render/geometry.ts';
 import { wirePolylines } from '../src/render/ortho.ts';
 import { checkPlan, GAPS, LANE, pathToPlan, planToPath, routeWires, wireKey, WIRE_D, type Point } from '../src/render/route3d.ts';
@@ -55,6 +56,7 @@ describe('routeWires on the fixtures', () => {
 describe('hand-shaped wires', () => {
   const doc = docs.PL1_1;
   const i = routed.PL1_1.routes.findIndex((r) => r.plan.length >= 4);
+  expect(i).toBeGreaterThanOrEqual(0);
   const w = doc.wires[i];
   const auto = routed.PL1_1.routes[i].plan;
 
@@ -71,6 +73,33 @@ describe('hand-shaped wires', () => {
   test('a plan off the half-pitch grid (the simple router draws those) has no grid form', () => {
     const off: Point[] = [auto[0], [auto[0][0], auto[1][1] - 5], [auto[auto.length - 1][0], auto[1][1] - 5], auto[auto.length - 1]];
     expect(planToPath(w, off)).toBeNull();
+  });
+
+  test('a plan with a sideways-offset run (ortho.ts SUB_V) has no grid form', () => {
+    const off = auto.map((p, n) => (n === 1 || n === 2 ? ([p[0] + 4, p[1]] as Point) : p));
+    expect(planToPath(w, off)).toBeNull();
+  });
+
+  test('bends in the top and bottom corridors round-trip', () => {
+    const [a, b] = [pt(w.a), pt(w.b)];
+    for (const [gap, lane] of [['top', 0], ['bottom', 0], ['top', -1], ['bottom', 1]] as const) {
+      const y = GAPS.find((g) => g.name === gap)!.y + lane * LANE;
+      const plan: Point[] = [a, [a[0], y], [b[0], y], b];
+      const path = planToPath(w, plan)!;
+      expect(path.points.every((p) => p.gap === gap && p.lane === lane)).toBe(true);
+      expect(pathToPlan(w, path)).toEqual(plan);
+    }
+  });
+
+  test('a saved bend sitting exactly on its own hole is refused, not silently straightened', () => {
+    const a = pt(w.a);
+    const row = GAPS.find((g) => Math.abs(g.y + LANE - a[1]) < 0.01 || Math.abs(g.y - LANE - a[1]) < 0.01)!;
+    const lane = Math.round((a[1] - row.y) / LANE);
+    const path = { points: [{ col: 1 + (a[0] - pt({ col: 1, row: 'a' })[0]) / 18, gap: row.name, lane }, ...planToPath(w, auto)!.points.slice(1)] };
+    const again = routeWires(doc, { [wireKey(w)]: w.a && holeKey(w.a) < holeKey(w.b) ? path : { points: [...path.points].reverse() } });
+    expect(again.warnings.length).toBe(1);
+    expect(again.warnings[0]).toContain('no longer fits');
+    expect(again.routes[i].locked).toBeUndefined();
   });
 
   test('a saved shape is used exactly as saved, and marked locked', () => {

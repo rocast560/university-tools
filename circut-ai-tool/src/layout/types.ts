@@ -118,7 +118,7 @@ export function normalizeSidecar(x: unknown): Sidecar {
     for (const [ref, c] of Object.entries(o.ledColors)) if (typeof c === 'string' && (LED_COLOURS as readonly string[]).includes(c)) s.ledColors[ref] = c as LedColour;
   }
   if (o.wirePaths && typeof o.wirePaths === 'object') {
-    for (const [key, path] of Object.entries(o.wirePaths)) {
+    for (const [key, path] of Object.entries(o.wirePaths).slice(0, 1024)) {
       const clean = normalizeWirePath(path);
       if (clean) s.wirePaths[key] = clean;
     }
