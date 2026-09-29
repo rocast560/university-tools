@@ -8,6 +8,7 @@ import path from 'node:path';
 import { OrganizerError, OrganizerStore } from './organizer.ts';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
+import type { WirePath } from '../src/layout/types.ts';
 import { PART_ALIASES, resolveAlias } from '../src/parts/aliases.ts';
 import { renderSvg, type Highlight } from '../src/render/index.ts';
 import { DARK, LIGHT } from '../src/render/theme.ts';
@@ -124,6 +125,11 @@ export function createApi(service: Service, events: Events<ProjectEvent>, tunnel
     const body = (await c.req.json()) as { ref?: string; color?: string | null };
     if (!body.ref) throw new ServiceError('body must be {"ref": "D1", "color": "blue" | null}');
     return c.json((await service.setLedColor(c.req.param('id'), body.ref, body.color ?? null)).doc);
+  });
+  api.post('/projects/:id/layout/wire', async (c) => {
+    const body = (await c.req.json()) as { key?: string; path?: WirePath | null };
+    if (!body.key || body.path === undefined) throw new ServiceError('body must be {"key": "/A|a12|e20", "path": {"points": [{"col": 12.5, "gap": "c|d", "lane": 0}]} | null}');
+    return c.json((await service.setWirePath(c.req.param('id'), body.key, body.path)).doc);
   });
   api.post('/projects/:id/layout/reset', async (c) => c.json((await service.resetLayout(c.req.param('id'))).doc));
   api.post('/projects/:id/erc', async (c) => c.json(await service.erc(c.req.param('id'))));

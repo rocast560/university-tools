@@ -268,7 +268,7 @@ export function renderPanels(panels: HTMLElement, toolbar: HTMLElement, legend: 
     if (action === 'reset') {
       try {
         const doc = await api.reset(p.id);
-        store.setProject({ doc, sidecar: { ...p.sidecar, pinned: {}, colors: {}, options: doc.board ? { ...p.sidecar.options, board: 'auto', railSplit: null, dipSwitchPositions: 0, packageOrder: [], substitutions: {}, wireStyle: 'arc' } : p.sidecar.options } });
+        store.setProject({ doc, sidecar: { ...p.sidecar, pinned: {}, colors: {}, wirePaths: {}, options: doc.board ? { ...p.sidecar.options, board: 'auto', railSplit: null, dipSwitchPositions: 0, packageOrder: [], substitutions: {}, wireStyle: 'arc' } : p.sidecar.options } });
       } catch (err) {
         toast((err as Error).message);
       }

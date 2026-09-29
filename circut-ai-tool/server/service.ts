@@ -7,13 +7,14 @@ import { copyFile, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs
 import path from 'node:path';
 import { addComponent, connectPin, disconnectPin, removeComponent, setValue, type OpResult } from '../src/kicad/ops.ts';
 import { parseSchematic, type Schematic } from '../src/kicad/schematic.ts';
-import type { Hole, Options, Sidecar } from '../src/layout/types.ts';
-import { emptySidecar } from '../src/layout/types.ts';
+import type { Hole, Options, Sidecar, WirePath } from '../src/layout/types.ts';
+import { emptySidecar, normalizeWirePath } from '../src/layout/types.ts';
 import { parseNetlist, type Design } from '../src/netlist.ts';
 import { buildLayoutDoc, type LayoutDoc } from '../src/pipeline.ts';
 import { footprintPins } from '../src/layout/engine.ts';
 import { classify } from '../src/parts/catalog.ts';
 import { LED_COLOURS, type LedColour } from '../src/parts/led.ts';
+import { checkPlan, pathToPlan, wireKey } from '../src/render/route3d.ts';
 import { simulate, type SimResult } from '../src/sim/index.ts';
 import type { KicadCli } from './kicad-cli.ts';
 import type { LibraryLookup } from './libraries.ts';
@@ -351,6 +352,35 @@ export class Service {
       p.sidecar.pinned = before;
       throw new ServiceError(dropped.replace('pinned placement for', 'cannot move'));
     }
+    return this.rebuild(p);
+  }
+
+  /**
+   * Keep the hand shape of one jumper (or, with null, forget it), keyed as
+   * wireKey() makes it: net|holeA|holeB with the holes sorted. Key "*" with
+   * null forgets every one. Only the layout sidecar changes, never the
+   * schematic. A shape that is not square, does not leave its holes along
+   * their columns, leaves the board or runs through a package is refused.
+   */
+  async setWirePath(id: string, key: string, path: WirePath | null): Promise<OpenProject> {
+    const p = this.get(id);
+    if (key === '*') {
+      if (path !== null) throw new ServiceError('key "*" only clears every hand shape: send "path": null');
+      p.sidecar.wirePaths = {};
+      return this.rebuild(p);
+    }
+    const wire = p.doc.wires.find((w) => wireKey(w) === key);
+    if (!wire) throw new ServiceError(`no jumper ${key} on the board (a key is net|holeA|holeB with the holes sorted, for example "/A|a12|e20")`, 404);
+    if (path === null) {
+      delete p.sidecar.wirePaths[key];
+      return this.rebuild(p);
+    }
+    const clean = normalizeWirePath(path);
+    const plan = clean && pathToPlan(wire, clean);
+    if (!clean || !plan) throw new ServiceError('path must be {"points": [{"col": 12.5, "gap": "c|d", "lane": 0}, ...]}, with corridors named "top", "T+|T-", "a|b" ... "B-|B+", "bottom"');
+    const why = checkPlan(plan, p.doc.packages, p.doc.board);
+    if (why) throw new ServiceError(`cannot shape the ${wire.net} jumper: ${why}`);
+    p.sidecar.wirePaths[key] = clean;
     return this.rebuild(p);
   }
 

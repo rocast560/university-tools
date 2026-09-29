@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { ProjectRegistry, normalizePath, sidecarPath, type PathMapping } from '../server/projects.ts';
 import { Service, ServiceError, type ProjectEvent } from '../server/service.ts';
+import { LANE, planToPath, wireKey } from '../src/render/route3d.ts';
 import { Events } from '../server/watch.ts';
 import { fakeKicad } from './fake-kicad.ts';
 import { FIXTURES, readFixture } from './smoke.test.ts';
@@ -209,5 +210,46 @@ describe('Service.edit safety (backup-before-write, stale guard)', () => {
     for (let i = 0; i < 6; i++) await service.setValue(p.info.id, 'R1', `${i}k`);
     const backups = readdirSync(path.join(work, '.circuit-ai-backups')).filter((f) => f.endsWith('.kicad_sch'));
     expect(backups.length).toBe(6);
+  });
+});
+
+describe('hand-shaped wires', () => {
+  test('setWirePath keeps a shape, the doc routes it as saved, and null or "*" forgets it', async () => {
+    const { service, sch } = await makeService();
+    const p = await service.open(sch);
+    const square = await service.setOptions(p.info.id, { wireStyle: 'orthogonal' });
+    const i = square.doc.routes!.findIndex((r) => r.plan.length >= 4);
+    const w = square.doc.wires[i];
+    const auto = square.doc.routes![i].plan;
+    // Slide the second run one lane over, as a hand drag would.
+    const across = auto[1][0] === auto[2][0] ? 0 : 1;
+    const shaped = auto.map((q, n) => (n === 1 || n === 2 ? ((across ? [q[0], q[1] + LANE] : [q[0] + LANE, q[1]]) as [number, number]) : q));
+    const key = wireKey(w);
+    const saved = await service.setWirePath(p.info.id, key, planToPath(w, shaped)!);
+    expect(saved.doc.routes![i].plan).toEqual(shaped);
+    expect(saved.doc.routes![i].locked).toBe(true);
+    expect(JSON.parse(readFileSync(sidecarPath(sch), 'utf8')).wirePaths[key]).toEqual(planToPath(w, shaped));
+    const cleared = await service.setWirePath(p.info.id, key, null);
+    expect(cleared.sidecar.wirePaths[key]).toBeUndefined();
+    expect(cleared.doc.routes![i].locked).toBeUndefined();
+    await service.setWirePath(p.info.id, key, planToPath(w, shaped)!);
+    const all = await service.setWirePath(p.info.id, '*', null);
+    expect(all.sidecar.wirePaths).toEqual({});
+  });
+
+  test('setWirePath refuses an unknown wire, a malformed path, a path through a chip and "*" with a path', async () => {
+    const { service, sch } = await makeService();
+    const p = await service.open(sch);
+    const w = p.doc.wires[0];
+    await expect(service.setWirePath(p.info.id, '/NOPE|a1|a2', null)).rejects.toThrow(/no jumper/);
+    await expect(service.setWirePath(p.info.id, wireKey(w), { points: [{ col: 3, gap: 'x|y', lane: 0 }] })).rejects.toThrow(/path must be/);
+    await expect(service.setWirePath(p.info.id, wireKey(w), { nope: 1 } as never)).rejects.toThrow(/path must be/);
+    // d22 to d27 runs above U3; down into the centre channel and along it goes straight through the chip.
+    const over = p.doc.wires.find((k) => wireKey(k) === 'Net-(U3-Pad13)|d22|d27')!;
+    const through = { points: [{ col: 22, gap: 'e|f', lane: 0 }, { col: 27, gap: 'e|f', lane: 0 }] };
+    await expect(service.setWirePath(p.info.id, wireKey(over), through)).rejects.toThrow('cannot shape the Net-(U3-Pad13) jumper: the path runs through U3');
+    await expect(service.setWirePath(p.info.id, '*', { points: [] })).rejects.toThrow(/only clears/);
+    const reset = await service.resetLayout(p.info.id);
+    expect(reset.sidecar.wirePaths).toEqual({});
   });
 });

@@ -1,6 +1,6 @@
 // Thin fetch wrappers over /api. Errors carry the server's message.
 
-import type { Hole, Options, Sidecar } from '../src/layout/types.ts';
+import type { Hole, Options, Sidecar, WirePath } from '../src/layout/types.ts';
 import type { LayoutDoc } from '../src/pipeline.ts';
 
 export class ApiError extends Error {
@@ -102,6 +102,8 @@ export const api = {
   options: (id: string, patch: Partial<Options>) => post<LayoutDoc>(`/api/projects/${id}/layout/options`, patch),
   color: (id: string, net: string, color: string | null) => post<LayoutDoc>(`/api/projects/${id}/layout/colors`, { net, color }),
   ledColor: (id: string, ref: string, color: string | null) => post<LayoutDoc>(`/api/projects/${id}/layout/ledcolor`, { ref, color }),
+  /** Keep a jumper's hand shape, or forget it with null; key "*" and null forget them all. */
+  wirePath: (id: string, key: string, path: WirePath | null) => post<LayoutDoc>(`/api/projects/${id}/layout/wire`, { key, path }),
   reset: (id: string) => post<LayoutDoc>(`/api/projects/${id}/layout/reset`, {}),
   connect: () => call<ConnectInfo>('/api/connect'),
   organizer: () => call<Organizer>('/api/organizer'),

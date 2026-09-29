@@ -63,6 +63,11 @@ describe('REST API', () => {
     expect(opts.packages[0].kind).toBe('dipswitch');
     const col = await (await json(`/api/projects/${id}/layout/colors`, { net: '/A', color: '#abcdef' })).json();
     expect(col.nets['/A'].color).toBe('#abcdef');
+    const wire = await json(`/api/projects/${id}/layout/wire`, { key: '*', path: null });
+    expect(wire.status).toBe(200);
+    const badWire = await json(`/api/projects/${id}/layout/wire`, { key: '/NOPE|a1|a2', path: null });
+    expect(badWire.status).toBe(404);
+    expect((await json(`/api/projects/${id}/layout/wire`, { path: null })).status).toBe(400);
     const reset = await (await json(`/api/projects/${id}/layout/reset`, {})).json();
     expect(reset.packages[0].kind).toBe('dip');
     const sim = await (await json(`/api/projects/${id}/sim`, { levels: { '/A': 1, '/B': 1 } })).json();
