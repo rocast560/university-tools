@@ -8,6 +8,14 @@
 //   stays square;
 // - a double-click adds a small Z to a run, or takes a bend out.
 //
+// What these functions guarantee, and what they do not: a result is square,
+// simplified (no repeated, doubled-back or straight-through points), keeps
+// both end holes exactly and leaves and enters each with a vertical stub.
+// They do NOT check chip bodies, crossings or shared lines with other wires,
+// or the board's bounds, and moveSegment/moveBend expect coordinates already
+// snapped with snapAcross. The editor must validate every edited plan through
+// planToPath plus shapePlan (route3d.ts) before accepting or saving it.
+//
 // Every result is simplified (no repeated or straight-through points). Runs
 // across the board snap to corridor lanes and runs down it to the lines
 // between columns, so a wire is never left lying along a row or column of
@@ -50,9 +58,11 @@ const LANE_YS: number[] = (() => {
  * across the board (never a row of holes), the line between two columns for
  * a run down it (never a column of holes).
  */
-export function snapAcross(horizontal: boolean, v: number): number {
+export function snapAcross(horizontal: boolean, v: number, cols: number): number {
   if (horizontal) return LANE_YS.reduce((best, y) => (Math.abs(y - v) < Math.abs(best - v) ? y : best), LANE_YS[0]);
-  return X0 + (Math.round((v - X0) / P - 0.5) + 0.5) * P;
+  // Between columns of a board `cols` wide, no further out than half a pitch beyond the first and last.
+  const k = Math.min(cols - 1, Math.max(-1, Math.round((v - X0) / P - 0.5)));
+  return X0 + (k + 0.5) * P;
 }
 
 /** Move run i so it lies on `to` across itself, without simplifying (moveBend does two in a row). */
@@ -99,7 +109,11 @@ export function moveSegment(plan: Point[], i: number, to: number): Point[] {
   return simplify(shift(plan, i, to));
 }
 
-/** Drag the corner plan[k] to `to`: the run before it and the run after it each take one of its coordinates. */
+/**
+ * Drag the corner plan[k] to `to`: the run before it and the run after it each take one of its coordinates.
+ * `to` must already be snapped (snapAcross); like every edit here, the result is only square and simplified,
+ * so validate it (planToPath, shapePlan) before use.
+ */
 export function moveBend(plan: Point[], k: number, to: Point): Point[] {
   // The later run first: a jog it adds at the far end does not move index k - 1.
   const after = shift(plan, k, isH(plan, k) ? to[1] : to[0]);
@@ -128,7 +142,7 @@ export function nearestRun(plan: Point[], p: Point): number {
  * steps one line over. The part that steps is the one away from a hole, so
  * the ends stay put; a run from hole to hole gets a bump instead.
  */
-export function addBendPair(plan: Point[], i: number, at: Point): Point[] {
+export function addBendPair(plan: Point[], i: number, at: Point, cols: number): Point[] {
   const h = isH(plan, i);
   const across = h ? 1 : 0;
   const along = 1 - across;
@@ -140,7 +154,7 @@ export function addBendPair(plan: Point[], i: number, at: Point): Point[] {
   const origin = along === 0 ? X0 : GAPS[0].y;
   const mid = Math.min(hi, Math.max(lo, origin + Math.round((at[along] - origin) / LANE) * LANE));
   const c = a[across];
-  const next = snapAcross(h, c + LANE + 0.01);
+  const next = snapAcross(h, c + LANE + 0.01, cols);
   const pt = (t: number, v: number): Point => (h ? [t, v] : [v, t]);
   const last = plan.length - 2;
   if (plan.length === 2) {

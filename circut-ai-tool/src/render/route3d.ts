@@ -145,16 +145,19 @@ const inside = (p: Point, r: Rect) => p[0] > r.x1 && p[0] < r.x2 && p[1] > r.y1 
 const crosses = (a: Point, b: Point, r: Rect) => Math.max(a[0], b[0]) > r.x1 && Math.min(a[0], b[0]) < r.x2 && Math.max(a[1], b[1]) > r.y1 && Math.min(a[1], b[1]) < r.y2;
 const same = (a: Point, b: Point) => Math.abs(a[0] - b[0]) < 0.01 && Math.abs(a[1] - b[1]) < 0.01;
 
-/** Drop repeated points and points in the middle of a straight run; the two ends always stay. */
+/** Drop repeated points and points in the middle of a straight run, cascading (a removal can expose another); the two ends always stay. */
 export function simplify(plan: Point[]): Point[] {
   const out: Point[] = [];
   for (const p of plan) {
     if (out.length && same(out[out.length - 1], p)) continue;
-    if (out.length >= 2) {
+    // Popping a middle point can leave the new last three straight or doubled back, so keep checking.
+    while (out.length >= 2) {
       const [a, b] = [out[out.length - 2], out[out.length - 1]];
       const straight = (Math.abs(a[0] - b[0]) < 0.01 && Math.abs(b[0] - p[0]) < 0.01) || (Math.abs(a[1] - b[1]) < 0.01 && Math.abs(b[1] - p[1]) < 0.01);
-      if (straight) out.pop();
+      if (!straight) break;
+      out.pop();
     }
+    if (out.length && same(out[out.length - 1], p)) continue;
     out.push([p[0], p[1]]);
   }
   return out;
