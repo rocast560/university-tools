@@ -199,6 +199,14 @@ const SCENARIOS: Record<string, (page: CDP, id: string) => Promise<void>> = {
     if (!left) throw new Error('an editor was left behind');
     await page.until(`document.querySelector('[data-action=view3d]').textContent.trim() === '3D'`, 'the toolbar button to read 3D');
   },
+  async 'a failed mount leaves no shell'(page) {
+    await page.eval(`window.__e3dFailMount = true`);
+    await page.eval(`document.querySelector('[data-action=view3d]').click()`);
+    await page.until(`document.querySelector('.toast')`, 'the failure toast');
+    const left = await page.eval<boolean>(`!document.querySelector('.ws') && !document.body.classList.contains('ws-open') && !window.__e3d`);
+    if (!left) throw new Error('a shell was left behind');
+    await page.until(`document.querySelector('[data-action=view3d]').textContent.trim() === '3D'`, 'the toolbar button to read 3D');
+  },
 };
 
 void main();
