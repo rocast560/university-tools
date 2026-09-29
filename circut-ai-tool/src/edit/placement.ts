@@ -85,6 +85,12 @@ export function validatePlacement(doc: LayoutDoc, design: Design, ref: string, h
   };
   /** Strip -> the net of the first of this part's own legs placed in it. */
   const mine = new Map<string, string>();
+  // A two-lead part with both legs in one strip is shorted out whatever its
+  // nets say: unconnected legs, or a part whose pins share a net, still do
+  // nothing there (spec §4.4). A part not in the doc yet (fresh from the tray)
+  // counts as two-lead when it has two legs.
+  const inDoc = !!doc.pinHoles[ref] || doc.parts.some((p) => p.id === ref) || doc.packages.some((p) => p.id === ref);
+  const twoLead = doc.parts.find((p) => p.id === ref)?.kind === 'lead2' || (!inDoc && Object.keys(holes).length === 2);
   for (const [pin, h] of Object.entries(holes)) {
     let tone: Tone = 'ok';
     let label: string | undefined;
@@ -107,7 +113,10 @@ export function validatePlacement(doc: LayoutDoc, design: Design, ref: string, h
         label = there[0];
       }
       const prev = mine.get(k);
-      if (prev !== undefined && prev !== n) {
+      if (prev !== undefined && twoLead) {
+        tone = 'bad';
+        fail(`${ref}'s legs would short each other in one strip at ${name(h)}`);
+      } else if (prev !== undefined && prev !== n) {
         tone = 'bad';
         fail(`${ref}'s pins would short each other in one strip (${short(prev) || 'unconnected'} and ${short(n) || 'unconnected'})`);
       }

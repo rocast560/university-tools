@@ -109,6 +109,40 @@ describe('validatePlacement', () => {
     expect(v.reason).toContain('short each other');
   });
 
+  test('a two-lead part with both legs in one strip is refused even with no nets', () => {
+    const c = emptyTopColumn();
+    const [p1, p2] = part.pins;
+    const v = validatePlacement(doc, design, part.id, { [p1]: { col: c, row: 'a' }, [p2]: { col: c, row: 'd' } }, () => '');
+    expect(v.ok).toBe(false);
+    expect(v.reason).toContain('short each other');
+    expect(v.tints[1].tone).toBe('bad');
+  });
+
+  test('a two-lead part with both legs in one strip is refused when both pins share a net', () => {
+    const c = emptyTopColumn();
+    const [p1, p2] = part.pins;
+    const v = validatePlacement(doc, design, part.id, { [p1]: { col: c, row: 'a' }, [p2]: { col: c, row: 'd' } }, () => '/SAME');
+    expect(v.ok).toBe(false);
+    expect(v.reason).toContain('short each other');
+  });
+
+  test('a new two-legged part from the tray is refused in one strip too', () => {
+    const c = emptyTopColumn();
+    const v = validatePlacement(doc, design, 'R_NEW', { '1': { col: c, row: 'a' }, '2': { col: c, row: 'b' } }, () => '');
+    expect(v.ok).toBe(false);
+    expect(v.reason).toContain('short each other');
+  });
+
+  test('a part with more than two legs keeps the multi-pin rule: same net in one strip is fine, different nets are not', () => {
+    const c = emptyTopColumn();
+    const holes = { '1': { col: c, row: 'a' as Row }, '2': { col: c, row: 'b' as Row }, '3': { col: c, row: 'f' as Row } };
+    const same = validatePlacement(doc, design, 'Q_NEW', holes, (pin) => (pin === '3' ? '/B' : '/A'));
+    expect(same.reason ?? '').not.toContain('short each other');
+    const diff = validatePlacement(doc, design, 'Q_NEW', holes, (pin) => `/N${pin}`);
+    expect(diff.ok).toBe(false);
+    expect(diff.reason).toContain('short each other');
+  });
+
   test('a new part (no nets yet) joining a strip gets the amber tone, not a refusal', () => {
     const other = doc.parts.find((p) => p.id !== part.id)!;
     const theirs = doc.pinHoles[other.id][other.pins[0]];
