@@ -29,6 +29,10 @@ folder is scanned), drag parts, click switches, follow the guide, print it.
 Moved parts, options and colours are saved in `NAME.breadboard.json` next to
 the schematic. Saving the schematic in KiCad reloads the board.
 
+## 3D editor
+
+Press **3D** on a project to open the full-screen 3D editor. Click a part to select it, then drag it to new holes, turn it (R), flip a chip (Shift+R), edit its value or delete it from the card beside it, and press F to fly to it. Ctrl+Z undoes layout changes. See [docs/editor3d.md](docs/editor3d.md). Agents working on the code should read [AGENTS.md](AGENTS.md).
+
 ## Run in Docker
 
     docker compose up --build -d      # http://localhost:8765, restarts with Docker Desktop
