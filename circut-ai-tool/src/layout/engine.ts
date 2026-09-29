@@ -250,7 +250,9 @@ class Engine {
         break;
       }
       case 'dip':
-        this.packages.push({ id: ref, kind: 'dip', name: value, col0, pins: fp.pins });
+        // Pin 1 lives bottom-left (row f) when the placer puts a chip down;
+        // pinned by hand with pin 1 in row e, it has been turned end for end.
+        this.packages.push({ id: ref, kind: 'dip', name: value, col0, pins: fp.pins, ...(holes['1']?.row === 'e' ? { flipped: true as const } : {}) });
         addCols(fp.pins / 2);
         break;
       case 'sevenseg': {

@@ -138,3 +138,17 @@ export function rotateLead2(holes: Record<string, Hole>, pins: [string, string])
   if (!row) return null;
   return { [p1]: { ...a }, [p2]: { col: a.col - dr, row } };
 }
+
+/**
+ * Half a turn about the chip's centre: the notch goes to the other end and
+ * pin 1 to the opposite corner, each leg landing in the hole its opposite
+ * number used. Only ever used on a DIP across the channel, so rows e and f
+ * simply trade places.
+ */
+export function flipDip(holes: Record<string, Hole>): Record<string, Hole> {
+  const cols = Object.values(holes).map((h) => h.col);
+  const lo = Math.min(...cols);
+  const hi = Math.max(...cols);
+  const other = (row: Row): Row => (row === 'e' ? 'f' : row === 'f' ? 'e' : row);
+  return Object.fromEntries(Object.entries(holes).map(([pin, h]) => [pin, { col: lo + hi - h.col, row: other(h.row) }]));
+}

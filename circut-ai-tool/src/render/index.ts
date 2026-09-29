@@ -195,8 +195,11 @@ function drawPackage(pkg: Package, res: EngineResult, t: Theme, sim: SimState | 
     parts.push(text(cx, by1 - 4, `${pkg.id} ${pkg.name}`, { fill: t.text, 'font-size': 8 }));
   } else {
     parts.push(el('rect', { x: x1, y: y1, width: x2 - x1, height: y2 - y1, rx: 3, fill: t.chip, stroke: '#000' }));
-    parts.push(el('circle', { cx: x1, cy: ym, r: 5, fill: t.notch }));
-    parts.push(el('circle', { cx: x1 + 8, cy: y2 - 8, r: 1.8, fill: t.chipText }));
+    // The notch and the pin 1 dimple mark the pin 1 end, which is the right
+    // end once the chip has been turned round.
+    const flip = !!pkg.flipped;
+    parts.push(el('circle', { cx: flip ? x2 : x1, cy: ym, r: 5, fill: t.notch }));
+    parts.push(el('circle', { cx: flip ? x2 - 8 : x1 + 8, cy: flip ? y1 + 8 : y2 - 8, r: 1.8, fill: t.chipText }));
     parts.push(text((x1 + x2) / 2, ym + 3, pkg.name, { fill: t.chipText, 'font-size': 9, 'font-weight': 600 }));
     parts.push(text((x1 + x2) / 2, y1 - 4, pkg.id, { fill: t.text, 'font-size': 8 }));
   }

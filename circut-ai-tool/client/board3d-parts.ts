@@ -641,7 +641,7 @@ function dipSwitchTop(kit: Kit, pkg: Package, x0: number, x1: number, cz: number
 
 function chipMarking(kit: Kit, pkg: Package, doc: LayoutDoc, length: number): THREE.CanvasTexture {
   const { code, description } = chipLegend(pkg, doc);
-  return marking(kit, length, BODY_HALF_Z * 2, (g, w, h) => {
+  const tex = marking(kit, length, BODY_HALF_Z * 2, (g, w, h) => {
     // The moulded half-round notch at the pin 1 end and the pin 1 dimple.
     // Both are shape rather than print, so they read as a lighter relief.
     g.fillStyle = 'rgba(255,255,255,0.10)';
@@ -663,6 +663,13 @@ function chipMarking(kit: Kit, pkg: Package, doc: LayoutDoc, length: number): TH
       g.fillText(description.toUpperCase(), cx, h * 0.68);
     }
   });
+  // Printed for pin 1 at the left; a chip turned end for end carries the
+  // same print rotated with it, notch and dimple included.
+  if (pkg.flipped) {
+    tex.center.set(0.5, 0.5);
+    tex.rotation = Math.PI;
+  }
+  return tex;
 }
 
 function dipMarking(kit: Kit, ways: number, length: number): THREE.CanvasTexture {

@@ -110,6 +110,8 @@ export interface Package {
   common?: 'cathode' | 'anode';
   /** module: the strip row its header sits in (a or j); the body hangs outward from it. */
   row?: Row;
+  /** dip: turned end for end, notch and pin 1 at the right. Absent, never false, so unflipped docs are unchanged. */
+  flipped?: true;
 }
 
 export interface PlacedPart {
