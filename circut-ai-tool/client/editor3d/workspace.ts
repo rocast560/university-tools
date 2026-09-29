@@ -136,6 +136,7 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
         if (closed) return;
         closed = true;
         release();
+        editHistory.clear();
         onClosed();
       },
     };
