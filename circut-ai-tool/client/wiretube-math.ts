@@ -18,12 +18,14 @@ export type V3 = [number, number, number];
 export const BEND_R = 4;
 /** Bend radius where the wire comes up out of its hole: a little tighter. */
 export const STUB_R = 3;
-/** One ring per this much turn in a fillet. */
-export const ARC_STEP = Math.PI / 12;
+/** One ring per this much turn in a fillet (30 degrees: the sagitta on a bend of radius 4 is 0.14, and the tube is smooth-shaded, so a 90 degree bend is 4 rings). */
+export const ARC_STEP = Math.PI / 6;
 /** Bare wire showing above the board at each end, as a stripped jumper has. */
 export const STRIP = 7;
 /** Half the length of a hump over another wire: about two pitches in all. */
 export const HUMP = P;
+/** Turns below this are not filleted. */
+const SHALLOW = Math.PI / 4;
 
 const sub = (a: V3, b: V3): V3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const add = (a: V3, b: V3): V3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
@@ -107,6 +109,11 @@ export function fillet(pts: V3[], radius: (i: number) => number, step = ARC_STEP
       continue;
     }
     const theta = Math.acos(Math.max(-1, Math.min(1, cos)));
+    // A shallow turn (the ramps of a hump, about 34 degrees) stays a plain corner: the ring frames smooth it, and it saves a ring or two per hump.
+    if (Math.PI - theta < SHALLOW) {
+      out.push(p);
+      continue;
+    }
     const d = Math.min(radius(i) / Math.tan(theta / 2), dist(p, pts[i - 1]) / 2, dist(p, pts[i + 1]) / 2);
     const turn = Math.PI - theta;
     const centre = add(p, scale(norm(add(u, v)), d / Math.cos(theta / 2)));
@@ -124,6 +131,7 @@ export function fillet(pts: V3[], radius: (i: number) => number, step = ARC_STEP
 
 /** The part of a line between two distances along it. */
 export function trim(pts: V3[], from: number, to: number): V3[] {
+  if (to <= from) return [];
   const out: V3[] = [];
   let s = 0;
   for (let i = 1; i < pts.length; i++) {
@@ -159,21 +167,23 @@ function rotate(v: V3, k: V3, angle: number): V3 {
   return add(add(scale(v, c), scale(cross(k, v), s)), scale(k, dot(k, v) * (1 - c)));
 }
 
-/**
- * A tube of `sides` round a centre line: one ring per sample, frames carried
- * from ring to ring by parallel transport (the smallest rotation taking one
- * tangent to the next) so the tube never twists, and seeded pointing down on
- * the flattest run so the ring's seam lies against the board. `caps` closes
- * both ends.
- */
-export function tubeData(centre: V3[], radius: number, sides: number, caps = false): TubeData {
+const EMPTY = (): TubeData => ({ positions: new Float32Array(0), normals: new Float32Array(0), uvs: new Float32Array(0), indices: new Uint32Array(0) });
+
+/** Tangents and twist-free ring frames along a line, seeded pointing down on its flattest run. */
+interface Frames {
+  tangents: V3[];
+  normals: V3[];
+}
+
+function frames(centre: V3[]): Frames {
   const n = centre.length;
   const tangents: V3[] = centre.map((_, i) => norm(sub(centre[Math.min(n - 1, i + 1)], centre[Math.max(0, i - 1)])));
   let seed = 0;
   for (let i = 1; i < n; i++) if (Math.abs(tangents[i][1]) < Math.abs(tangents[seed][1])) seed = i;
   const normals: V3[] = new Array(n);
-  const down: V3 = [0, -1, 0];
-  normals[seed] = norm(sub(down, scale(tangents[seed], dot(down, tangents[seed]))));
+  // A wire that is vertical all the way has no flat run to lie against: any sideways reference will do.
+  const ref: V3 = Math.abs(tangents[seed][1]) > 0.999 ? [1, 0, 0] : [0, -1, 0];
+  normals[seed] = norm(sub(ref, scale(tangents[seed], dot(ref, tangents[seed]))));
   const carry = (from: number, to: number) => {
     const [t0, t1] = [tangents[from], tangents[to]];
     const axis = cross(t0, t1);
@@ -184,7 +194,13 @@ export function tubeData(centre: V3[], radius: number, sides: number, caps = fal
   };
   for (let i = seed + 1; i < n; i++) carry(i - 1, i);
   for (let i = seed - 1; i >= 0; i--) carry(i + 1, i);
+  return { tangents, normals };
+}
 
+/** The rings `from`..`to` (inclusive) of a line whose frames are already known. */
+function tubeRange(centre: V3[], f: Frames, from: number, to: number, radius: number, sides: number, caps: boolean): TubeData {
+  const n = to - from + 1;
+  if (n < 2) return EMPTY();
   const ring = sides + 1;
   const count = n * ring + (caps ? 2 * (ring + 1) : 0);
   const positions = new Float32Array(count * 3);
@@ -200,12 +216,14 @@ export function tubeData(centre: V3[], radius: number, sides: number, caps = fal
     return vi++;
   };
   for (let i = 0; i < n; i++) {
-    if (i) s += dist(centre[i - 1], centre[i]);
-    const b = cross(tangents[i], normals[i]);
+    const c = centre[from + i];
+    if (i) s += dist(centre[from + i - 1], c);
+    const nrm = f.normals[from + i];
+    const b = cross(f.tangents[from + i], nrm);
     for (let j = 0; j <= sides; j++) {
       const a = (2 * Math.PI * j) / sides;
-      const dir = add(scale(normals[i], Math.cos(a)), scale(b, Math.sin(a)));
-      put(add(centre[i], scale(dir, radius)), dir, s / 20, j / sides);
+      const dir = add(scale(nrm, Math.cos(a)), scale(b, Math.sin(a)));
+      put(add(c, scale(dir, radius)), dir, s / 20, j / sides);
     }
   }
   for (let i = 0; i + 1 < n; i++) {
@@ -218,14 +236,58 @@ export function tubeData(centre: V3[], radius: number, sides: number, caps = fal
   }
   if (caps) {
     for (const [i, facing] of [[0, -1], [n - 1, 1]] as const) {
-      const out = scale(tangents[i], facing);
-      const mid = put(centre[i], out, 0, 0);
+      const out = scale(f.tangents[from + i], facing);
+      const mid = put(centre[from + i], out, 0, 0);
       const first = vi;
       for (let j = 0; j <= sides; j++) put(Array.from(positions.subarray((i * ring + j) * 3, (i * ring + j) * 3 + 3)) as V3, out, 0, 0);
       for (let j = 0; j < sides; j++) indices.push(...(facing > 0 ? [mid, first + j, first + j + 1] : [mid, first + j + 1, first + j]));
     }
   }
   return { positions, normals: norms, uvs, indices: Uint32Array.from(indices) };
+}
+
+/**
+ * A tube of `sides` round a centre line: one ring per sample, frames carried
+ * from ring to ring by parallel transport (the smallest rotation taking one
+ * tangent to the next) so the tube never twists, and seeded pointing down on
+ * the flattest run so the ring's seam lies against the board. `caps` closes
+ * both ends. A line of fewer than two distinct points gives empty buffers.
+ */
+export function tubeData(centre: V3[], radius: number, sides: number, caps = false): TubeData {
+  const line = dropRepeats(centre);
+  if (line.length < 2) return EMPTY();
+  return tubeRange(line, frames(line), 0, line.length - 1, radius, sides, caps);
+}
+
+/** Insert a point at each given distance along a line (no repeats), returning the new line and the index of each cut. */
+function splitAt(pts: V3[], cuts: number[]): { line: V3[]; index: number[] } {
+  const line: V3[] = [pts[0]];
+  const index: number[] = new Array(cuts.length);
+  const order = cuts.map((c, i) => [c, i] as const).sort((p, q) => p[0] - q[0]);
+  let k = 0;
+  let s = 0;
+  const mark = (upTo: number, at: number) => {
+    while (k < order.length && order[k][0] <= upTo + 1e-9) {
+      const [d, i] = order[k++];
+      if (d <= 1e-9) index[i] = 0;
+      else if (d >= at - 1e-9) index[i] = line.length - 1;
+    }
+  };
+  mark(0, 0);
+  for (let i = 1; i < pts.length; i++) {
+    const [a, b] = [pts[i - 1], pts[i]];
+    const l = dist(a, b);
+    while (k < order.length && order[k][0] > s + 1e-9 && order[k][0] < s + l - 1e-9) {
+      const [d, idx] = order[k++];
+      line.push(add(a, scale(sub(b, a), (d - s) / l)));
+      index[idx] = line.length - 1;
+    }
+    line.push(b);
+    s += l;
+    while (k < order.length && order[k][0] <= s + 1e-9) index[order[k++][1]] = line.length - 1;
+  }
+  while (k < order.length) index[order[k++][1]] = line.length - 1;
+  return { line, index };
 }
 
 /** Two tubes as one buffer set, so both bare ends of a wire are one draw. */
@@ -265,8 +327,20 @@ export function wireShape(plan: Point[], lifts: Lift[], o: { base: number; endY:
   const line = fillet(raw, (i) => (i === 1 || i === raw.length - 2 ? STUB_R : BEND_R));
   const length = pathLength(line);
   const bare = o.top - o.endY + STRIP;
-  const jacket = tubeData(trim(line, bare, length - bare), o.radius, o.sides, true);
+  // One set of frames for the whole wire, cut into pieces afterwards, so the
+  // jacket and the tin share seams and a short vertical piece cannot lose its frame.
+  const cuts = [bare, bare + 1, length - bare - 1, length - bare];
+  const usable = length > 2 * bare + 2;
+  const { line: cut, index } = splitAt(line, usable ? cuts : []);
+  const f = frames(cut);
+  const last = cut.length - 1;
+  const piece = (from: number, to: number, r: number, sides: number, caps: boolean) => tubeRange(cut, f, from, to, r, sides, caps);
+  if (!usable) {
+    // Too short for a jacket: all bare tin.
+    return { jacket: EMPTY(), tin: piece(0, last, o.core, o.coreSides, false), length, line };
+  }
+  const jacket = piece(index[0], index[3], o.radius, o.sides, true);
   // A little under the jacket at each end, so no gap shows between the two.
-  const tin = mergeTubes(tubeData(trim(line, 0, bare + 1), o.core, o.coreSides), tubeData(trim(line, length - bare - 1, length), o.core, o.coreSides));
+  const tin = mergeTubes(piece(0, index[1], o.core, o.coreSides, false), piece(index[2], last, o.core, o.coreSides, false));
   return { jacket, tin, length, line };
 }

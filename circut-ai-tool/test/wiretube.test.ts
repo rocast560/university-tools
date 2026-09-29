@@ -127,3 +127,47 @@ describe('wireShape', () => {
     expect(lowest).toBeCloseTo(OPTS.endY, 4);
   });
 });
+
+describe('robustness', () => {
+  const ringsOk = (t: TubeData, radius: number, centres: V3[], sides: number) => {
+    const ring = sides + 1;
+    for (let v = 0; v < t.positions.length / 3; v++) {
+      const n = Math.hypot(t.normals[v * 3], t.normals[v * 3 + 1], t.normals[v * 3 + 2]);
+      expect(n).toBeCloseTo(1, 4);
+    }
+    // Every vertex is a radius away from some centre.
+    for (let i = 0; i < centres.length && (i + 1) * ring <= t.positions.length / 3; i++) {
+      const v = i * ring * 3;
+      expect(dist([t.positions[v], t.positions[v + 1], t.positions[v + 2]], centres[i])).toBeCloseTo(radius, 4);
+    }
+  };
+
+  test('a lone vertical tube keeps a real frame', () => {
+    const c: V3[] = [[0, -4, 0], [0, 20, 0]];
+    ringsOk(tubeData(c, 2, 6), 2, c, 6);
+  });
+
+  for (const base of [20, 40]) {
+    test(`with the base raised to ${base} the tinned ends still have unit normals and a radius`, () => {
+      const w = wireShape(Z, [], { ...OPTS, base });
+      expect(vertexCount(w.tin)).toBeGreaterThan(0);
+      for (let v = 0; v < vertexCount(w.tin); v++) {
+        expect(Math.hypot(w.tin.normals[v * 3], w.tin.normals[v * 3 + 1], w.tin.normals[v * 3 + 2])).toBeCloseTo(1, 4);
+      }
+      // The first ring lies 2.1 from the line's first point.
+      const first: V3 = w.line[0];
+      const v = 0;
+      expect(dist([w.tin.positions[v], w.tin.positions[v + 1], w.tin.positions[v + 2]], first)).toBeCloseTo(OPTS.core, 4);
+    });
+  }
+
+  test('a half-unit plan and empty ranges never throw', () => {
+    const w = wireShape([[40, 84], [40, 84.5]], [], OPTS);
+    expect(w.length).toBeGreaterThan(0);
+    expect(w.jacket.indices.length % 3).toBe(0);
+    expect(trim([[0, 0, 0], [10, 0, 0]], 5, 5)).toEqual([]);
+    expect(trim([[0, 0, 0], [10, 0, 0]], 6, 5)).toEqual([]);
+    expect(tubeData([[0, 0, 0]], 1, 6).positions.length).toBe(0);
+    expect(tubeData([[0, 0, 0], [0, 0, 0]], 1, 6).indices.length).toBe(0);
+  });
+});
