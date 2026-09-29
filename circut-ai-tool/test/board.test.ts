@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { Board, Occupancy, halfOf, hole, holeKey, holeName, isRail, parseHole, stripOf } from '../src/layout/board.ts';
-import { emptySidecar, normalizeSidecar } from '../src/layout/types.ts';
+import { emptySidecar, normalizeSidecar, normalizeWirePath } from '../src/layout/types.ts';
 
 describe('holes and strips', () => {
   test('naming', () => {
@@ -48,5 +48,22 @@ describe('sidecar', () => {
     expect(s.pinned).toEqual({ R1: { '1': { col: 3, row: 'a' } } });
     expect(s.colors['/A']).toBe('#123456');
     expect(s.placed).toEqual({});
+  });
+
+  test('wire shapes: an old sidecar has none, good ones are kept, malformed ones dropped', () => {
+    expect(normalizeSidecar({ pinned: {} }).wirePaths).toEqual({});
+    expect(emptySidecar().wirePaths).toEqual({});
+    const good = { points: [{ col: 12.5, gap: 'c|d', lane: 0 }, { col: 20, gap: 'e|f', lane: -1 }] };
+    const s = normalizeSidecar({
+      wirePaths: {
+        '/A|a12|e20': good,
+        '/B|a1|a2': { points: [{ col: 'x', gap: 'c|d', lane: 0 }] },
+        '/C|a1|a3': { points: [{ col: 3, gap: 'c|d', lane: 0.5 }] },
+        '/D|a1|a4': 'nope',
+      },
+    });
+    expect(s.wirePaths).toEqual({ '/A|a12|e20': good });
+    expect(normalizeWirePath({ points: [] })).toEqual({ points: [] });
+    expect(normalizeWirePath({ points: [{ col: 3, gap: 'c|d', lane: 9 }] })).toBeNull();
   });
 });

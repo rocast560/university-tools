@@ -34,16 +34,55 @@ export interface Sidecar {
    * raises that LED's forward voltage and drops its current.
    */
   ledColors: Record<string, LedColour>;
+  /**
+   * Hand-shaped jumpers. Key: `${net}|${holeA}|${holeB}` with the two holes in
+   * MCP naming (`e12`, `T+3`) sorted as strings; see wireKey in
+   * src/render/route3d.ts. Absent from sidecars written before phase 2.
+   */
+  wirePaths: Record<string, WirePath>;
+}
+
+/** One bend of a hand-shaped jumper, in grid units rather than SVG units. */
+export interface WirePoint {
+  /** Column position in pitches; 12.5 sits halfway between columns 12 and 13. */
+  col: number;
+  /** The corridor it lies in, named by the rows either side ('c|d', 'e|f', 'T-|a'), or 'top' / 'bottom' outside the rails. */
+  gap: string;
+  /** Signed sub-lane inside that corridor, one per half pitch; 0 is its centre line. */
+  lane: number;
+}
+
+/** The bends between a jumper's two end holes, listed from the hole whose name sorts first. */
+export interface WirePath {
+  points: WirePoint[];
 }
 
 export const defaultOptions = (): Options => ({ board: 'auto', railSplit: null, dipSwitchPositions: 0, packageOrder: [], substitutions: {}, wireStyle: 'arc' });
 
-export const emptySidecar = (): Sidecar => ({ version: 1, options: defaultOptions(), pinned: {}, colors: {}, placed: {}, ledColors: {} });
+export const emptySidecar = (): Sidecar => ({ version: 1, options: defaultOptions(), pinned: {}, colors: {}, placed: {}, ledColors: {}, wirePaths: {} });
 
 const ROWS = new Set(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'T+', 'T-', 'B+', 'B-']);
 
 export function isHole(x: unknown): x is Hole {
   return !!x && typeof x === 'object' && Number.isInteger((x as Hole).col) && (x as Hole).col >= 1 && ROWS.has((x as Hole).row);
+}
+
+/**
+ * A saved wire shape as it came off disk or the wire, or null when it is not
+ * one. Only the shape is checked here; whether its corridors exist on the
+ * board and whether it clears the chips is the router's business.
+ */
+export function normalizeWirePath(x: unknown): WirePath | null {
+  const pts = (x as { points?: unknown } | null)?.points;
+  if (!Array.isArray(pts) || pts.length > 64) return null;
+  const out: WirePoint[] = [];
+  for (const p of pts) {
+    if (!p || typeof p !== 'object') return null;
+    const { col, gap, lane } = p as WirePoint;
+    if (typeof col !== 'number' || !Number.isFinite(col) || typeof gap !== 'string' || !Number.isInteger(lane) || Math.abs(lane) > 4) return null;
+    out.push({ col, gap, lane });
+  }
+  return { points: out };
 }
 
 /** Accept whatever is on disk and return a well-formed sidecar. */
@@ -77,6 +116,12 @@ export function normalizeSidecar(x: unknown): Sidecar {
   }
   if (o.ledColors && typeof o.ledColors === 'object') {
     for (const [ref, c] of Object.entries(o.ledColors)) if (typeof c === 'string' && (LED_COLOURS as readonly string[]).includes(c)) s.ledColors[ref] = c as LedColour;
+  }
+  if (o.wirePaths && typeof o.wirePaths === 'object') {
+    for (const [key, path] of Object.entries(o.wirePaths)) {
+      const clean = normalizeWirePath(path);
+      if (clean) s.wirePaths[key] = clean;
+    }
   }
   return s;
 }

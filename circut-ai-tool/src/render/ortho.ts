@@ -33,7 +33,7 @@ const SUB_H = [0, -5, 5, -10, 10];
 const SUB_V = [0, -4, 4, -8, 8];
 
 /** Where the bodies are, so no run is drawn through a chip. */
-function packageRects(packages: Package[]): Rect[] {
+export function packageRects(packages: Package[]): Rect[] {
   return packages.map((pkg) => {
     if (pkg.kind === 'module') {
       const r = moduleRect(pkg);
