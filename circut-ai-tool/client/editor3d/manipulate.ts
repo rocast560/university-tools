@@ -155,7 +155,9 @@ export function attachManipulation(ws: Workspace): () => void {
         // The engine has the last word on anything the pure rules cannot see.
         // Built once per change of snapped holes, not once per pointer move.
         if (drag.verdict.ok) {
-          const doc = buildLayoutDoc(p.design, { ...p.sidecar, pinned: { ...p.sidecar.pinned, [drag.ref]: holes } });
+          // Curved wires for this check: only the engine's warnings are read,
+          // and routing square wires on every snapped move would stall a big board.
+          const doc = buildLayoutDoc(p.design, { ...p.sidecar, options: { ...p.sidecar.options, wireStyle: 'arc' }, pinned: { ...p.sidecar.pinned, [drag.ref]: holes } });
           const dropped = doc.warnings.find((w) => w.startsWith(`pinned placement for ${drag!.ref} dropped`));
           if (dropped) drag.verdict = { ok: false, reason: dropped.replace(`pinned placement for ${drag.ref} dropped: `, ''), tints: drag.verdict.tints.map((t) => ({ ...t, tone: 'bad' as const })) };
         }

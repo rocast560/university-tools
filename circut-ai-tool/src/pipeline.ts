@@ -5,6 +5,7 @@ import { buildPartsList, buildPinouts, buildSteps, type Pinout, type Step } from
 import { layout, type EngineResult } from './layout/engine.ts';
 import type { Sidecar } from './layout/types.ts';
 import type { Design } from './netlist.ts';
+import { routeWires, type WireRoute } from './render/route3d.ts';
 import { buildSimModel, truthTable, type SimModel, type TruthTable } from './sim/index.ts';
 
 export interface LayoutDoc extends EngineResult {
@@ -13,6 +14,12 @@ export interface LayoutDoc extends EngineResult {
   partsList: string[];
   checks: Check[];
   sim: { model: SimModel; truthTable: TruthTable | null; note: string | null };
+  /**
+   * Square-cornered jumper routes, one per wire, present only when the
+   * sidecar asks for square wires. The flat board and the 3D board both draw
+   * these, so the two views always agree.
+   */
+  routes?: WireRoute[];
 }
 
 export function buildLayoutDoc(design: Design, sidecar: Sidecar): LayoutDoc {
@@ -26,7 +33,12 @@ export function buildLayoutDoc(design: Design, sidecar: Sidecar): LayoutDoc {
   else if (model.inputs.length > 6) note = `${model.inputs.length} inputs is too many for a truth table (limit 6); use simulate with explicit levels`;
   else table = truthTable(model);
   if (!note && model.notSimulated.length) note = `not simulated: ${model.notSimulated.join(', ')}`;
-  return { ...res, steps: buildSteps(design, res, model), pinouts: buildPinouts(design, res), partsList: buildPartsList(res), checks, sim: { model, truthTable: table, note } };
+  const doc: LayoutDoc = { ...res, steps: buildSteps(design, res, model), pinouts: buildPinouts(design, res), partsList: buildPartsList(res), checks, sim: { model, truthTable: table, note } };
+  if (sidecar.options.wireStyle !== 'orthogonal') return doc;
+  // Routed here rather than at draw time so the stale-shape warnings reach
+  // doc.warnings and every view draws the one set of paths.
+  const routed = routeWires(res, sidecar.wirePaths ?? {});
+  return { ...doc, routes: routed.routes, warnings: [...res.warnings, ...routed.warnings] };
 }
 
 export function summarize(doc: LayoutDoc): string {
