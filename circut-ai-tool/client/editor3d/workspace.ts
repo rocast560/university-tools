@@ -14,6 +14,7 @@ import { flowOrder } from '../floworder.ts';
 import { esc } from '../main.ts';
 import { simState } from '../simstate.ts';
 import { store } from '../state.ts';
+import { attachManipulation } from './manipulate.ts';
 
 export interface Workspace {
   board: Board3D;
@@ -87,10 +88,12 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
   let offStore = () => {};
   let offSim = () => {};
   let offKey = () => {};
+  let detachManip = () => {};
   const release = () => {
     offStore();
     offSim();
     offKey();
+    detachManip();
     disposeBoard();
     dismantle();
     delete (window as { __e3d?: unknown }).__e3d;
@@ -132,6 +135,8 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
         onClosed();
       },
     };
+
+    detachManip = attachManipulation(ws);
 
     const push = () => {
       const q = store.get().project;
@@ -228,6 +233,7 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
           const r = canvasHost.getBoundingClientRect();
           return a ? { x: r.left + a.x, y: r.top + a.y + 6 } : null;
         },
+        pickAt: (x: number, y: number) => board.pick({ clientX: x, clientY: y }),
         parts: () => store.get().project?.doc.parts.map((x) => x.id) ?? [],
         chips: () => store.get().project?.doc.packages.filter((x) => x.kind === 'dip').map((x) => x.id) ?? [],
       };

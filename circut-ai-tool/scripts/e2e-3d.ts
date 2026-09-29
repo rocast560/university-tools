@@ -207,6 +207,25 @@ const SCENARIOS: Record<string, (page: CDP, id: string) => Promise<void>> = {
     if (!left) throw new Error('a shell was left behind');
     await page.until(`document.querySelector('[data-action=view3d]').textContent.trim() === '3D'`, 'the toolbar button to read 3D');
   },
+  async 'clicking a part selects it, empty board clears it'(page) {
+    await open3d(page);
+    // Picks are depth-ordered, so a jumper can sit in front of a part's top centre: take a part whose point picks as itself.
+    const target = await page.eval<{ ref: string; x: number; y: number } | null>(
+      `(() => { for (const ref of __e3d.parts()) { const at = __e3d.screenOf(ref); const hit = at && __e3d.pickAt(at.x, at.y); if (hit && hit.kind === 'part' && hit.ref === ref) return { ref, x: at.x, y: at.y }; } return null; })()`,
+    );
+    if (!target) throw new Error('no part could be picked at its screen point');
+    await page.mouse('mousePressed', target.x, target.y);
+    await page.mouse('mouseReleased', target.x, target.y);
+    await page.until(`__e3d.selected() === ${JSON.stringify(target.ref)}`, `${target.ref} to be selected`);
+    // Empty canvas: nothing picked there, and the canvas (not the legend or toolbar) is what sits under the point.
+    const empty = await page.eval<{ x: number; y: number } | null>(
+      `(() => { for (let y = 120; y < 880; y += 40) for (let x = 1380; x > 700; x -= 40) { if (__e3d.pickAt(x, y) === null && document.elementFromPoint(x, y)?.tagName === 'CANVAS') return { x, y }; } return null; })()`,
+    );
+    if (!empty) throw new Error('no empty canvas point found');
+    await page.mouse('mousePressed', empty.x, empty.y);
+    await page.mouse('mouseReleased', empty.x, empty.y);
+    await page.until(`__e3d.selected() === null`, 'the selection to clear');
+  },
 };
 
 void main();
