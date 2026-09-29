@@ -329,16 +329,12 @@ export function renderPanels(panels: HTMLElement, toolbar: HTMLElement, legend: 
     if (action === 'step') analog.stepOnce(p);
     if (action === 'reset-sim') analog.reset(p);
     if (action === 'view3d') {
-      const card = document.querySelector<HTMLElement>('.board-card')!;
-      // Repaint the toolbar so the button flips to Exit, but only once the
-      // view is really up: opening it waits on three being downloaded, which
-      // is far longer than a zero timeout.
       const repaint = () => renderPanels(panels, toolbar, legend, store.get());
       if (is3dOpen()) {
         close3d();
         repaint();
       } else {
-        void open3d(card, p.doc).then(repaint);
+        void open3d().then(repaint);
       }
     }
   };

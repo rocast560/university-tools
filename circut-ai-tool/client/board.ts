@@ -53,7 +53,7 @@ export function mountBoard(container: HTMLElement): () => void {
     // The boolean simulator still supplies switch and segment state; the
     // analog one supplies how brightly each LED is actually running.
     const sim = { ...simState(p.doc.sim.model, p.switches), ledBrightness: live?.brightness, ledOverdrive: live?.overdrive };
-    const highlight: Highlight | null = p.highlight ?? (p.activeStep !== null ? stepHighlight(p, p.activeStep) : null);
+    const highlight: Highlight | null = p.highlight ?? (p.activeStep !== null ? stepHighlight(p, p.activeStep) : p.selectedRef ? { ref: p.selectedRef } : null);
     // Deliberately excludes the analog frame: brightness is patched onto the
     // nodes below, never re-serialised. Re-rendering this string at 60 Hz is
     // the one thing that would make the whole run loop unaffordable.

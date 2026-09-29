@@ -38,7 +38,7 @@ export async function loadProject(id: string) {
     const doc = buildLayoutDoc(design, side);
     // A different board means a different circuit: drop the old solver.
     analog.invalidate();
-    store.set({ loading: false, project: { id, name: summary.name, path: summary.path, design, sidecar: side, doc, switches: {}, highlight: null, activeStep: null, done: loadDone(id), panel: 'guide', running: false } });
+    store.set({ loading: false, project: { id, name: summary.name, path: summary.path, design, sidecar: side, doc, switches: {}, highlight: null, activeStep: null, selectedRef: null, done: loadDone(id), panel: 'guide', running: false } });
   } catch (e) {
     store.set({ loading: false, project: null });
     toast(e instanceof ApiError && e.status === 404 ? 'That project is not open on the server. Open it from the home page.' : (e as Error).message);

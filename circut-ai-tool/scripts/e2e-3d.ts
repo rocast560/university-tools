@@ -179,6 +179,15 @@ const SCENARIOS: Record<string, (page: CDP, id: string) => Promise<void>> = {
     const r = await page.eval<{ w: number; h: number }>(`(() => { const b = document.querySelector('.ws').getBoundingClientRect(); return { w: b.width, h: b.height }; })()`);
     if (r.w < 1300 || r.h < 800) throw new Error(`workspace is ${r.w}x${r.h}, not full screen`);
   },
+  async 'Esc and Back both close it'(page) {
+    await open3d(page);
+    await page.key('Escape', 'Escape');
+    await page.until(`!document.querySelector('.ws')`, 'Esc to close');
+    await open3d(page);
+    await page.eval(`history.back()`);
+    await page.until(`!document.querySelector('.ws')`, 'Back to close');
+    await page.until(`document.querySelector('[data-action=view3d]').textContent.trim() === '3D'`, 'the toolbar button to read 3D again');
+  },
 };
 
 void main();
