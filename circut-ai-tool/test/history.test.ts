@@ -95,4 +95,34 @@ describe('History', () => {
     await p;
     expect(h.canUndo).toBe(false);
   });
+
+  test('a failed undo drops the command, and the next undo reaches the earlier one', async () => {
+    const h = new History();
+    const c = counter();
+    await h.execute(c.cmd(1));
+    // Stands in for "move R3" after R3 was deleted: its undo can never succeed.
+    let tries = 0;
+    await h.execute({ label: 'move R3', run: async () => true, undo: async () => (tries++, false) });
+    let changes = 0;
+    h.onChange(() => changes++);
+    expect(await h.undo()).toBe(false);
+    expect(tries).toBe(1);
+    expect(changes).toBe(1);
+    expect(h.canRedo).toBe(false);
+    expect(await h.undo()).toBe(true);
+    expect(c.value).toBe(0);
+    expect(tries).toBe(1);
+    expect(h.canUndo).toBe(false);
+  });
+
+  test('a failed redo drops the command too', async () => {
+    const h = new History();
+    let fail = false;
+    await h.execute({ label: 'x', run: async () => !fail, undo: async () => true });
+    await h.undo();
+    fail = true;
+    expect(await h.redo()).toBe(false);
+    expect(h.canRedo).toBe(false);
+    expect(h.canUndo).toBe(false);
+  });
 });

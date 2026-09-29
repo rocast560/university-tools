@@ -273,6 +273,17 @@ const SCENARIOS: Record<string, (page: CDP, id: string) => Promise<void>> = {
     }
     throw new Error('no drag distance moved any part');
   },
+  async 'leaving 3D releases the selection on the flat board'(page) {
+    await open3d(page);
+    const ref = (await page.eval<string[]>(`__e3d.parts()`))[0];
+    await page.eval(`__e3d.select(${JSON.stringify(ref)})`);
+    // The flat board underneath draws the 3D selection as a hard highlight: everything else dimmed.
+    const dimmed = `document.querySelectorAll('#board .part[opacity], #board .pkg[opacity]').length`;
+    await page.until(`${dimmed} > 0`, 'the flat board to dim around the selection');
+    await page.eval(`history.back()`);
+    await page.until(`!document.querySelector('.ws')`, 'Back to close');
+    await page.until(`${dimmed} === 0`, 'the flat board to un-dim after leaving 3D', 5000);
+  },
   async 'a drag that starts on an unselected part orbits instead'(page) {
     await open3d(page);
     const [first] = await pickable(page);
@@ -300,12 +311,64 @@ const SCENARIOS: Record<string, (page: CDP, id: string) => Promise<void>> = {
     await page.until(`__e3d.tintCount() > 0`, 'strip tints while dragging', 3000);
     // A switch flick or a reload lands while the pointer is down.
     await page.eval(`document.querySelector('[data-ws=next]').click()`);
+    await page.until(`__e3d.tintCount() > 0`, 'the drag to survive a store update that keeps the doc', 3000);
     await page.key('Escape', 'Escape');
     await page.mouse('mouseReleased', x + 40, y);
     await sleep(300);
     const tinted = await page.eval<number>(`__e3d.tintCount()`);
     if (tinted !== 0) throw new Error(`${tinted} strip tints left behind`);
     if (!(await page.eval<boolean>(`!!document.querySelector('.ws')`))) throw new Error('Esc mid-drag closed the editor');
+  },
+  async 'a doc change mid-drag ends the drag and clears the tints'(page) {
+    await open3d(page);
+    const parts = await pickable(page);
+    if (parts.length < 2) throw new Error('need two pickable parts');
+    const [{ ref, x, y }, other] = parts;
+    const before = await page.eval<string>(`JSON.stringify(__e3d.holes(${JSON.stringify(ref)}))`);
+    await page.mouse('mousePressed', x, y);
+    await page.mouse('mouseReleased', x, y);
+    await page.until(`__e3d.selected() === ${JSON.stringify(ref)}`, `${ref} to be selected`);
+    await page.mouse('mousePressed', x, y);
+    await page.mouse('mouseMoved', x + 40, y);
+    await page.until(`__e3d.tintCount() > 0`, 'strip tints while dragging', 3000);
+    // Another part re-pinned where it stands: a new doc arrives, nothing else changes.
+    const ok = await page.eval<boolean>(`__e3d.move(${JSON.stringify(other.ref)}, __e3d.holes(${JSON.stringify(other.ref)}))`);
+    if (!ok) throw new Error(`moving ${other.ref} in place was refused`);
+    await page.until(`__e3d.tintCount() === 0`, 'the tints to clear when the doc changed', 3000);
+    // The drag is over: more pointer travel and the release move nothing.
+    await page.mouse('mouseMoved', x + 120, y);
+    await page.mouse('mouseReleased', x + 120, y);
+    await sleep(600);
+    const tinted = await page.eval<number>(`__e3d.tintCount()`);
+    if (tinted !== 0) throw new Error(`${tinted} strip tints came back after the drag ended`);
+    if ((await page.eval<string>(`JSON.stringify(__e3d.holes(${JSON.stringify(ref)}))`)) !== before) throw new Error(`${ref} moved after its drag was cancelled`);
+  },
+  async 'the wire style button rebuilds the board in place'(page) {
+    await open3d(page);
+    const start = await page.eval<string>(`__e3d.wireStyle()`);
+    const flipped = start === 'orthogonal' ? 'arc' : 'orthogonal';
+    await page.eval(`document.querySelector('[data-ws=wires]').click()`);
+    await page.until(`__e3d.wireStyle() === ${JSON.stringify(flipped)} && document.querySelector('[data-ws=wires]').textContent === ${JSON.stringify(flipped === 'orthogonal' ? 'Wires: square' : 'Wires: curved')}`, 'the wire style to switch');
+    if (!(await page.eval<boolean>(`!!document.querySelector('.ws') && __e3d.ready`))) throw new Error('the workspace did not survive the rebuild');
+    // Put it back so later scenarios see the default.
+    await page.eval(`document.querySelector('[data-ws=wires]').click()`);
+    await page.until(`__e3d.wireStyle() === ${JSON.stringify(start)}`, 'the wire style to switch back');
+  },
+  async 'an MCP-style REST edit reaches the open page quietly'(page, id) {
+    await open3d(page);
+    const ref = (await page.eval<string[]>(`__e3d.lead2()`))[0];
+    await page.eval(`__e3d.select(${JSON.stringify(ref)})`);
+    const value = '33k';
+    // Straight at the server, as the MCP tools and other clients do: the page makes no call of its own.
+    const res = await fetch(`${base}/api/projects/${id}/edit/value`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ref, value }) });
+    if (!res.ok) throw new Error(`edit/value answered ${res.status}: ${await res.text()}`);
+    await page.until(`__e3d.value(${JSON.stringify(ref)}) === ${JSON.stringify(value)}`, 'the page to pick up the edit', 15000);
+    const quiet = `!(document.getElementById('toast')?.textContent ?? '').includes('changed on disk')`;
+    if (!(await page.eval<boolean>(quiet))) throw new Error('an edit was announced as "changed on disk"');
+    // The watcher's view of the same write must not follow up with a toast either.
+    await sleep(2000);
+    if (!(await page.eval<boolean>(quiet))) throw new Error('the watcher echoed the edit as "changed on disk"');
+    if ((await page.eval<string | null>(`__e3d.selected()`)) !== ref) throw new Error('the reload dropped the selection');
   },
   async 'R turns a resistor and Ctrl+Z puts it back'(page) {
     await open3d(page);
@@ -349,7 +412,7 @@ const SCENARIOS: Record<string, (page: CDP, id: string) => Promise<void>> = {
     await page.eval(`__e3d.select(${JSON.stringify(ref)})`);
     await page.until(`document.querySelector('.ws-card:not([hidden])')?.dataset.ref === ${JSON.stringify(ref)}`, 'the card');
     await page.eval(`(() => { const i = document.querySelector('.ws-card input[name=value]'); i.value = '4.7k'; i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); })()`);
-    await page.until(`document.querySelector('.ws-card input[name=value]')?.value === '4.7k' && !document.querySelector('.ws-card.is-busy')`, 'the new value after reload', 20000);
+    await page.until(`__e3d.value(${JSON.stringify(ref)}) === '4.7k' && document.querySelector('.ws-card input[name=value]')?.value === '4.7k' && !document.querySelector('.ws-card.is-busy')`, 'the new value in the reloaded design', 20000);
     // The server must not echo our own edit back as a "changed on disk" reload.
     await new Promise((r) => setTimeout(r, 3000));
     if (await page.eval<boolean>(`(document.getElementById('toast')?.textContent ?? '').includes('changed on disk')`)) throw new Error('our own edit came back as "changed on disk"');

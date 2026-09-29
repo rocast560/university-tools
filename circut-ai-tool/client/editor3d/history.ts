@@ -65,7 +65,15 @@ export class History {
       if (g !== this.gen) return false;
       const cmd = this.undos[this.undos.length - 1];
       if (!cmd) return false;
-      if (!(await cmd.undo())) return false;
+      if (!(await cmd.undo())) {
+        // It failed (the command already said why): drop it, or it sits on
+        // top failing forever and blocks everything beneath it.
+        if (g === this.gen && this.undos[this.undos.length - 1] === cmd) {
+          this.undos.pop();
+          this.changed();
+        }
+        return false;
+      }
       if (g !== this.gen) return true;
       this.undos.pop();
       this.redos.push(cmd);
@@ -81,7 +89,14 @@ export class History {
       if (g !== this.gen) return false;
       const cmd = this.redos[this.redos.length - 1];
       if (!cmd) return false;
-      if (!(await cmd.run())) return false;
+      if (!(await cmd.run())) {
+        // As for undo: a redo that cannot happen must not block the rest.
+        if (g === this.gen && this.redos[this.redos.length - 1] === cmd) {
+          this.redos.pop();
+          this.changed();
+        }
+        return false;
+      }
       if (g !== this.gen) return true;
       this.redos.pop();
       this.undos.push(cmd);

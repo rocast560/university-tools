@@ -32,15 +32,15 @@ Guidance for AI coding agents working in this directory. People should start wit
 - In the scene, every part/package group has `userData.ref` and is on raycast layer 1. Jackets are on layer 2, switch ways on layer 3.
 - Pick is depth-ordered: a switch first, then whichever of the part or jumper is nearer.
 - The editor decides drag vs orbit on `pointerdown` (capture phase) and calls `board.setOrbit(false)` synchronously. Only an already-selected part can start a drag.
-- The workspace has a single `release()` teardown, used by both `close()` and a failed setup. Add new listeners and subscriptions to it.
-- `History` is serialised (one operation at a time) and generation-guarded: `clear()` bumps a counter so queued or in-flight operations cannot touch the stacks afterwards. Commands hold model data, not scene objects.
+- The workspace has a single `release()` teardown, used by both `close()` and a failed setup. Add new listeners and subscriptions to it. It also clears `selectedRef`, which the flat board draws as a hard highlight.
+- `History` is serialised (one operation at a time) and generation-guarded: `clear()` bumps a counter so queued or in-flight operations cannot touch the stacks afterwards. Commands hold model data, not scene objects. A command whose undo or redo fails is dropped (the command itself toasts why), so it cannot block the stack beneath it.
 - Key routing lives in `workspace.ts`. Ctrl, Cmd and Alt chords belong to the browser except Ctrl+Z, Ctrl+Shift+Z and Ctrl+Y. Modules add handlers with `addKeyHandler`.
 - No `window.confirm`/`alert`/`prompt` anywhere in the client.
 - Commits: no Co-Authored-By / Claude-Session / Generated-with footers.
 
 ## Testing notes
 - three.js code has no unit tests (no WebGL in Bun). Cover it with `scripts/e2e-3d.ts`.
-- The `?e2e` URL flag exposes `window.__e3d`: `ready`, `selected`, `holes`, `screenOf`, `parts`, `lead2`, `chips`, `select`, `pickAt`, `tintCount`. It also honours the test-only knobs `window.__e3dDelay` (ms to hold the three.js download) and `window.__e3dFailMount` (make mounting throw).
+- The `?e2e` URL flag exposes `window.__e3d`: `ready`, `selected`, `holes`, `screenOf`, `parts`, `lead2`, `chips`, `select`, `pickAt`, `tintCount`, `value` (a part's value in the store's design), `wireStyle`, `move` (a layout move outside the pointer path). It also honours the test-only knobs `window.__e3dDelay` (ms to hold the three.js download) and `window.__e3dFailMount` (make mounting throw).
 - The headless-Chrome harness renders at about 3 fps. Scenarios must poll with `until` rather than assume a frame has happened.
 - Don't measure UI timing in the Chrome MCP tab: it is a background tab clamped to 1 s timers. Use the headless harness.
 

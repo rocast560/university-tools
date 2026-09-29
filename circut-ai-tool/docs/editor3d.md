@@ -11,7 +11,7 @@ Press **3D** in the project toolbar. The button then reads **Exit 3D**. The edit
 - **Exit 3D** in the toolbar
 - the browser's Back button
 
-Closing while the 3D library is still loading is safe. Undo history is discarded on close.
+Closing while the 3D library is still loading is safe. Undo history is discarded on close, and so is the selection, so the flat board is not left dimmed around the part you last picked. On the flat board, clicking off any part also clears it.
 
 ## Moving around
 
@@ -20,6 +20,7 @@ Closing while the 3D library is still loading is safe. Undo history is discarded
 - **F** with a part selected flies the camera to frame it. Double-clicking a part selects it and does the same.
 - **F** with nothing selected, or the **Fly through** button, enters fly mode: W, A, S, D move, the mouse looks, Space and C go up and down, Shift sprints. **F** or **Esc** returns to orbit.
 - **F** is ignored while a drag is in progress.
+- The **Wires** button in the bar switches jumpers between curved arcs and square-cornered runs, the same setting as the page toolbar's. The board rebuilds in place and the camera stays put.
 
 ## Selecting and moving parts
 
@@ -41,7 +42,7 @@ Refusal reasons:
 | The hole is taken | `hole d12 is taken by R2` |
 | Off the board | `pin 2 would be off the board at j31` |
 | Shorts two nets | `pin 1 would short VCC to GND at c10` |
-| Shorts itself | `R1's pins would short each other in one strip` |
+| Shorts itself | `R1's pins would short each other in one strip`, or for a two-lead part `R1's legs would short each other in one strip at c10` (refused whatever its nets, since both legs in one strip do nothing) |
 | Chip not across the channel | `U1 has to straddle the centre channel (rows e and f)` |
 
 The layout engine also checks each drop. If it would refuse the pinned placement, its reason is shown instead.

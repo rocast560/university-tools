@@ -8,15 +8,16 @@
 // never take the canvas with it.
 
 import { analog } from '../analog.ts';
+import { api } from '../api.ts';
 import type { Board3D } from '../board3d.ts';
 import { currentHighlight } from '../board.ts';
 import { flowOrder } from '../floworder.ts';
-import { esc } from '../main.ts';
+import { esc, toast } from '../main.ts';
 import { simState } from '../simstate.ts';
 import { store } from '../state.ts';
 import { history as editHistory } from './history.ts';
 import { attachCard } from './card.ts';
-import { attachManipulation } from './manipulate.ts';
+import { attachManipulation, commitMove } from './manipulate.ts';
 
 export interface Workspace {
   board: Board3D;
@@ -53,6 +54,7 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
     '<button type="button" class="ws-btn" data-ws="exit" title="Close the 3D editor (Esc)">← Exit</button>' +
     '<button type="button" class="ws-btn" data-ws="fly" title="Fly through (F with nothing selected)">Fly through</button>' +
     '<button type="button" class="ws-btn" data-ws="prev" title="previous build step">◀</button><span class="ws-step"></span><button type="button" class="ws-btn" data-ws="next" title="next build step">▶</button>' +
+    '<button type="button" class="ws-btn" data-ws="wires" title="curved arcs or square-cornered runs">Wires: curved</button>' +
     '<button type="button" class="ws-btn" data-ws="undo" title="Undo (Ctrl+Z)" disabled>Undo</button><button type="button" class="ws-btn" data-ws="redo" title="Redo (Ctrl+Shift+Z)" disabled>Redo</button>' +
     '<span class="ws-hint"></span></div>' +
     '<div class="ws-canvas"></div>' +
@@ -62,6 +64,7 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
   const canvasHost = root.querySelector<HTMLElement>('.ws-canvas')!;
   const hintEl = root.querySelector<HTMLElement>('.ws-hint')!;
   const stepEl = root.querySelector<HTMLElement>('.ws-step')!;
+  const wiresBtn = root.querySelector<HTMLButtonElement>('[data-ws=wires]')!;
 
   const dismantle = () => {
     root.remove();
@@ -85,7 +88,7 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
   }
   let mountedStyle = p.sidecar.options.wireStyle;
   let mountedDoc = p.doc;
-  let mountedId = p.id;
+  let mountedDesign = p.design;
   // Whatever has been built so far, so one teardown serves both close() and a failed setup.
   let disposeBoard = () => {};
   let offStore = () => {};
@@ -106,6 +109,9 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
     disposeBoard();
     dismantle();
     delete (window as { __e3d?: unknown }).__e3d;
+    // The flat board draws the selection as a hard highlight that dims
+    // everything else; leaving 3D must not leave the page stuck that way.
+    if (store.get().project?.selectedRef) store.setProject({ selectedRef: null });
   };
   try {
     if (location.search.includes('e2e') && (window as { __e3dFailMount?: boolean }).__e3dFailMount) throw new Error('mount failed (test)');
@@ -174,9 +180,11 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
       // A new doc is new parts, and a wire-style change is different jumper
       // geometry; both are a rebuild in place, the camera staying where it is.
       if (q.doc !== mountedDoc || q.sidecar.options.wireStyle !== mountedStyle) {
-        // Another project is another undo stack; a re-solve of the same one keeps it.
-        if (q.id !== mountedId) {
-          mountedId = q.id;
+        // A schematic reload (another project, or this one edited from the
+        // card, an agent or KiCad) can remove or renumber parts the stack
+        // points at, so it starts over; a move only swaps the doc and keeps it.
+        if (q.design !== mountedDesign) {
+          mountedDesign = q.design;
           editHistory.clear();
         }
         mountedDoc = q.doc;
@@ -188,6 +196,9 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
       board.setHighlight(currentHighlight(q) ?? (q.selectedRef ? { ref: q.selectedRef, soft: true } : null));
       board.setSelected(q.selectedRef);
       for (const chip of root.querySelectorAll<HTMLElement>('[data-legend]')) chip.classList.toggle('is-on', q.highlight?.net === chip.dataset.legend);
+      const square = q.sidecar.options.wireStyle === 'orthogonal';
+      wiresBtn.textContent = square ? 'Wires: square' : 'Wires: curved';
+      wiresBtn.classList.toggle('is-on', square);
       const n = q.doc.steps.length;
       const step = q.activeStep !== null ? q.doc.steps.find((x) => x.n === q.activeStep) : undefined;
       stepEl.textContent = step ? `Step ${step.n}/${n}: ${step.label}` : `Walk-through: ▶ for step 1 of ${n}`;
@@ -210,6 +221,20 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
       if (what === 'fly') board.setFly(!board.flying);
       if (what === 'prev') stepBy(-1);
       if (what === 'next') stepBy(1);
+      if (what === 'wires') {
+        // The same call as the page toolbar's button; the store update it
+        // makes is what rebuilds the scene in place (see push).
+        const q = store.get().project;
+        if (!q) return;
+        const wireStyle = q.sidecar.options.wireStyle === 'orthogonal' ? 'arc' : 'orthogonal';
+        api
+          .options(q.id, { wireStyle })
+          .then((doc) => {
+            const now = store.get().project;
+            if (now?.id === q.id) store.setProject({ doc, sidecar: { ...now.sidecar, options: { ...now.sidecar.options, wireStyle } } });
+          })
+          .catch((err: Error) => toast(err.message));
+      }
       if (what === 'undo') void editHistory.undo();
       if (what === 'redo') void editHistory.redo();
     });
@@ -284,6 +309,11 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
         lead2: () => store.get().project?.doc.parts.filter((x) => x.kind === 'lead2').map((x) => x.id) ?? [],
         select: (ref: string) => store.setProject({ selectedRef: ref }),
         chips: () => store.get().project?.doc.packages.filter((x) => x.kind === 'dip').map((x) => x.id) ?? [],
+        // The value in the reloaded design, not whatever an input happens to show.
+        value: (ref: string) => store.get().project?.design.components.get(ref)?.value ?? null,
+        wireStyle: () => store.get().project?.sidecar.options.wireStyle ?? null,
+        // A layout move from outside the pointer path, to change the doc under a live drag.
+        move: (ref: string, holes: Parameters<typeof commitMove>[1]) => commitMove(ref, holes),
       };
     }
     return ws;

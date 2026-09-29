@@ -176,7 +176,12 @@ export function mountBoard(container: HTMLElement): () => void {
 
   const onPointerUp = async (e: PointerEvent) => {
     if (panning) {
+      const moved = Math.hypot(e.clientX - panning.x, e.clientY - panning.y);
       panning = null;
+      // A click (not a pan) off any part lets go of the part the 3D editor
+      // picked; otherwise its hard outline would dim the board with no way out.
+      const p = store.get().project;
+      if (moved < 4 && p?.selectedRef) store.setProject({ selectedRef: null });
       return;
     }
     if (!drag) return;
