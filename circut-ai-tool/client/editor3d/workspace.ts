@@ -235,6 +235,7 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
         },
         pickAt: (x: number, y: number) => board.pick({ clientX: x, clientY: y }),
         parts: () => store.get().project?.doc.parts.map((x) => x.id) ?? [],
+        tintCount: () => (board as unknown as { _tintCount(): number })._tintCount(),
         chips: () => store.get().project?.doc.packages.filter((x) => x.kind === 'dip').map((x) => x.id) ?? [],
       };
     }

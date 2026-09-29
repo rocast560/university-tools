@@ -173,6 +173,21 @@ async function open3d(page: CDP) {
   await page.until(`window.__e3d?.ready`, 'the 3D workspace');
 }
 
+/**
+ * Parts whose screen point picks as themselves (picks are depth-ordered, so a
+ * jumper can sit in front of a part's top centre), in `__e3d.parts()` order.
+ */
+async function pickable(page: CDP) {
+  return page.eval<{ ref: string; x: number; y: number }[]>(
+    `__e3d.parts().flatMap((ref) => { const at = __e3d.screenOf(ref); const hit = at && __e3d.pickAt(at.x, at.y); return hit && hit.kind === 'part' && hit.ref === ref ? [{ ref, x: at.x, y: at.y }] : []; })`,
+  );
+}
+
+/** Poll until `expression` holds or `ms` passes; true when it held. */
+async function settles(page: CDP, expression: string, ms: number) {
+  return page.until(expression, '', ms).then(() => true, () => false);
+}
+
 const SCENARIOS: Record<string, (page: CDP, id: string) => Promise<void>> = {
   async 'workspace opens full screen'(page) {
     await open3d(page);
@@ -225,6 +240,70 @@ const SCENARIOS: Record<string, (page: CDP, id: string) => Promise<void>> = {
     await page.mouse('mousePressed', empty.x, empty.y);
     await page.mouse('mouseReleased', empty.x, empty.y);
     await page.until(`__e3d.selected() === null`, 'the selection to clear');
+  },
+  async 'dragging a selected part moves it to new holes'(page) {
+    await open3d(page);
+    const candidates = await pickable(page);
+    if (!candidates.length) throw new Error('no part could be picked at its screen point');
+    // Try a few distances right on the first pickable part: some columns may be
+    // taken, and one of them must be free. If every nearby column is taken for
+    // that part, try the next one before giving up.
+    for (const { ref } of candidates.slice(0, 4)) {
+      // Asked again for each part: a refused drag leaves the camera alone, but a screen point is only good for the current view.
+      const at = (await pickable(page)).find((c) => c.ref === ref);
+      if (!at) continue;
+      const { x, y } = at;
+      const before = await page.eval<Record<string, { col: number }>>(`__e3d.holes(${JSON.stringify(ref)})`);
+      const beforeKey = JSON.stringify(before);
+      await page.mouse('mousePressed', x, y);
+      await page.mouse('mouseReleased', x, y);
+      await page.until(`__e3d.selected() === ${JSON.stringify(ref)}`, `${ref} to be selected`);
+      for (const dx of [60, 120, 180, 240]) {
+        await page.mouse('mousePressed', x, y);
+        for (let k = 1; k <= 6; k++) await page.mouse('mouseMoved', x + (dx * k) / 6, y);
+        await page.mouse('mouseReleased', x + dx, y);
+        const changed = `JSON.stringify(__e3d.holes(${JSON.stringify(ref)})) !== ${JSON.stringify(beforeKey)}`;
+        if (!(await settles(page, changed, 1500))) continue;
+        const after = await page.eval<Record<string, { col: number }>>(`__e3d.holes(${JSON.stringify(ref)})`);
+        if (Object.values(after)[0].col <= Object.values(before)[0].col) throw new Error(`${ref} moved, but not to the right`);
+        return;
+      }
+    }
+    throw new Error('no drag distance moved any part');
+  },
+  async 'a drag that starts on an unselected part orbits instead'(page) {
+    await open3d(page);
+    const [first] = await pickable(page);
+    if (!first) throw new Error('no part could be picked at its screen point');
+    const { ref, x, y } = first;
+    const before = await page.eval<string>(`JSON.stringify(__e3d.holes(${JSON.stringify(ref)}))`);
+    await page.mouse('mousePressed', x, y);
+    for (let k = 1; k <= 6; k++) await page.mouse('mouseMoved', x + k * 20, y);
+    await page.mouse('mouseReleased', x + 120, y);
+    await sleep(400);
+    if ((await page.eval<string>(`JSON.stringify(__e3d.holes(${JSON.stringify(ref)}))`)) !== before) throw new Error('an unselected part moved');
+    if ((await page.eval<string | null>(`__e3d.selected()`)) !== null) throw new Error('an orbit drag selected a part');
+  },
+  async 'store update mid-drag does not strand a ghost'(page) {
+    await open3d(page);
+    const [first] = await pickable(page);
+    if (!first) throw new Error('no part could be picked at its screen point');
+    const { ref, x, y } = first;
+    await page.mouse('mousePressed', x, y);
+    await page.mouse('mouseReleased', x, y);
+    await page.until(`__e3d.selected() === ${JSON.stringify(ref)}`, `${ref} to be selected`);
+    await page.mouse('mousePressed', x, y);
+    await page.mouse('mouseMoved', x + 40, y);
+    // The drag has to be live, with holes tinted, for the cancel to prove anything.
+    await page.until(`__e3d.tintCount() > 0`, 'strip tints while dragging', 3000);
+    // A switch flick or a reload lands while the pointer is down.
+    await page.eval(`document.querySelector('[data-ws=next]').click()`);
+    await page.key('Escape', 'Escape');
+    await page.mouse('mouseReleased', x + 40, y);
+    await sleep(300);
+    const tinted = await page.eval<number>(`__e3d.tintCount()`);
+    if (tinted !== 0) throw new Error(`${tinted} strip tints left behind`);
+    if (!(await page.eval<boolean>(`!!document.querySelector('.ws')`))) throw new Error('Esc mid-drag closed the editor');
   },
 };
 

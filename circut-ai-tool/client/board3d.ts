@@ -226,7 +226,7 @@ interface Content {
   doc: LayoutDoc;
 }
 
-export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOptions = {}): Board3D {
+export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOptions = {}): Board3D & { /** internal, e2e only */ _tintCount(): number } {
   const depth = 350;
   const cz = depth / 2;
   /** The middle of a doc's board along x; it widens when an edit adds columns. */
@@ -1039,6 +1039,8 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
     onFrame: (fn) => (frameFns.add(fn), () => frameFns.delete(fn)),
     dom,
     setOrbit,
+    // Internal, for the e2e hook: how many strip tints are showing.
+    _tintCount: () => tintMesh.count,
     dispose() {
       alive = false;
       cancelAnimationFrame(raf);
