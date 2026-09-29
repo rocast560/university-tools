@@ -3,6 +3,16 @@
 
 import { api, type TunnelStatus } from './api.ts';
 import { esc, h, toast } from './main.ts';
+import { placeLights } from './lights.ts';
+
+/** Which status light a connect snippet belongs to. */
+function lightKindFor(id: string): 'claude-code' | 'claude-desktop' | 'codex' | 'chatgpt' | null {
+  if (id === 'claude-code') return 'claude-code';
+  if (id === 'claude-desktop' || id === 'claude-connector') return 'claude-desktop';
+  if (id === 'codex') return 'codex';
+  if (id === 'chatgpt') return 'chatgpt';
+  return null;
+}
 
 function cloudCard(t: TunnelStatus): string {
   const busy = t.state === 'downloading' || t.state === 'starting';
@@ -61,10 +71,15 @@ export async function renderConnect(root: HTMLElement) {
       h(`<header><a href="#/" class="back">← projects</a><h1>Connect an assistant</h1><span class="path">MCP ${esc(info.mcpUrl)}</span></header>`),
       h(`<p>Tools: <code>${info.tools.map(esc).join('</code>, <code>')}</code></p>`),
       h(cloudCard(info.tunnel)),
-      ...info.snippets.map((s) => h(`<section class="snippet"><h3>${esc(s.title)}</h3><p class="muted">${esc(s.how)}</p><pre><code>${esc(s.code)}</code></pre><button data-copy>Copy</button></section>`)),
+      ...info.snippets.map((s) => {
+        const kind = lightKindFor(s.id);
+        const light = kind ? `<span class="conn-light light is-off" data-kind="${kind}"><i></i><span class="conn-state">not connected</span></span>` : '';
+        return h(`<section class="snippet"><h3>${esc(s.title)}${light}</h3><p class="muted">${esc(s.how)}</p><pre><code>${esc(s.code)}</code></pre><button data-copy>Copy</button></section>`);
+      }),
     );
     wireCopy();
     wireTunnel();
+    placeLights();
   } catch (e) {
     root.querySelector('p')!.textContent = `Server not reachable: ${(e as Error).message}`;
   }

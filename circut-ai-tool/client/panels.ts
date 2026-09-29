@@ -9,6 +9,7 @@ import { analog } from './analog.ts';
 import { close3d, is3dOpen, open3d } from './view3d.ts';
 import { api } from './api.ts';
 import { fitView } from './board.ts';
+import { flowOrder } from './floworder.ts';
 import { esc, toast } from './main.ts';
 import { saveDone, store, type AppState, type ProjectState } from './state.ts';
 
@@ -140,6 +141,7 @@ function options(p: ProjectState): string {
     <label>Rail split <select data-opt="railSplit"><option value="null" ${o.railSplit === null ? 'selected' : ''}>auto</option><option value="true" ${o.railSplit === true ? 'selected' : ''}>split</option><option value="false" ${o.railSplit === false ? 'selected' : ''}>continuous</option></select></label>
     <label>DIP switch positions (0 = separate switches) <input type="number" min="0" max="16" data-opt="dipSwitchPositions" value="${o.dipSwitchPositions}"></label>
     <label>Chip order <input data-opt="packageOrder" value="${esc(o.packageOrder.join(' '))}" placeholder="${esc(chips.join(' '))}"></label>
+    <label>2D wires <select data-opt="wireStyle"><option value="arc" ${o.wireStyle !== 'orthogonal' ? 'selected' : ''}>curved arcs (default)</option><option value="orthogonal" ${o.wireStyle === 'orthogonal' ? 'selected' : ''}>square corners, no shared lines</option></select></label>
     <p><button data-action="reset">Reset layout</button> <span class="muted">forgets moved parts, options and colours</span></p>
     <p class="muted mono">${esc(p.path)}</p></div>`;
 }
@@ -151,6 +153,14 @@ function options(p: ProjectState): string {
  */
 let liveWired = false;
 const LIVE_HZ = 10;
+
+let fullscreenHandler: (() => void) | null = null;
+/** One listener for entering or leaving full screen, always calling the latest repaint. */
+function watchFullscreen(onChange: () => void) {
+  const first = fullscreenHandler === null;
+  fullscreenHandler = onChange;
+  if (first) document.addEventListener('fullscreenchange', () => fullscreenHandler?.());
+}
 
 function wireLive() {
   if (liveWired) return;
@@ -188,7 +198,7 @@ export function renderPanels(panels: HTMLElement, toolbar: HTMLElement, legend: 
   const warn = p.doc.checks.some((c) => c.level === 'error');
   let tabs = panels.querySelector<HTMLElement>('.tabs');
   if (!tabs) {
-    panels.innerHTML = `<div class="tabs" role="tablist">${TABS.map(([id, label]) => `<button type="button" role="tab" data-tab="${id}">${label}<span class="tabwarn" hidden>⚠</span></button>`).join('')}</div><div class="panelbody"></div>`;
+    panels.innerHTML = `<button type="button" class="panels-toggle" data-collapse title="hide or show this panel"><span class="when-open">Hide panel ▸</span><span class="when-closed">◂ Guide</span></button><div class="tabs" role="tablist">${TABS.map(([id, label]) => `<button type="button" role="tab" data-tab="${id}">${label}<span class="tabwarn" hidden>⚠</span></button>`).join('')}</div><div class="panelbody"></div>`;
     tabs = panels.querySelector<HTMLElement>('.tabs')!;
   }
   for (const b of tabs.querySelectorAll<HTMLButtonElement>('[data-tab]')) {
@@ -203,18 +213,34 @@ export function renderPanels(panels: HTMLElement, toolbar: HTMLElement, legend: 
   const errs = p.doc.checks.filter((c) => c.level === 'error').length;
   toolbar.innerHTML =
     `<div class="tgroup run"><button type="button" class="btn ${p.running ? 'is-on' : ''}" data-action="${p.running ? 'stop' : 'run'}">${p.running ? '■ Stop' : '▶ Run'}</button><button type="button" class="btn" data-action="step" ${p.running ? 'disabled' : ''}>Step</button><button type="button" class="btn ghost" data-action="reset-sim">Reset</button><span class="simclock mono" data-live-clock>0.000 s</span></div>` +
-    `<div class="tgroup"><button type="button" class="btn" data-action="fit">Fit</button><button type="button" class="btn" data-action="print">Print</button></div>` +
+    `<div class="tgroup"><button type="button" class="btn" data-action="fit">Fit</button><button type="button" class="btn ${document.fullscreenElement ? 'is-on' : ''}" data-action="fullscreen">${document.fullscreenElement ? 'Exit full screen' : 'Full screen'}</button><button type="button" class="btn" data-action="print">Print</button><button type="button" class="btn ${p.sidecar.options.wireStyle === 'orthogonal' ? 'is-on' : ''}" data-action="wirestyle" title="curved arcs or square-cornered runs">${p.sidecar.options.wireStyle === 'orthogonal' ? 'Wires: square' : 'Wires: curved'}</button></div>` +
     `<div class="tgroup"><button type="button" class="btn ${is3dOpen() ? 'is-on' : ''}" data-action="view3d">${is3dOpen() ? 'Exit 3D' : '3D'}</button></div>` +
     `<div class="tgroup"><a class="btn" href="/api/projects/${p.id}/board.svg" download="${esc(p.name)}-breadboard.svg">SVG</a><a class="btn" href="/api/projects/${p.id}/board.png" download="${esc(p.name)}-breadboard.png">PNG</a><a class="btn" href="/api/projects/${p.id}/schematic.svg" target="_blank" rel="noopener">Schematic</a></div>` +
     (p.activeStep !== null ? '<button type="button" class="btn ghost" data-action="clear-step">Clear highlight</button>' : '') +
     `<span class="statuschip"><b>${esc(p.doc.board.kind)} board</b><i class="dot"></i>${p.doc.wires.length} wires<i class="dot"></i><em class="errs ${errs ? 'is-bad' : 'is-ok'}">${errs} ${errs === 1 ? 'error' : 'errors'}</em></span>`;
-  legend.innerHTML = Object.entries(p.doc.nets)
-    .sort(([, a], [, b]) => (a.power ? 0 : 1) - (b.power ? 0 : 1) || a.name.localeCompare(b.name))
+  legend.innerHTML = flowOrder(p.doc)
+    .map((net) => [net, p.doc.nets[net]] as const)
     .map(([net, info]) => `<span data-legend="${esc(net)}" title="click to recolour"><i style="background:${esc(info.color)}"></i><span>${esc(info.name)}</span></span>`)
     .join('');
+  watchFullscreen(() => {
+    fitView(document.getElementById('board')!);
+    renderPanels(panels, toolbar, legend, store.get());
+  });
 
   panels.onclick = async (e) => {
     const t = e.target as HTMLElement;
+    if (t.closest('[data-collapse]')) {
+      // The board column takes the room; the choice sticks across projects.
+      const layout = panels.closest<HTMLElement>('.layout');
+      const collapsed = layout?.classList.toggle('collapsed') ?? false;
+      try {
+        localStorage.setItem('panelsCollapsed', collapsed ? '1' : '0');
+      } catch {
+        /* storage blocked */
+      }
+      fitView(document.getElementById('board')!);
+      return;
+    }
     const tab = t.closest<HTMLElement>('[data-tab]');
     if (tab) return store.setProject({ panel: tab.dataset.tab as ProjectState['panel'] });
     const done = t.closest<HTMLInputElement>('input[data-done]');
@@ -242,7 +268,7 @@ export function renderPanels(panels: HTMLElement, toolbar: HTMLElement, legend: 
     if (action === 'reset') {
       try {
         const doc = await api.reset(p.id);
-        store.setProject({ doc, sidecar: { ...p.sidecar, pinned: {}, colors: {}, options: doc.board ? { ...p.sidecar.options, board: 'auto', railSplit: null, dipSwitchPositions: 0, packageOrder: [], substitutions: {} } : p.sidecar.options } });
+        store.setProject({ doc, sidecar: { ...p.sidecar, pinned: {}, colors: {}, options: doc.board ? { ...p.sidecar.options, board: 'auto', railSplit: null, dipSwitchPositions: 0, packageOrder: [], substitutions: {}, wireStyle: 'arc' } : p.sidecar.options } });
       } catch (err) {
         toast((err as Error).message);
       }
@@ -270,6 +296,7 @@ export function renderPanels(panels: HTMLElement, toolbar: HTMLElement, legend: 
     if (opt === 'railSplit') patch.railSplit = t.value === 'null' ? null : t.value === 'true';
     if (opt === 'dipSwitchPositions') patch.dipSwitchPositions = Number(t.value);
     if (opt === 'packageOrder') patch.packageOrder = t.value.split(/[\s,]+/).filter(Boolean);
+    if (opt === 'wireStyle') patch.wireStyle = t.value === 'orthogonal' ? 'orthogonal' : 'arc';
     try {
       const doc = await api.options(p.id, patch);
       store.setProject({ doc, sidecar: { ...p.sidecar, options: { ...p.sidecar.options, ...patch } } });
@@ -280,7 +307,16 @@ export function renderPanels(panels: HTMLElement, toolbar: HTMLElement, legend: 
   toolbar.onclick = (e) => {
     const action = (e.target as HTMLElement).closest<HTMLElement>('[data-action]')?.dataset.action;
     if (action === 'fit') fitView(document.getElementById('board')!);
+    if (action === 'fullscreen') {
+      // The whole card goes full screen, so the toolbar and legend stay in reach.
+      const card = document.querySelector<HTMLElement>('.board-card')!;
+      (document.fullscreenElement ? document.exitFullscreen() : card.requestFullscreen()).catch((err: Error) => toast(err.message));
+    }
     if (action === 'print') window.print();
+    if (action === 'wirestyle') {
+      const wireStyle = p.sidecar.options.wireStyle === 'orthogonal' ? 'arc' : 'orthogonal';
+      api.options(p.id, { wireStyle }).then((doc) => store.setProject({ doc, sidecar: { ...p.sidecar, options: { ...p.sidecar.options, wireStyle } } })).catch((err: Error) => toast(err.message));
+    }
     if (action === 'clear-step') store.setProject({ activeStep: null, highlight: null });
     if (action === 'run') {
       analog.start(p);
@@ -294,10 +330,16 @@ export function renderPanels(panels: HTMLElement, toolbar: HTMLElement, legend: 
     if (action === 'reset-sim') analog.reset(p);
     if (action === 'view3d') {
       const card = document.querySelector<HTMLElement>('.board-card')!;
-      if (is3dOpen()) close3d();
-      else void open3d(card, p.doc);
-      // Repaint the toolbar so the button flips to Exit.
-      setTimeout(() => renderPanels(panels, toolbar, legend, store.get()), 0);
+      // Repaint the toolbar so the button flips to Exit, but only once the
+      // view is really up: opening it waits on three being downloaded, which
+      // is far longer than a zero timeout.
+      const repaint = () => renderPanels(panels, toolbar, legend, store.get());
+      if (is3dOpen()) {
+        close3d();
+        repaint();
+      } else {
+        void open3d(card, p.doc).then(repaint);
+      }
     }
   };
   legend.onclick = async (e) => {

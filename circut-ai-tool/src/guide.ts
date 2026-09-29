@@ -53,16 +53,39 @@ export function buildSteps(design: Design, res: EngineResult, sim: SimModel): St
   };
 
   for (const pkg of res.packages) {
-    if (pkg.kind === 'dip' || pkg.kind === 'sevenseg') {
+    if (pkg.kind === 'module') {
+      const row = pkg.row ?? 'a';
+      const side = row === 'j' ? 'bottom' : 'top';
+      const last = pkg.col0 + pkg.pins - 1;
+      steps.push({ n: 0, phase: 'Chips', kind: 'chip', ref: pkg.id, label: `${pkg.id}: plug the L3 board's 15-pin header into row ${row}, columns ${pkg.col0}-${last}, VCC in ${row}${pkg.col0} and D in ${row}${last}, chip facing up and the board hanging out over the ${side} rails and off the ${side} edge of the breadboard. Header order is VCC, GND, W, X, Y, Z, separator, ~W, ~X, ~Y, ~Z, A, B, C, D; leave position 7 (${row}${pkg.col0 + 6}) unwired. The board covers the ${side} rail holes in columns ${pkg.col0 - 2}-${last + 2}, so rail jumpers land outside that span. Outputs are active low. Inputs 10-15 are unspecified.` });
+    } else if (pkg.kind === 'sevenseg') {
       const half = pkg.pins / 2;
-      const what = pkg.kind === 'dip' ? 'across the gutter, notch on the left' : 'across the gutter, decimal points at the bottom';
-      steps.push({ n: 0, phase: 'Chips', kind: 'chip', ref: pkg.id, label: `Place ${pkg.id} (${pkg.name}) ${what}, pin 1 in f${pkg.col0}. Pins 1 to ${half} sit in row f, columns ${pkg.col0} to ${pkg.col0 + half - 1}; pins ${half + 1} to ${pkg.pins} in row e, columns ${pkg.col0 + half - 1} down to ${pkg.col0}.` });
+      const last = pkg.col0 + half - 1;
+      steps.push({ n: 0, phase: 'Chips', kind: 'chip', ref: pkg.id, label: `Place ${pkg.id} (${pkg.name}) across the gutter, decimal point at the bottom, pin 1 in g${pkg.col0}. Pins 1 to ${half} sit in row g, columns ${pkg.col0} to ${last}; pins ${half + 1} to ${pkg.pins} in row d, columns ${last} down to ${pkg.col0}. Its body covers rows c to h in those columns, so its jumpers go in rows a, b, i and j. Check the pinout of your actual display before wiring the segments.` });
+    } else if (pkg.kind === 'dip') {
+      const half = pkg.pins / 2;
+      steps.push({ n: 0, phase: 'Chips', kind: 'chip', ref: pkg.id, label: `Place ${pkg.id} (${pkg.name}) across the gutter, notch on the left, pin 1 in f${pkg.col0}. Pins 1 to ${half} sit in row f, columns ${pkg.col0} to ${pkg.col0 + half - 1}; pins ${half + 1} to ${pkg.pins} in row e, columns ${pkg.col0 + half - 1} down to ${pkg.col0}.` });
     } else {
+      // The nets a position joins, so a way that is wired to nothing can say
+      // it is spare rather than claim to be an input.
+      const netsOf = (ref: string, pos: string) => {
+        const comp = design.components.get(ref);
+        const fp = res.footprints[ref];
+        if (!comp || fp?.kind !== 'dipswitch') return [];
+        return (fp.pairs[Number(pos) - 1] ?? []).map((pin) => comp.pins.get(pin)?.net).filter((net): net is string => !!net);
+      };
       const who = Object.entries(pkg.map ?? {}).map(([k, ref]) => {
+        const where = `position ${k} (column ${pkg.col0 + Number(k) - 1})`;
         const inp = sim.inputs.find((i) => i.control === `DIP position ${k}` || i.control === `${ref} position ${k}`);
-        return `position ${k} (column ${pkg.col0 + Number(k) - 1}) is input ${inp ? inp.name : ref}`;
+        if (inp) return `${where} is input ${inp.name}`;
+        const joined = netsOf(ref, k);
+        if (joined.length && joined.every(isUnconnected)) return `${where} is spare, leave it alone`;
+        return `${where} is input ${ref}`;
       });
-      steps.push({ n: 0, phase: 'Chips', kind: 'chip', ref: pkg.id, label: `Place the ${pkg.name} across the gutter with its pins in e${pkg.col0} to e${pkg.col0 + (pkg.positions ?? 1) - 1} and f${pkg.col0} to f${pkg.col0 + (pkg.positions ?? 1) - 1}; ${who.join('; ')}. A position set to ON joins its top pin to its bottom pin.` });
+      // A real DIP switch is a part with a reference; a folded one only stands
+      // in for the separate switches the schematic actually has.
+      const which = design.components.has(pkg.id) ? `${pkg.id} (${pkg.name})` : `the ${pkg.name}`;
+      steps.push({ n: 0, phase: 'Chips', kind: 'chip', ref: pkg.id, label: `Place ${which} across the gutter with its pins in e${pkg.col0} to e${pkg.col0 + (pkg.positions ?? 1) - 1} and f${pkg.col0} to f${pkg.col0 + (pkg.positions ?? 1) - 1}; ${who.join('; ')}. A position set to ON joins its top pin to its bottom pin.` });
     }
   }
   if (res.supply) {

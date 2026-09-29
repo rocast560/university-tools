@@ -6,6 +6,7 @@ import { displayName } from '../netlist.ts';
 export type Lead2Style = 'R' | 'C' | 'Cpol' | 'L' | 'D' | 'Z' | 'LED' | 'SW' | 'BTN' | 'X';
 
 export type Footprint =
+  | { kind: 'module'; pins: number }
   | { kind: 'dip'; pins: number }
   | { kind: 'lead2'; style: Lead2Style; a: string; b: string; polarized: boolean; aLabel: string; bLabel: string }
   | { kind: 'to92'; legs: [string, string, string]; names: [string, string, string] }
@@ -31,6 +32,7 @@ const byNumber = (a: string, b: string) => Number(a) - Number(b);
 
 export function classify(comp: Component): Footprint {
   const { lib, part, ref } = comp;
+  if (lib === 'ECE2300L' && part === 'L3_Auxiliary') return { kind: 'module', pins: 15 };
   const P = part.toUpperCase();
   const pinNums = [...comp.pins.keys()].sort(byNumber);
   const n = pinNums.length;

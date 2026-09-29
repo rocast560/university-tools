@@ -7,16 +7,20 @@ import { createApp } from './app.ts';
 import { bootService } from './boot.ts';
 import { HOST, KICAD_CLI, PORT, PUBLIC_URL } from './config.ts';
 import { createMcpServer } from './mcp.ts';
+import { ClientRegistry, reportStdioActivity } from './clients.ts';
 
 if (process.argv.includes('--stdio')) {
   // stdout carries the protocol; every diagnostic must go to stderr.
   console.log = (...args: unknown[]) => console.error(...args);
   const { service } = await bootService({ watch: true });
-  await createMcpServer(service).connect(new StdioServerTransport());
+  const transport = new StdioServerTransport();
+  await createMcpServer(service).connect(transport);
+  reportStdioActivity(transport, PUBLIC_URL);
   console.error('[circuit-ai-tool] stdio MCP server ready');
 } else {
   const { service, events, kicad } = await bootService({ watch: true });
-  const app = createApp({ service, events, mcp: () => createMcpServer(service), kicad });
+  const clients = new ClientRegistry(events);
+  const app = createApp({ service, events, mcp: () => createMcpServer(service), kicad, clients });
 
   Bun.serve({ hostname: HOST, port: PORT, fetch: app.fetch, idleTimeout: 255 });
   // Bun is PID 1 in the container; tunnel.ts installs a SIGTERM listener that would otherwise keep it alive.

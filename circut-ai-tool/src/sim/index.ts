@@ -2,11 +2,12 @@
 // decoders, LEDs and 7-segment displays. Inputs are the nets controlled by
 // switches. Anything else is placed and checked but reported as not simulated.
 
+import { l3Gates } from '../parts/lab3.ts';
 import type { EngineResult } from '../layout/engine.ts';
 import type { Design } from '../netlist.ts';
 import { displayName, isAutoNamed, isUnconnected } from '../netlist.ts';
 import { powerKind } from '../parts/catalog.ts';
-import { DECODER_PINS, icInfo, type GateKind } from '../parts/gates.ts';
+import { DECODER_PINS, DEMUX_PINS, demuxOutputs, icInfo, type GateKind } from '../parts/gates.ts';
 
 export interface SimInput {
   name: string;
@@ -34,6 +35,15 @@ export interface SimDecoder {
   outputs: Record<string, string>;
 }
 
+export interface SimDemux {
+  ref: string;
+  select: string[];
+  enableLow: string[];
+  enableHigh: string;
+  /** O0-O7 nets. */
+  outputs: string[];
+}
+
 export interface SimLed {
   ref: string;
   cathode: string;
@@ -51,6 +61,7 @@ export interface SimModel {
   inputs: SimInput[];
   gates: SimGate[];
   decoders: SimDecoder[];
+  demuxes: SimDemux[];
   leds: SimLed[];
   displays: SimDisplay[];
   resistors: [string, string][];
@@ -97,7 +108,7 @@ export function evalGate(kind: GateKind, values: number[]): 0 | 1 {
 }
 
 export function buildSimModel(design: Design, res: EngineResult): SimModel {
-  const model: SimModel = { inputs: [], gates: [], decoders: [], leds: [], displays: [], resistors: [], power: {}, notSimulated: [] };
+  const model: SimModel = { inputs: [], gates: [], decoders: [], demuxes: [], leds: [], displays: [], resistors: [], power: {}, notSimulated: [] };
   for (const n of res.power.plus) model.power[n] = 1;
   for (const n of res.power.gnd) model.power[n] = 0;
   for (const n of res.power.minus) model.power[n] = 0;
@@ -117,6 +128,9 @@ export function buildSimModel(design: Design, res: EngineResult): SimModel {
     if (!comp) continue;
     const net = (pin: string) => comp.pins.get(pin)?.net ?? `unconnected-(${ref}-Pad${pin})`;
     switch (fp.kind) {
+      case 'module':
+        model.gates.push(...l3Gates(net, ref).map(g => ({ ...g, ref, pins: { inputs: [], output: 0 } })));
+        break;
       case 'lead2': {
         if (fp.style === 'SW' || fp.style === 'BTN') {
           addInput(net(fp.a), net(fp.b), dipPosition.get(ref) ?? ref, ref);
@@ -151,6 +165,12 @@ export function buildSimModel(design: Design, res: EngineResult): SimModel {
           model.decoders.push({ ref, kind: info.spec.decoder, inputs: { A: net(String(p.inputs.A)), B: net(String(p.inputs.B)), C: net(String(p.inputs.C)), D: net(String(p.inputs.D)) }, lampTest: net(String(p.lampTest)), blanking: net(String(p.blanking)), outputs });
           break;
         }
+        if (info.spec.demux) {
+          const p = DEMUX_PINS;
+          const at = (pin: number) => net(String(pin));
+          model.demuxes.push({ ref, select: p.select.map(at), enableLow: p.enableLow.map(at), enableHigh: at(p.enableHigh), outputs: p.outputs.map(at) });
+          break;
+        }
         info.spec.gates.forEach((g, i) => {
           const out = net(String(g.output));
           if (isUnconnected(out)) return;
@@ -166,7 +186,12 @@ export function buildSimModel(design: Design, res: EngineResult): SimModel {
         break;
     }
   }
-  model.inputs.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+  // Inputs on a 74138's select lines come first, MSB first, so the truth
+  // table rows count in the same order as the decoder outputs.
+  const selectRank = new Map<string, number>();
+  for (const dm of model.demuxes) [...dm.select].reverse().forEach((net) => selectRank.has(net) || selectRank.set(net, selectRank.size));
+  const rank = (i: SimInput) => selectRank.get(i.net) ?? Infinity;
+  model.inputs.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name, undefined, { numeric: true }));
   return model;
 }
 
@@ -195,6 +220,14 @@ export function simulate(model: SimModel, levels: Record<string, 0 | 1>): SimRes
           changed = true;
         }
       }
+    }
+    for (const dm of model.demuxes) {
+      const outs = demuxOutputs(dm.select.map(val), dm.enableLow.map(val), val(dm.enableHigh));
+      dm.outputs.forEach((net, i) => {
+        if (isUnconnected(net) || L[net] === outs[i]) return;
+        L[net] = outs[i];
+        changed = true;
+      });
     }
     if (!changed) break;
   }
@@ -225,7 +258,7 @@ export function simulate(model: SimModel, levels: Record<string, 0 | 1>): SimRes
 export function truthTable(model: SimModel, maxInputs = 6): TruthTable | null {
   const inputs = model.inputs;
   if (!inputs.length || inputs.length > maxInputs) return null;
-  const outputNets = [...new Set([...model.gates.map((g) => g.output), ...model.decoders.flatMap((d) => Object.values(d.outputs))])]
+  const outputNets = [...new Set([...model.gates.map((g) => g.output), ...model.decoders.flatMap((d) => Object.values(d.outputs)), ...model.demuxes.flatMap((d) => d.outputs)])]
     .filter((n) => !isAutoNamed(n) && !isUnconnected(n))
     .sort((a, b) => displayName(a).localeCompare(displayName(b), undefined, { numeric: true }));
   const leds = model.leds.map((l) => l.ref);

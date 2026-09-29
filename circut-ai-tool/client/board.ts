@@ -2,10 +2,10 @@
 // to highlight a net, click switches, drag parts with live re-layout.
 
 import { buildLayoutDoc } from '../src/pipeline.ts';
-import { renderSvg, svgSize, type Highlight } from '../src/render/index.ts';
+import { overhang, renderSvg, svgSize, type Highlight } from '../src/render/index.ts';
 import { RICH } from '../src/render/skin-rich.ts';
 import { blowOpacity, coreOpacity, haloOpacity, haloRadius, spillOpacity } from '../src/render/skin-rich.ts';
-import { DARK, LIGHT } from '../src/render/theme.ts';
+import { DARK } from '../src/render/theme.ts';
 import type { AnalogState } from '../src/sim/analog/simulator.ts';
 import { analog } from './analog.ts';
 import { api } from './api.ts';
@@ -57,12 +57,15 @@ export function mountBoard(container: HTMLElement): () => void {
     // Deliberately excludes the analog frame: brightness is patched onto the
     // nodes below, never re-serialised. Re-rendering this string at 60 Hz is
     // the one thing that would make the whole run loop unaffordable.
-    const key = JSON.stringify([p.id, s.theme, highlight, p.switches, doc === p.doc ? p.doc : drag?.preview]);
+    const key = JSON.stringify([p.id, s.theme, highlight, p.switches, p.sidecar.options.wireStyle, doc === p.doc ? p.doc : drag?.preview]);
     if (key === lastKey) return;
     lastKey = key;
-    const size = svgSize(doc.board);
-    if (!view.w) view = { x: -100, y: 0, w: size.width, h: size.height };
-    container.innerHTML = renderSvg(doc, { theme: s.theme === 'dark' ? DARK : LIGHT, highlight, sim, skin: RICH });
+    const size = svgSize(doc.board, doc.packages);
+    if (!view.w) view = { x: -100, y: -overhang(doc.packages).top, w: size.width, h: size.height };
+    // Always DARK, in either app theme: the well the board sits in is dark in
+    // both, and the only thing this palette changes is the ink used out there
+    // in the margin. The board itself is tan either way.
+    container.innerHTML = renderSvg(doc, { theme: DARK, highlight, sim, skin: RICH, wireStyle: p.sidecar.options.wireStyle });
     indexLeds();
     if (live) paintLeds(live);
     if (drag && !drag.valid) container.querySelector(`[data-ref="${drag.ref}"]`)?.classList.add('invalid');
@@ -104,14 +107,6 @@ export function mountBoard(container: HTMLElement): () => void {
     if (el && el.getAttribute(attr) !== value) el.setAttribute(attr, value);
   };
 
-  const stepHighlight = (p: NonNullable<AppState['project']>, n: number): Highlight | null => {
-    const step = p.doc.steps.find((x) => x.n === n);
-    if (!step) return null;
-    if (step.wire !== undefined) return { wire: step.wire };
-    if (step.ref && step.ref !== 'PSU') return { ref: step.ref };
-    return null;
-  };
-
   const onWheel = (e: WheelEvent) => {
     e.preventDefault();
     const svg = container.querySelector('svg');
@@ -129,7 +124,11 @@ export function mountBoard(container: HTMLElement): () => void {
     const sw = target.closest<Element>('[data-switch]');
     if (sw) {
       const k = sw.getAttribute('data-switch')!;
-      store.setProject({ switches: { ...p.switches, [k]: !p.switches[k] } });
+      const switches = { ...p.switches, [k]: !p.switches[k] };
+      store.setProject({ switches });
+      // The solver has to be told too, or a running simulation carries on
+      // with the switch positions it was started with.
+      analog.refresh({ ...p, switches });
       return;
     }
     const part = target.closest<Element>('.part[data-ref], .pkg[data-ref]');
@@ -222,10 +221,22 @@ export function mountBoard(container: HTMLElement): () => void {
   };
 }
 
+/** What a build step lights up: its wire, or the part it places. */
+export const stepHighlight = (p: NonNullable<AppState['project']>, n: number): Highlight | null => {
+  const step = p.doc.steps.find((x) => x.n === n);
+  if (!step) return null;
+  if (step.wire !== undefined) return { wire: step.wire };
+  if (step.ref && step.ref !== 'PSU') return { ref: step.ref };
+  return null;
+};
+
+/** The highlight the board should show right now: a followed net, or the active build step. */
+export const currentHighlight = (p: NonNullable<AppState['project']>): Highlight | null => p.highlight ?? (p.activeStep !== null ? stepHighlight(p, p.activeStep) : null);
+
 export function fitView(container: HTMLElement) {
   const svg = container.querySelector('svg');
   const p = store.get().project;
   if (!svg || !p) return;
-  const size = svgSize(p.doc.board);
+  const size = svgSize(p.doc.board, p.doc.packages);
   svg.setAttribute('viewBox', size.viewBox);
 }

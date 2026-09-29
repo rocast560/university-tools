@@ -186,8 +186,10 @@ describe('other footprints', () => {
     expect(r.pinHoles.SW1['1']).toEqual({ col: r.packages[0].col0, row: 'f' });
     expect(r.pinHoles.SW1['8']).toEqual({ col: r.packages[0].col0, row: 'e' });
     const ds = r.packages[1];
-    expect(r.pinHoles.DS1['1']).toEqual({ col: ds.col0, row: 'f' });
-    expect(r.pinHoles.DS1['10']).toEqual({ col: ds.col0, row: 'e' });
+    // A display's pin rows are wider apart than a DIP's and its body covers rows c to h.
+    expect(r.pinHoles.DS1['1']).toEqual({ col: ds.col0, row: 'g' });
+    expect(r.pinHoles.DS1['10']).toEqual({ col: ds.col0, row: 'd' });
+    for (const w of r.wires) for (const h of [w.a, w.b]) if (h.col >= ds.col0 && h.col < ds.col0 + 5) expect(['c', 'd', 'e', 'f', 'g', 'h']).not.toContain(h.row);
     expect(r.wires.filter((w) => w.role === 'power' && w.net === 'GND').length).toBeGreaterThanOrEqual(1);
   });
 

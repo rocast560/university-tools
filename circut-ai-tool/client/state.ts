@@ -45,7 +45,7 @@ function initialTheme(): 'light' | 'dark' {
   } catch {
     /* storage blocked */
   }
-  return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  return 'dark';
 }
 
 let state: AppState = { route: { name: 'home' }, theme: initialTheme(), project: null, loading: false, toast: null };

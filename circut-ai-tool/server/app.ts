@@ -8,6 +8,7 @@ import path from 'node:path';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { createApi } from './api.ts';
+import { describeMcpRequest, type ClientRegistry } from './clients.ts';
 import { DIST_DIR } from './config.ts';
 import { openapiDocument } from './openapi.ts';
 import type { ProjectEvent, Service } from './service.ts';
@@ -15,9 +16,9 @@ import type { Events } from './watch.ts';
 
 const MIME: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json; charset=utf-8', '.woff2': 'font/woff2', '.map': 'application/json' };
 
-export function createApp(deps: { service: Service; events: Events<ProjectEvent>; mcp: () => McpServer; kicad?: { available(): Promise<boolean> } }): Hono {
+export function createApp(deps: { service: Service; events: Events<ProjectEvent>; mcp: () => McpServer; kicad?: { available(): Promise<boolean> }; clients?: ClientRegistry }): Hono {
   const app = new Hono();
-  app.route('/api', createApi(deps.service, deps.events));
+  app.route('/api', createApi(deps.service, deps.events, undefined, deps.clients));
   app.get('/openapi.json', (c) => c.json(openapiDocument()));
   // Readiness probe for the desktop shell. `kicad` lets it warn on first run:
   // without kicad-cli the server still starts, but every project open fails.
@@ -34,6 +35,8 @@ export function createApp(deps: { service: Service; events: Events<ProjectEvent>
   app.use('/mcp-server/mcp', mcpCors);
 
   const mcpHandler = async (c: { req: { raw: Request } }) => {
+    // Note who is calling before the transport consumes the request.
+    if (deps.clients) deps.clients.touch(await describeMcpRequest(c.req.raw));
     const server = deps.mcp();
     const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     await server.connect(transport);

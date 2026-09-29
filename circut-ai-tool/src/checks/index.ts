@@ -81,6 +81,13 @@ export function runChecks(design: Design, res: EngineResult): Check[] {
   for (const u of res.unplaced) add('unplaced', 'warning', `${u.ref} not placed: ${u.reason}`, [u.ref]);
   for (const w of res.warnings) add('layout', 'warning', w);
 
+  for (const [ref, fp] of Object.entries(res.footprints)) if (fp.kind === 'module') {
+    const comp = design.components.get(ref)!;
+    if (powerKind(comp.pins.get('1')?.net ?? '') !== '+' || powerKind(comp.pins.get('2')?.net ?? '') !== 'gnd') add('l3-power', 'error', `${ref}: connect header VCC to +5V and GND to ground.`, [ref]);
+    if (!isUnconnected(comp.pins.get('7')?.net ?? 'unconnected-')) add('l3-reserved', 'error', `${ref}: header position 7 is reserved and must stay unwired.`, [ref]);
+    add('l3-model', 'warning', `${ref}: L3 internal chip is unspecified. Supply current and output drive are not characterized; analog results use an approximate LS model. Inputs 10-15 are unspecified.`, [ref]);
+  }
+
   // hole conflicts
   const owners = new Map<string, string[]>();
   const own = (h: Hole, who: string) => owners.set(holeKey(h), [...(owners.get(holeKey(h)) ?? []), who]);

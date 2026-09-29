@@ -14,6 +14,13 @@ Design: `docs/superpowers/specs/2026-09-03-circuit-ai-tool-design.md`.
 
 ## Run
 
+### Lab 3 example
+
+Choose **Create Lab 3 prelab example** on the home page to create an editable
+BCD-to-seven-segment circuit using the instructor's L3 Auxiliary module.
+The module is also available in the part picker. See [Lab 3 notes](docs/lab3.md)
+for its labeled header, logic expressions, display pinout, and model limits.
+
     bun run build      # once, and after client changes
     bun start          # http://localhost:8765
 

@@ -3,6 +3,7 @@ import { layout } from '../src/layout/engine.ts';
 import { emptySidecar } from '../src/layout/types.ts';
 import { makeDesign, parseNetlist } from '../src/netlist.ts';
 import { renderSvg, svgSize } from '../src/render/index.ts';
+import { buildSimModel } from '../src/sim/index.ts';
 import { RICH } from '../src/render/skin-rich.ts';
 import { DARK, LIGHT } from '../src/render/theme.ts';
 import { readFixture } from './smoke.test.ts';
@@ -39,22 +40,31 @@ describe('renderSvg', () => {
     expect(lit).toContain('data-led="on"');
     expect(lit).toContain('data-led="off"');
   });
-  test('the board is theme independent: dark renders exactly like light', () => {
-    // The renderer draws the supply leads and their +5V / GND labels in the
-    // margin OUTSIDE the board rect, so a dark board palette puts dark ink on
-    // the page itself. The client mounts the SVG in a constant light well
-    // (--well in client/styles.css) instead, so the two palettes must stay
-    // equal. This fails the moment a divergent DARK field comes back.
+  test('the board itself is theme independent: only the margin ink differs', () => {
+    // A breadboard is tan under any lighting, so every colour of the board is
+    // the same in both palettes. The one exception is the ink used outside the
+    // board rect, where the renderer puts the supply leads, their +5V / GND
+    // labels and the rail-split note: the client sits the board on a near-black
+    // well and needs light ink out there, while server/png.ts renders onto a
+    // light page and needs dark. Anything else diverging is a bug, and this
+    // fails the moment a second divergent field appears.
     const light = renderSvg(res, { theme: LIGHT });
-    expect(renderSvg(res, { theme: DARK })).toBe(light);
     expect(renderSvg(res)).toBe(light);
     expect(light).toContain(LIGHT.board);
-    const { name: lightName, ...lightColours } = LIGHT;
-    const { name: darkName, ...darkColours } = DARK;
+
+    const { name: lightName, margin: lightMargin, ...lightColours } = LIGHT;
+    const { name: darkName, margin: darkMargin, ...darkColours } = DARK;
     expect(darkColours).toEqual(lightColours);
     expect(lightName).toBe('light');
     expect(darkName).toBe('dark');
     expect(DARK.dim).toBe(0.18);
+    // The exception has to be a real one, or the client's margin is unreadable.
+    expect(darkMargin).not.toBe(lightMargin);
+
+    // And it really is the only thing that reaches the output: swapping the one
+    // colour back turns the dark render into the light one, byte for byte.
+    const dark = renderSvg(res, { theme: DARK });
+    expect(dark.split(darkMargin).join(lightMargin)).toBe(light);
   });
   test('all footprints render', () => {
     const d2 = makeDesign({
@@ -72,6 +82,73 @@ describe('renderSvg', () => {
     for (const ref of ['Q1', 'RV1', 'C1', 'C2', 'L1', 'D1', 'SW1', 'DS1']) expect(s2).toContain(`data-ref="${ref}"`);
     expect(s2).toContain('data-seg="a" data-lit="on"');
     expect(s2).not.toContain('undefined');
+  });
+});
+
+describe('DIP switches', () => {
+  const dip = makeDesign({
+    SW1: { lib: 'Switch', part: 'SW_DIP_x07', value: 'SW_DIP_x07', pins: { '1': ['~', 'passive', '/A'], '14': ['~', 'passive', 'GND'], '2': ['~', 'passive', '/B'], '13': ['~', 'passive', 'GND'] } },
+    R1: { lib: 'Device', part: 'R', value: '1k', pins: { '1': ['1', 'passive', '+5V'], '2': ['2', 'passive', '/A'] } },
+    U1: { lib: '74xx', part: '74LS86', value: '74LS86', pins: { '1': ['~', 'input', '/A'], '2': ['~', 'input', '/B'], '3': ['~', 'output', '/Y'], '7': ['GND', 'power_in', 'GND'], '14': ['VCC', 'power_in', '+5V'] } },
+  });
+
+  test('a real one is drawn red, with a slider per way and its own reference', () => {
+    const svg = renderSvg(layout(dip, emptySidecar()));
+    expect(svg).toContain('fill="#B4232C"');
+    expect(svg).toContain('SW1 SW_DIP_x07');
+    expect((svg.match(/class="slider"/g) ?? []).length).toBe(7);
+  });
+
+  test('every position gets its own key, so the sliders flip one at a time', () => {
+    const res7 = layout(dip, emptySidecar());
+    const svg = renderSvg(res7);
+    const keys = [...svg.matchAll(/class="position" data-switch="([^"]+)"/g)].map((m) => m[1]);
+    expect(keys).toEqual(['SW1:1', 'SW1:2', 'SW1:3', 'SW1:4', 'SW1:5', 'SW1:6', 'SW1:7']);
+    // The whole way carries the key, so the click target is the well and the
+    // number too, not the few pixels of the slider.
+    expect(svg).not.toContain('class="slider" data-switch');
+    const way = /<g class="position" data-switch="SW1:1"[^>]*>(.*?)<\/g>/s.exec(svg)![1];
+    const [wellWidth, sliderWidth] = [...way.matchAll(/width="([\d.]+)"/g)].map((m) => Number(m[1]));
+    expect(wellWidth).toBeGreaterThan(sliderWidth);
+    // Those keys are the ones the simulator listens on for the wired ways.
+    const wired = buildSimModel(dip, res7).inputs.map((i) => i.key);
+    expect(wired).toEqual(['SW1:1', 'SW1:2']);
+    // Flipping one moves that slider and leaves its neighbours alone.
+    const one = renderSvg(res7, { sim: { leds: {}, segments: {}, switches: { 'SW1:2': true } } });
+    expect((one.match(/data-on="on"/g) ?? []).length).toBe(1);
+    expect(one).toContain('data-switch="SW1:2" data-on="on"');
+  });
+
+  test('switches folded into one by the layout option keep the reference of the switch they stand for', () => {
+    const folded = layout(d, { ...emptySidecar(), options: { ...emptySidecar().options, dipSwitchPositions: 7 } });
+    const keys = [...renderSvg(folded).matchAll(/class="position" data-switch="([^"]+)"/g)].map((m) => m[1]);
+    expect(keys.slice(0, 2)).toEqual(['SW1', 'SW2']);
+  });
+
+  test('switches folded into one by the layout option are named by size, not by a reference', () => {
+    const folded = layout(d, { ...emptySidecar(), options: { ...emptySidecar().options, dipSwitchPositions: 7 } });
+    const svg = renderSvg(folded);
+    expect(svg).toContain('7-position DIP switch');
+    expect(svg).not.toContain('SW 7-position');
+    expect((svg.match(/class="slider"/g) ?? []).length).toBe(7);
+  });
+});
+
+describe('resistor bands', () => {
+  test('spell out the value rather than a fixed decoration', () => {
+    const d2 = makeDesign({
+      R1: { lib: 'Device', part: 'R', value: '1k', pins: { '1': ['1', 'passive', '+5V'], '2': ['2', 'passive', '/A'] } },
+      R2: { lib: 'Device', part: 'R', value: '330', pins: { '1': ['1', 'passive', '+5V'], '2': ['2', 'passive', '/B'] } },
+      U1: { lib: '74xx', part: '74LS86', value: '74LS86', pins: { '1': ['~', 'input', '/A'], '2': ['~', 'input', '/B'], '3': ['~', 'output', '/Y'], '7': ['GND', 'power_in', 'GND'], '14': ['VCC', 'power_in', '+5V'] } },
+    });
+    const svg = renderSvg(layout(d2, emptySidecar()));
+    const bandsOf = (ref: string) => {
+      const group = new RegExp(`<g class="part" data-ref="${ref}".*?</g>`, 's').exec(svg)![0];
+      return [...group.matchAll(/width="2" height="9" fill="(#[0-9A-Fa-f]{6})"/g)].map((m) => m[1]);
+    };
+    // 1k is brown black red gold; 330 is orange orange brown gold.
+    expect(bandsOf('R1')).toEqual(['#6B4226', '#1A1A1A', '#C62828', '#C9A227']);
+    expect(bandsOf('R2')).toEqual(['#E8641A', '#E8641A', '#6B4226', '#C9A227']);
   });
 });
 

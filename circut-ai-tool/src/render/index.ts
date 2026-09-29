@@ -3,15 +3,19 @@
 // the client can attach hover, drag and click handlers.
 
 import { isRail } from '../layout/board.ts';
-import { P, pt, ROWY, svgSize, X0 } from './geometry.ts';
+import { moduleRect, P, pt, ROWY, svgSize, X0 } from './geometry.ts';
+import { wireControls, type Control } from './routing.ts';
+import { wirePolylines, type Point as OrthoPoint } from './ortho.ts';
 import type { EngineResult } from '../layout/engine.ts';
 import type { BoardSpec, Hole, Package, PlacedPart, Row, Wire } from '../layout/types.ts';
 import { displayName } from '../netlist.ts';
 import type { LedColour } from '../parts/led.ts';
+import { colourBands } from '../parts/resistor.ts';
+import { L3_BOARD, L3_SILK } from '../parts/lab3.ts';
 import { FLAT, type BoardGeom, type Skin, type SkinContext, type SkinLedState } from './skin.ts';
 import { LIGHT, type Theme } from './theme.ts';
 
-export { HEIGHT, P, pt, ROWY, svgSize, X0 } from './geometry.ts';
+export { HEIGHT, moduleRect, overhang, P, pt, ROWY, svgSize, X0 } from './geometry.ts';
 
 export interface SimState {
   leds: Record<string, boolean>;
@@ -31,6 +35,8 @@ export interface Highlight {
   net?: string;
   ref?: string;
   wire?: number;
+  /** In 3D, fade everything else instead of hiding it (a net picked from the legend). */
+  soft?: boolean;
 }
 
 export interface RenderOptions {
@@ -43,6 +49,12 @@ export interface RenderOptions {
    * downloads and the print sheet all depend on.
    */
   skin?: Skin;
+  /**
+   * Jumpers as bowed arcs (the default, and what the fixtures pin), or as
+   * square-cornered runs along the corridors between rows that never share a
+   * line with one another.
+   */
+  wireStyle?: 'arc' | 'orthogonal';
 }
 
 const esc = (s: string) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -89,7 +101,8 @@ function drawBoard(res: EngineResult, t: Theme, sk: Skin): string {
     const sx = (gapL + gapR) / 2;
     out.push(el('line', { x1: sx, y1: 22, x2: sx, y2: 56, stroke: t.textMuted, 'stroke-dasharray': '2 2' }));
     out.push(el('line', { x1: sx, y1: 292, x2: sx, y2: 326, stroke: t.textMuted, 'stroke-dasharray': '2 2' }));
-    out.push(text(sx, 6, 'rail split', { 'font-size': 6.5, fill: t.textMuted }));
+    // Above the board rect, so it lands on the surround, not on the board.
+    out.push(text(sx, 6, 'rail split', { 'font-size': 6.5, fill: t.margin }));
   }
   for (const row of ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'] as Row[]) {
     out.push(text(22, ROWY[row] + 3.5, row, { 'font-size': 10, fill: t.textMuted }));
@@ -123,31 +136,63 @@ function drawSupply(res: EngineResult, t: Theme, dim: (nets: string[], refs: str
 
 const SEG_SHAPES: Record<string, [number, number, number, number]> = { a: [-7, -14, 14, 3], b: [7, -12, 3, 11], c: [7, 1, 3, 11], d: [-7, 11, 14, 3], e: [-10, 1, 3, 11], f: [-10, -12, 3, 11], g: [-7, -1.5, 14, 3] };
 
+/**
+ * The key the simulator knows one DIP switch position by, and so the key a
+ * click on its slider must send. A folded package maps each position to the
+ * separate switch it stands for; a real DIP switch is one part, so its
+ * positions are numbered within it. Collapsing the two cases would give all
+ * seven sliders of one part the same key, and they would flip together.
+ */
+export function positionKey(pkg: Package, pos: number): string {
+  const ref = pkg.map?.[String(pos)];
+  return ref && ref !== pkg.id ? ref : `${pkg.id}:${pos}`;
+}
+
 function drawPackage(pkg: Package, res: EngineResult, t: Theme, sim: SimState | null, dim: (nets: string[], refs: string[]) => number | undefined): string {
-  const width = pkg.kind === 'dipswitch' ? (pkg.positions ?? 1) : pkg.pins / 2;
+  const width = pkg.kind === 'module' ? pkg.pins : pkg.kind === 'dipswitch' ? (pkg.positions ?? 1) : pkg.pins / 2;
   const x1 = pt({ col: pkg.col0, row: 'e' })[0] - P / 2 + 2;
   const x2 = pt({ col: pkg.col0 + width - 1, row: 'e' })[0] + P / 2 - 2;
   const y1 = ROWY.e - 7;
   const y2 = ROWY.f + 7;
   const ym = (y1 + y2) / 2;
   const parts: string[] = [];
-  if (pkg.kind === 'dipswitch') {
+  if (pkg.kind === 'module') {
+    return el('g', { class: 'pkg', 'data-ref': pkg.id, opacity: dim([], [pkg.id]) }, drawModule(pkg));
+  } else if (pkg.kind === 'dipswitch') {
     parts.push(el('rect', { x: x1, y: y1, width: x2 - x1, height: y2 - y1, rx: 3, fill: '#B4232C', stroke: '#6E1219' }));
     for (let i = 0; i < width; i++) {
       const cx = pt({ col: pkg.col0 + i, row: 'e' })[0];
-      const on = !!sim?.switches[pkg.map?.[String(i + 1)] ?? pkg.id] || !!sim?.switches[`${pkg.id}:${i + 1}`];
-      parts.push(el('rect', { x: cx - 4, y: y1 + 8, width: 8, height: y2 - y1 - 16, rx: 2, fill: '#F2E9D8', stroke: '#6E1219' }));
-      parts.push(el('rect', { x: cx - 3, y: on ? y1 + 9 : ym + 1, width: 6, height: (y2 - y1) / 2 - 10, rx: 1.5, fill: '#3A3D44', class: 'slider', 'data-switch': pkg.map?.[String(i + 1)] ?? `${pkg.id}:${i + 1}`, 'data-on': on ? 'on' : 'off' }));
-      parts.push(text(cx, y2 - 2, String(i + 1), { 'font-size': 6, fill: '#F2E9D8' }));
+      const key = positionKey(pkg, i + 1);
+      const on = !!sim?.switches[key];
+      // The whole way is the click target, well and number included. The
+      // slider alone is about three pixels wide at the zoom a full board
+      // opens at, which is not something you can reliably hit.
+      // Wells nearly fill the pitch, the way they do on the real part, which
+      // also leaves only a thin rib of red between one way and the next.
+      const well = el('rect', { x: cx - 6, y: y1 + 8, width: 12, height: y2 - y1 - 16, rx: 2, fill: '#F2E9D8', stroke: '#6E1219' });
+      const slider = el('rect', { x: cx - 4.5, y: on ? y1 + 9 : ym + 1, width: 9, height: (y2 - y1) / 2 - 10, rx: 1.5, fill: '#3A3D44', class: 'slider' });
+      parts.push(el('g', { class: 'position', 'data-switch': key, 'data-on': on ? 'on' : 'off' }, well + slider + text(cx, y2 - 2, String(i + 1), { 'font-size': 6, fill: '#F2E9D8' })));
     }
-    parts.push(text((x1 + x2) / 2, y1 - 4, pkg.name, { fill: t.text, 'font-size': 8 }));
+    // A folded package stands in for several separate switches and has no
+    // reference of its own; a real DIP switch is a part, so name it.
+    const folded = Object.values(pkg.map ?? {}).some((ref) => ref !== pkg.id);
+    parts.push(text((x1 + x2) / 2, y1 - 4, folded ? pkg.name : `${pkg.id} ${pkg.name}`, { fill: t.text, 'font-size': 8 }));
   } else if (pkg.kind === 'sevenseg') {
-    parts.push(el('rect', { x: x1, y: y1 - 6, width: x2 - x1, height: y2 - y1 + 12, rx: 3, fill: '#1B1C20', stroke: '#000' }));
+    // The body at its real height: 19 mm across the gutter, rows c to h, with
+    // the pins showing at rows d and g and the digit centred on the gutter.
+    const by1 = ROWY.c - 8;
+    const by2 = ROWY.h + 8;
+    parts.push(el('rect', { x: x1, y: by1, width: x2 - x1, height: by2 - by1, rx: 3, fill: '#1B1C20', stroke: '#000' }));
+    for (const [num, h] of Object.entries(res.pinHoles[pkg.id] ?? {})) {
+      const [hx, hy] = pt(h);
+      parts.push(el('circle', { cx: hx, cy: hy, r: 2.2, fill: '#8a8f99', stroke: '#000', 'stroke-width': 0.5 }));
+      parts.push(text(hx, hy + (hy < ym ? -5 : 10), num, { fill: '#c9ccd3', 'font-size': 5.5 }));
+    }
     const cx = (x1 + x2) / 2;
     const state = sim?.segments[pkg.id] ?? {};
-    for (const [seg, [dx, dy, w, h]] of Object.entries(SEG_SHAPES)) parts.push(el('rect', { x: cx + dx, y: ym + dy, width: w, height: h, rx: 1, fill: state[seg] ? t.segOn : t.segOff, 'data-seg': seg, 'data-lit': state[seg] ? 'on' : 'off' }));
-    parts.push(el('circle', { cx: x2 - 5, cy: y2 + 1, r: 1.5, fill: t.segOff }));
-    parts.push(text(cx, y1 - 10, `${pkg.id} ${pkg.name}`, { fill: t.text, 'font-size': 8 }));
+    for (const [seg, [dx, dy, w, h]] of Object.entries(SEG_SHAPES)) parts.push(el('rect', { x: cx + dx * 1.5, y: ym + dy * 1.6, width: w * 1.5, height: h * 1.6, rx: 1, fill: state[seg] ? t.segOn : t.segOff, 'data-seg': seg, 'data-lit': state[seg] ? 'on' : 'off' }));
+    parts.push(el('circle', { cx: x2 - 7, cy: ym + 22, r: 1.8, fill: t.segOff }));
+    parts.push(text(cx, by1 - 4, `${pkg.id} ${pkg.name}`, { fill: t.text, 'font-size': 8 }));
   } else {
     parts.push(el('rect', { x: x1, y: y1, width: x2 - x1, height: y2 - y1, rx: 3, fill: t.chip, stroke: '#000' }));
     parts.push(el('circle', { cx: x1, cy: ym, r: 5, fill: t.notch }));
@@ -158,14 +203,67 @@ function drawPackage(pkg: Package, res: EngineResult, t: Theme, sim: SimState | 
   return el('g', { class: 'pkg', 'data-ref': pkg.id, opacity: dim([], [pkg.id]) }, parts.join(''));
 }
 
+/**
+ * The L3 board at its real size: a blue PCB about 18 by 13 pitches with its
+ * 15-position header half a pitch in from the long edge that sits on the
+ * breadboard, silkscreen beside each position, and the wide DIP socket with
+ * the potted chip filling the rest. It hangs outward from its header row.
+ */
+function drawModule(pkg: Package): string {
+  const r = moduleRect(pkg);
+  const row = pkg.row ?? 'a';
+  const yh = ROWY[row];
+  const out: string[] = [];
+  out.push(el('rect', { x: r.x1, y: r.y1, width: r.x2 - r.x1, height: r.y2 - r.y1, rx: 6, fill: '#1f3a66', stroke: '#0f1f3a', 'stroke-width': 1.2 }));
+  // Silkscreen: the separator line between Z and ~W, the labels, and the board name near the far edge.
+  const xs = Array.from({ length: pkg.pins }, (_, i) => pt({ col: pkg.col0 + i, row })[0]);
+  const yFar = yh + r.dir * L3_BOARD.depth * P;
+  out.push(text((r.x1 + r.x2) / 2, yFar - r.dir * 5 + 3, `${pkg.id}  L3 AUXILIARY`, { fill: '#e8ecf4', 'font-size': 7, 'font-weight': 600 }));
+  for (let i = 0; i < pkg.pins; i++) {
+    const x = xs[i];
+    out.push(el('circle', { cx: x, cy: yh, r: 4.2, fill: '#c7a544', stroke: '#7a6220', 'stroke-width': 0.6 }));
+    out.push(el('circle', { cx: x, cy: yh, r: 1.6, fill: '#101f38' }));
+    const label = L3_SILK[i];
+    // Labels read along the board's short axis, the way they are printed.
+    const ly = yh + r.dir * 8;
+    if (label) out.push(el('text', { x, y: ly, transform: `rotate(${r.dir === -1 ? -90 : 90} ${n(x)} ${n(ly)})`, 'font-family': 'ui-monospace, Consolas, monospace', 'font-size': 6.5, 'font-weight': 700, fill: '#f4f6fa', 'text-anchor': 'start', 'dominant-baseline': 'middle' }, esc(label)));
+    else out.push(el('line', { x1: x, y1: yh + r.dir * 6, x2: x, y2: yh + r.dir * 24, stroke: '#f4f6fa', 'stroke-width': 1.2 }));
+  }
+  // The wide DIP socket, its pin rows parallel to the header, and the chip in it.
+  const sNear = yh + r.dir * L3_BOARD.socket.near * P;
+  const sFar = yh + r.dir * L3_BOARD.socket.far * P;
+  const sx1 = xs[0] - P / 2;
+  const sx2 = xs[pkg.pins - 1] + P / 2;
+  out.push(el('rect', { x: sx1, y: Math.min(sNear, sFar) - 5, width: sx2 - sx1, height: Math.abs(sFar - sNear) + 10, rx: 2, fill: '#3a3d44', stroke: '#1b1d22' }));
+  for (let i = 0; i < L3_BOARD.socket.perSide; i++) {
+    const x = xs[0] + ((xs[pkg.pins - 1] - xs[0]) * i) / (L3_BOARD.socket.perSide - 1);
+    for (const y of [sNear, sFar]) out.push(el('circle', { cx: x, cy: y, r: 2.2, fill: '#c7a544' }));
+  }
+  const cx1 = sx1 + 3;
+  const cx2 = sx2 - 3;
+  const cy1 = Math.min(sNear, sFar) + 8;
+  const cy2 = Math.max(sNear, sFar) - 8;
+  out.push(el('rect', { x: cx1, y: cy1, width: cx2 - cx1, height: cy2 - cy1, rx: 2, fill: '#111216', stroke: '#000' }));
+  // Pin 1 mark at the near-left corner, and the legend along the chip's long axis.
+  out.push(el('circle', { cx: cx1 + 6, cy: r.dir === -1 ? cy2 - 6 : cy1 + 6, r: 2, fill: '#d8dbe2' }));
+  out.push(text((cx1 + cx2) / 2, (cy1 + cy2) / 2 + 4, 'L3 CKT', { fill: '#e8ecf4', 'font-size': 11, 'font-weight': 700, 'letter-spacing': 1.5 }));
+  return out.join('');
+}
+
 // ---------- parts ----------
 
 function body2(part: PlacedPart, t: Theme, sim: SimState | null, sk: Skin, colours: Record<string, LedColour>): string {
   // Drawn horizontally, centred at the origin; the caller rotates it along the leg axis.
   const value = part.value;
   switch (part.style) {
-    case 'R':
-      return el('rect', { x: -11, y: -4.5, width: 22, height: 9, rx: 2, fill: t.body, stroke: t.bodyStroke }) + el('rect', { x: -6, y: -4.5, width: 2, height: 9, fill: '#B4232C' }) + el('rect', { x: -1, y: -4.5, width: 2, height: 9, fill: '#3A3D44' }) + el('rect', { x: 4, y: -4.5, width: 2, height: 9, fill: '#E3B505' });
+    case 'R': {
+      // The bands are read off the value, so a resistor never shows a code for
+      // some other part. Three grouped at one end, tolerance alone at the far
+      // end, the way they are painted.
+      const bands = colourBands(value);
+      const xs = [-7.5, -4.5, -1.5, 5.5];
+      return el('rect', { x: -11, y: -4.5, width: 22, height: 9, rx: 2, fill: t.body, stroke: t.bodyStroke }) + (bands ?? []).map((b, i) => el('rect', { x: xs[i], y: -4.5, width: 2, height: 9, fill: b.hex })).join('');
+    }
     case 'C':
       return el('rect', { x: -3.5, y: -6, width: 2.2, height: 12, fill: '#2F6FBF' }) + el('rect', { x: 1.3, y: -6, width: 2.2, height: 12, fill: '#2F6FBF' });
     case 'Cpol':
@@ -243,22 +341,33 @@ function wrap(id: string, style: string, inner: string | undefined): string {
   return inner ? `<g id="${id}" style="${style}" aria-hidden="true">${inner}</g>` : '';
 }
 
-function drawWire(w: Wire, i: number, color: string, t: Theme, opacity: number | undefined, sk: Skin): string {
+function drawWire(w: Wire, i: number, color: string, t: Theme, opacity: number | undefined, sk: Skin, c: Control): string {
   const [ax, ay] = pt(w.a);
   const [bx, by] = pt(w.b);
-  const dx = bx - ax;
-  const dy = by - ay;
-  const len = Math.hypot(dx, dy) || 1;
-  // Jumper wires run straight between their two holes, the way a tidy
-  // prototyping job looks. The control point stays in the API so a route that
-  // genuinely has to turn a corner can bend, but a plain hole-to-hole link
-  // puts it on the midpoint, which makes the quadratic a straight line.
-  const bulge = 0;
-  const cx = (ax + bx) / 2 + (-dy / len) * bulge;
-  const cy = (ay + by) / 2 + (dx / len) * bulge;
+  // Every jumper bows, and wires sharing a corridor bow by different amounts,
+  // so a run of links along one row reads as several arcs rather than a single
+  // straight line. routing.ts works out where each control point goes.
+  const [cx, cy] = c;
   const rail = isRail(w.a.row) || isRail(w.b.row);
   const body = sk.wireBody?.([ax, ay], [cx, cy], [bx, by], color, rail);
   return el('g', { class: 'wire', 'data-net': w.net, 'data-wire': i, opacity }, body ?? el('path', { d: `M ${n(ax)} ${n(ay)} Q ${n(cx)} ${n(cy)} ${n(bx)} ${n(by)}`, fill: 'none', stroke: color, 'stroke-width': rail ? 2.2 : 2.6, 'stroke-linecap': 'round' }) + (body ? '' : el('circle', { cx: ax, cy: ay, r: 3.2, fill: color, stroke: t.chip, 'stroke-width': 0.8 }) + el('circle', { cx: bx, cy: by, r: 3.2, fill: color, stroke: t.chip, 'stroke-width': 0.8 })));
+}
+
+/** A square-cornered jumper: a dark edge under the coloured run, mitred corners, and a dot in each hole. */
+function drawOrthoWire(w: Wire, i: number, color: string, t: Theme, opacity: number | undefined, pts: OrthoPoint[]): string {
+  const rail = isRail(w.a.row) || isRail(w.b.row);
+  const width = rail ? 2.2 : 2.6;
+  const d = pts.map(([x, y], k) => `${k ? 'L' : 'M'} ${n(x)} ${n(y)}`).join(' ');
+  const [ax, ay] = pts[0];
+  const [bx, by] = pts[pts.length - 1];
+  return el(
+    'g',
+    { class: 'wire', 'data-net': w.net, 'data-wire': i, opacity },
+    el('path', { d, fill: 'none', stroke: 'rgba(0,0,0,0.38)', 'stroke-width': width + 1.6, 'stroke-linejoin': 'miter', 'stroke-linecap': 'round' }) +
+      el('path', { d, fill: 'none', stroke: color, 'stroke-width': width, 'stroke-linejoin': 'miter', 'stroke-linecap': 'round' }) +
+      el('circle', { cx: ax, cy: ay, r: 3.2, fill: color, stroke: t.chip, 'stroke-width': 0.8 }) +
+      el('circle', { cx: bx, cy: by, r: 3.2, fill: color, stroke: t.chip, 'stroke-width': 0.8 }),
+  );
 }
 
 // ---------- entry ----------
@@ -282,7 +391,10 @@ export function renderSvg(res: EngineResult, opts: RenderOptions = {}): string {
     return undefined;
   };
   const dimPart = (nets: string[], refs: string[]) => (hl?.wire !== undefined ? t.dim : dim(nets, refs));
-  const size = svgSize(res.board);
+  const size = svgSize(res.board, res.packages);
+  const ortho = opts.wireStyle === 'orthogonal';
+  const controls = ortho ? [] : wireControls(res.wires);
+  const polylines = ortho ? wirePolylines(res.wires, res.packages, res.board) : [];
   const ctx: SkinContext = { parts: res.parts, board: res.board, ledColors: res.ledColors ?? {}, leds: Object.fromEntries(res.parts.filter((p) => p.style === 'LED').map((p) => [p.id, ledState(p.id, sim)])) };
   const defs = sk.defs?.(ctx, t);
   const layers = [
@@ -294,7 +406,7 @@ export function renderSvg(res: EngineResult, opts: RenderOptions = {}): string {
     wrap('l-spill', 'mix-blend-mode:multiply', sk.spillLayer?.(ctx, t)),
     el('g', { class: 'packages' }, res.packages.map((p) => drawPackage(p, res, t, sim, hl?.wire !== undefined || hl?.net !== undefined ? () => undefined : dim)).join('')),
     el('g', { class: 'parts' }, res.parts.map((p) => drawPart(p, res, t, sim, dimPart, sk)).join('')),
-    el('g', { class: 'wires' }, res.wires.map((w, i) => drawWire(w, i, res.nets[w.net]?.color ?? t.text, t, dim([w.net], [], i), sk)).join('')),
+    el('g', { class: 'wires' }, res.wires.map((w, i) => (ortho ? drawOrthoWire(w, i, res.nets[w.net]?.color ?? t.text, t, dim([w.net], [], i), polylines[i]) : drawWire(w, i, res.nets[w.net]?.color ?? t.text, t, dim([w.net], [], i), sk, controls[i]))).join('')),
     drawSupply(res, t, hl?.wire !== undefined ? () => undefined : dim),
     wrap('l-glow', 'mix-blend-mode:screen', sk.glowLayer?.(ctx, t)),
   ];

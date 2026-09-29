@@ -14,6 +14,8 @@ export interface ChipSpec {
   kind: GateKind | null;
   gates: GateSpec[];
   decoder: '7447' | '7448' | null;
+  /** 3-to-8 line decoder with active-low outputs (74138). */
+  demux?: boolean;
   vcc: number;
   gnd: number;
   iccMax: number;
@@ -43,7 +45,23 @@ export const CHIPS: Record<string, ChipSpec> = {
   '86': chip('86', 'quad 2-input XOR', 'xor', QUAD2, 10e-3),
   '47': { code: '47', description: 'BCD to 7-segment decoder, active-low outputs (common-anode display)', kind: null, gates: [], decoder: '7447', vcc: 16, gnd: 8, iccMax: 64e-3, pins: 16 },
   '48': { code: '48', description: 'BCD to 7-segment decoder, active-high outputs (common-cathode display)', kind: null, gates: [], decoder: '7448', vcc: 16, gnd: 8, iccMax: 76e-3, pins: 16 },
+  '138': { code: '138', description: '3-to-8 line decoder, active-low outputs', kind: null, gates: [], decoder: null, demux: true, vcc: 16, gnd: 8, iccMax: 10e-3, pins: 16 },
 };
+
+/** 74138 pinout: select A0-A2, enables E1 and E2 (active low) and E3 (active high), outputs O0-O7. */
+export const DEMUX_PINS = {
+  select: [1, 2, 3],
+  enableLow: [4, 5],
+  enableHigh: 6,
+  outputs: [15, 14, 13, 12, 11, 10, 9, 7],
+};
+
+/** Output levels O0-O7 of a 74138: the selected line goes low only while enabled. */
+export function demuxOutputs(select: number[], enableLow: number[], enableHigh: number): (0 | 1)[] {
+  const on = enableLow.every((v) => v === 0) && enableHigh === 1;
+  const line = select[0] + 2 * select[1] + 4 * select[2];
+  return DEMUX_PINS.outputs.map((_, i) => (on && i === line ? 0 : 1));
+}
 
 /** 7447 / 7448 pinout (same for both). */
 export const DECODER_PINS = {

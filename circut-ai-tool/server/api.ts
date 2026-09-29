@@ -1,6 +1,11 @@
 // REST routes. Every route is a thin call into the Service; errors map to
 // JSON {error} with the ServiceError status.
 
+import { lab3Example } from './lab3-example.ts';
+import { createLibraryLookup } from './libraries.ts';
+import { DATA_DIR, KICAD_SYMBOL_DIR } from './config.ts';
+import path from 'node:path';
+import { OrganizerError, OrganizerStore } from './organizer.ts';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { PART_ALIASES, resolveAlias } from '../src/parts/aliases.ts';
@@ -11,6 +16,7 @@ import { buildConnectInfo } from './connect.ts';
 import { pngAvailable, renderPng } from './png.ts';
 import { ServiceError, type ProjectEvent, type Service } from './service.ts';
 import { createTunnel, type Tunnel } from './tunnel.ts';
+import type { ClientRegistry } from './clients.ts';
 import type { Events } from './watch.ts';
 
 export function parseHighlight(q: string | undefined): Highlight | null {
@@ -39,15 +45,20 @@ export function summaryOf(p: ReturnType<Service['get']>) {
   };
 }
 
-export function createApi(service: Service, events: Events<ProjectEvent>, tunnel: Tunnel = createTunnel()): Hono {
+export function createApi(service: Service, events: Events<ProjectEvent>, tunnel: Tunnel = createTunnel(), clients?: ClientRegistry): Hono {
   const api = new Hono();
 
   api.onError((err, c) => {
     if (err instanceof ServiceError) return c.json({ error: err.message }, err.status as 400);
+    if (err instanceof OrganizerError) return c.json({ error: err.message }, err.status as 400);
     console.error(err);
     return c.json({ error: err.message }, 500);
   });
 
+  api.post('/examples/lab3', async (c) => {
+    const text = await lab3Example(createLibraryLookup({ symbolDir: KICAD_SYMBOL_DIR }));
+    return c.json(summaryOf(await service.import('Lab3_Prelab_Example.kicad_sch', new TextEncoder().encode(text))));
+  });
   api.get('/projects', async (c) => c.json(await service.list()));
   api.post('/projects/open', async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as { path?: string };
@@ -82,13 +93,13 @@ export function createApi(service: Service, events: Events<ProjectEvent>, tunnel
   api.get('/projects/:id/sidecar', (c) => c.json(service.get(c.req.param('id')).sidecar));
   api.get('/projects/:id/board.svg', (c) => {
     const p = service.get(c.req.param('id'));
-    const svg = renderSvg(p.doc, { highlight: parseHighlight(c.req.query('highlight')), theme: c.req.query('theme') === 'dark' ? DARK : LIGHT });
+    const svg = renderSvg(p.doc, { highlight: parseHighlight(c.req.query('highlight')), theme: c.req.query('theme') === 'dark' ? DARK : LIGHT, wireStyle: p.sidecar.options.wireStyle });
     return c.body(svg, 200, { 'content-type': 'image/svg+xml; charset=utf-8', 'cache-control': 'no-cache' });
   });
   api.get('/projects/:id/board.png', (c) => {
     const p = service.get(c.req.param('id'));
     if (!pngAvailable()) return c.json({ error: 'PNG rendering unavailable; use board.svg' }, 501);
-    const png = renderPng(renderSvg(p.doc, { highlight: parseHighlight(c.req.query('highlight')) }));
+    const png = renderPng(renderSvg(p.doc, { highlight: parseHighlight(c.req.query('highlight')), wireStyle: p.sidecar.options.wireStyle }));
     // resvg/Node always back this with a real ArrayBuffer; TS's stricter
     // Uint8Array<ArrayBufferLike> vs <ArrayBuffer> split needs a nudge here.
     return c.body(png as Uint8Array<ArrayBuffer>, 200, { 'content-type': 'image/png', 'cache-control': 'no-cache' });
@@ -143,7 +154,41 @@ export function createApi(service: Service, events: Events<ProjectEvent>, tunnel
     if (!b.ref || b.value === undefined) throw new ServiceError('body must be {"ref": "R1", "value": "10k"}');
     return c.json(editResult(await service.setValue(c.req.param('id'), b.ref, String(b.value))));
   });
+  // Home page folders: which folder each project is filed under.
+  const organizer = new OrganizerStore(path.join(DATA_DIR, 'organizer.json'));
+  api.get('/organizer', async (c) => c.json(await organizer.get()));
+  api.post('/organizer/folders', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { name?: unknown };
+    return c.json(await organizer.createFolder(body.name));
+  });
+  api.patch('/organizer/folders/:id', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { name?: unknown };
+    return c.json(await organizer.renameFolder(c.req.param('id'), body.name));
+  });
+  api.delete('/organizer/folders/:id', async (c) => {
+    await organizer.deleteFolder(c.req.param('id'));
+    return c.json({ ok: true });
+  });
+  api.post('/organizer/move', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { path?: unknown; folderId?: unknown };
+    await organizer.move(body.path, body.folderId);
+    return c.json({ ok: true });
+  });
+  api.post('/organizer/order', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { ids?: unknown };
+    await organizer.reorder(body.ids);
+    return c.json({ ok: true });
+  });
   api.get('/connect', (c) => c.json({ ...buildConnectInfo(), tunnel: tunnel.status() }));
+  // Who has been calling the MCP server, for the status lights.
+  api.get('/clients', (c) => c.json(clients?.list() ?? []));
+  // The stdio entry point runs in its own process and reports in here.
+  api.post('/clients/touch', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { name?: string; method?: string; transport?: string };
+    if (!clients) return c.json({ ok: false });
+    const name = typeof body.name === 'string' && body.name ? body.name : 'stdio client';
+    return c.json(clients.touch({ id: `stdio:${name}`, transport: 'stdio', method: typeof body.method === 'string' ? body.method : 'request', clientName: name }));
+  });
   api.get('/parts', (c) => c.json(PART_ALIASES));
 
   // Public access for ChatGPT and other internet-only MCP clients.
@@ -157,6 +202,8 @@ export function createApi(service: Service, events: Events<ProjectEvent>, tunnel
   api.get('/events', (c) =>
     streamSSE(c, async (stream) => {
       const unsub = events.subscribe((ev) => void stream.writeSSE({ event: ev.type, data: JSON.stringify(ev) }));
+      // A page that has just connected wants to know who is already here.
+      for (const client of clients?.list() ?? []) await stream.writeSSE({ event: 'client', data: JSON.stringify({ projectId: '', type: 'client', client }) });
       let alive = true;
       stream.onAbort(() => {
         alive = false;

@@ -5,60 +5,70 @@
  * .board-card / .boardcol: dragging a part re-serialises the whole SVG each
  * frame, and a backdrop-filter above that is a compositing trap.
  *
- * The board sits in a "well" whose colour is CONSTANT across themes (--well,
- * matching the PNG background in server/png.ts). The renderer draws supply
- * leads and their +5V / GND labels in the margin OUTSIDE the board rect, so a
- * dark surface there would swallow them. See src/render/theme.ts.
+ * The board sits in a "well" whose colour is CONSTANT across themes (--well):
+ * a near-black bench, so a lit LED reads as a lamp rather than as a slightly
+ * warmer dot, and so the flat board and the 3D board agree about the room they
+ * are in. Print overrides it back to white further down.
+ *
+ * The renderer draws supply leads and their +5V / GND labels in the margin
+ * OUTSIDE the board rect, so anything drawn there has to be light: that is
+ * what Theme.margin is for, and why the client always renders the board with
+ * the DARK theme. server/png.ts keeps the light background and the LIGHT
+ * theme, because an exported PNG goes into a build guide. See
+ * src/render/theme.ts.
  */
 
 :root {
   color-scheme: light;
 
-  /* ambient */
-  --bg: #f4f1ea;
-  --tint-a: rgba(88, 132, 224, 0.14);
-  --tint-b: rgba(226, 152, 96, 0.12);
-  --tint-c: rgba(120, 196, 178, 0.1);
+  /* Gotham in daylight: Blueprint's light grays, flat and dense, blue for anything active. */
+  --bg: #f6f7f9;
+  --tint-a: transparent;
+  --tint-b: transparent;
+  --tint-c: transparent;
 
   /* content */
-  --ink: #1b1f27;
-  --ink-2: #5d6577;
-  --line: rgba(18, 22, 32, 0.12);
+  --ink: #1c2127;
+  --ink-2: #5f6b7c;
+  --line: rgba(17, 20, 24, 0.15);
   --card: #ffffff;
-  --sunken: rgba(18, 22, 32, 0.045);
-  --accent: #1657c4;
-  --accent-soft: rgba(22, 87, 196, 0.12);
+  --sunken: rgba(17, 20, 24, 0.05);
+  --accent: #2d72d2;
+  --accent-soft: rgba(45, 114, 210, 0.14);
   --accent-ink: #ffffff;
+  --btn: #f6f7f9;
+  --btn-hover: #edeff2;
+  --btn-line: rgba(17, 20, 24, 0.2);
 
-  /* glass */
-  --glass: rgba(255, 255, 255, 0.6);
-  --glass-strong: rgba(255, 255, 255, 0.78);
-  --glass-border: rgba(18, 22, 32, 0.09);
-  --glass-highlight: rgba(255, 255, 255, 0.9);
-  --blur: 24px;
-  --sat: 180%;
+  /* panels are solid; there is no glass in this skin */
+  --glass: #ffffff;
+  --glass-strong: #f6f7f9;
+  --glass-border: rgba(17, 20, 24, 0.15);
+  --glass-highlight: rgba(255, 255, 255, 0.8);
+  --blur: 0px;
+  --sat: 100%;
 
   /* elevation */
-  --shadow-1: 0 1px 2px rgba(16, 20, 30, 0.06), 0 2px 8px rgba(16, 20, 30, 0.05);
-  --shadow-2: 0 2px 6px rgba(16, 20, 30, 0.07), 0 10px 28px rgba(16, 20, 30, 0.08);
-  --shadow-3: 0 8px 24px rgba(16, 20, 30, 0.1), 0 24px 60px rgba(16, 20, 30, 0.12);
+  --shadow-1: 0 1px 1px rgba(17, 20, 24, 0.1);
+  --shadow-2: 0 1px 1px rgba(17, 20, 24, 0.1), 0 2px 6px rgba(17, 20, 24, 0.12);
+  --shadow-3: 0 2px 4px rgba(17, 20, 24, 0.12), 0 8px 24px rgba(17, 20, 24, 0.16);
 
   /* status */
-  --done: #1f8a4c;
-  --warn: #a2740a;
-  --err: #c33025;
+  --done: #1c6e42;
+  --warn: #935610;
+  --err: #ac2f33;
   --on-status: #ffffff;
 
   /* shape + rhythm */
-  --r-sm: 10px;
-  --r-md: 14px;
-  --r-lg: 20px;
-  --r-xl: 28px;
+  --r-sm: 2px;
+  --r-md: 3px;
+  --r-lg: 4px;
+  --r-xl: 6px;
   --pad: 16px;
 
   /* CONSTANT in both themes: the board's surface */
-  --well: #f6f4ee;
-  --well-line: rgba(18, 22, 32, 0.1);
+  --well: #14171f;
+  --well-line: rgba(150, 165, 195, 0.22);
   --well-invalid: #c0362c;
 
   --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
@@ -67,34 +77,44 @@
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #0e1014;
-  --tint-a: rgba(78, 126, 224, 0.2);
-  --tint-b: rgba(196, 118, 72, 0.14);
-  --tint-c: rgba(84, 168, 156, 0.12);
+  /* Gotham: Blueprint's dark grays, flat and dense, blue for anything active. */
+  --bg: #1c2127;
+  --tint-a: transparent;
+  --tint-b: transparent;
+  --tint-c: transparent;
 
-  --ink: #e9e7e1;
-  --ink-2: #a0a7b5;
-  --line: rgba(255, 255, 255, 0.12);
-  --card: #191c22;
-  --sunken: rgba(0, 0, 0, 0.25);
-  --accent: #6aa8ff;
-  --accent-soft: rgba(106, 168, 255, 0.16);
-  --accent-ink: #08152a;
+  --ink: #f6f7f9;
+  --ink-2: #abb3bf;
+  --line: rgba(255, 255, 255, 0.15);
+  --card: #252a31;
+  --sunken: rgba(17, 20, 24, 0.55);
+  --accent: #4c90f0;
+  --accent-soft: rgba(45, 114, 210, 0.24);
+  --accent-ink: #ffffff;
+  --btn: #383e47;
+  --btn-hover: #404854;
+  --btn-line: rgba(255, 255, 255, 0.12);
 
-  --glass: rgba(30, 34, 43, 0.55);
-  --glass-strong: rgba(32, 36, 46, 0.74);
-  --glass-border: rgba(255, 255, 255, 0.1);
-  --glass-highlight: rgba(255, 255, 255, 0.14);
+  --glass: #252a31;
+  --glass-strong: #2f343c;
+  --glass-border: rgba(255, 255, 255, 0.15);
+  --glass-highlight: rgba(255, 255, 255, 0.06);
+  --blur: 0px;
+  --sat: 100%;
 
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.3);
-  --shadow-2: 0 2px 8px rgba(0, 0, 0, 0.45), 0 12px 32px rgba(0, 0, 0, 0.4);
-  --shadow-3: 0 10px 30px rgba(0, 0, 0, 0.5), 0 28px 70px rgba(0, 0, 0, 0.55);
+  --shadow-1: 0 1px 1px rgba(17, 20, 24, 0.5);
+  --shadow-2: 0 1px 1px rgba(17, 20, 24, 0.5), 0 2px 6px rgba(17, 20, 24, 0.4);
+  --shadow-3: 0 2px 4px rgba(17, 20, 24, 0.5), 0 8px 24px rgba(17, 20, 24, 0.5);
 
-  /* these had no dark values before, so the light ones leaked through */
-  --done: #4ac97e;
-  --warn: #e0a83c;
-  --err: #ff6f66;
-  --on-status: #10141a;
+  --r-sm: 2px;
+  --r-md: 3px;
+  --r-lg: 4px;
+  --r-xl: 6px;
+
+  --done: #32a467;
+  --warn: #ec9a3c;
+  --err: #e76a6e;
+  --on-status: #ffffff;
 }
 
 /* Correct shell before the JS module boots (the inline guard in index.html
@@ -102,29 +122,44 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --bg: #0e1014;
-    --tint-a: rgba(78, 126, 224, 0.2);
-    --tint-b: rgba(196, 118, 72, 0.14);
-    --tint-c: rgba(84, 168, 156, 0.12);
-    --ink: #e9e7e1;
-    --ink-2: #a0a7b5;
-    --line: rgba(255, 255, 255, 0.12);
-    --card: #191c22;
-    --sunken: rgba(0, 0, 0, 0.25);
-    --accent: #6aa8ff;
-    --accent-soft: rgba(106, 168, 255, 0.16);
-    --accent-ink: #08152a;
-    --glass: rgba(30, 34, 43, 0.55);
-    --glass-strong: rgba(32, 36, 46, 0.74);
-    --glass-border: rgba(255, 255, 255, 0.1);
-    --glass-highlight: rgba(255, 255, 255, 0.14);
-    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.3);
-    --shadow-2: 0 2px 8px rgba(0, 0, 0, 0.45), 0 12px 32px rgba(0, 0, 0, 0.4);
-    --shadow-3: 0 10px 30px rgba(0, 0, 0, 0.5), 0 28px 70px rgba(0, 0, 0, 0.55);
-    --done: #4ac97e;
-    --warn: #e0a83c;
-    --err: #ff6f66;
-    --on-status: #10141a;
+    /* Gotham: Blueprint's dark grays, flat and dense, blue for anything active. */
+    --bg: #1c2127;
+    --tint-a: transparent;
+    --tint-b: transparent;
+    --tint-c: transparent;
+
+    --ink: #f6f7f9;
+    --ink-2: #abb3bf;
+    --line: rgba(255, 255, 255, 0.15);
+    --card: #252a31;
+    --sunken: rgba(17, 20, 24, 0.55);
+    --accent: #4c90f0;
+    --accent-soft: rgba(45, 114, 210, 0.24);
+    --accent-ink: #ffffff;
+    --btn: #383e47;
+    --btn-hover: #404854;
+    --btn-line: rgba(255, 255, 255, 0.12);
+
+    --glass: #252a31;
+    --glass-strong: #2f343c;
+    --glass-border: rgba(255, 255, 255, 0.15);
+    --glass-highlight: rgba(255, 255, 255, 0.06);
+    --blur: 0px;
+    --sat: 100%;
+
+    --shadow-1: 0 1px 1px rgba(17, 20, 24, 0.5);
+    --shadow-2: 0 1px 1px rgba(17, 20, 24, 0.5), 0 2px 6px rgba(17, 20, 24, 0.4);
+    --shadow-3: 0 2px 4px rgba(17, 20, 24, 0.5), 0 8px 24px rgba(17, 20, 24, 0.5);
+
+    --r-sm: 2px;
+    --r-md: 3px;
+    --r-lg: 4px;
+    --r-xl: 6px;
+
+    --done: #32a467;
+    --warn: #ec9a3c;
+    --err: #e76a6e;
+    --on-status: #ffffff;
   }
 }
 
@@ -472,6 +507,31 @@ header .back:hover {
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-2);
   padding: 12px;
+}
+
+/* Full screen: the board fills the height, with the toolbar and legend still beneath it. */
+.board-card:fullscreen {
+  display: flex;
+  flex-direction: column;
+  border-radius: 0;
+  background: var(--bg);
+  overflow: auto;
+}
+
+.board-card:fullscreen #board {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.board-card:fullscreen #board svg {
+  width: auto;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
 }
 
 #board {
@@ -1257,20 +1317,545 @@ th.mono {
   inset: 0;
   border-radius: inherit;
   overflow: hidden;
-  background: #e9e5dc;
+  /* Matches the renderer's own clear colour, so resizing never flashes. */
+  background: #070910;
   z-index: 3;
 }
 .view3d-canvas { position: absolute; inset: 0; }
-.view3d-hint {
+.view3d-bar {
   position: absolute;
   left: 10px;
   top: 8px;
+  right: 10px;
   z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* The bar is a caption, not a toolbar: only the button takes the pointer,
+     so a drag begun anywhere else still orbits the board. */
+  pointer-events: none;
+}
+.view3d-legend {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 8px;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 4px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: rgba(10, 12, 18, .72);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: #fff;
+  max-height: 30%;
+  overflow: auto;
+}
+.view3d-legend span[data-legend] {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.view3d-legend span[data-legend]:hover { background: rgba(255, 255, 255, .12); }
+.view3d-legend span[data-legend].is-on { background: rgba(255, 255, 255, .22); outline: 1px solid rgba(255, 255, 255, .5); }
+.view3d-legend i { width: 14px; height: 5px; border-radius: 3px; display: inline-block; flex: none; }
+.view3d-steptext {
+  color: #fff;
+  font-size: 12px;
+  max-width: 42%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .8);
+}
+.view3d-step { padding: 4px 9px; }
+.view3d-mode {
+  pointer-events: auto;
+  flex: none;
+  padding: 4px 11px;
+  border: 1px solid rgba(255, 255, 255, .22);
+  border-radius: 999px;
+  background: rgba(20, 22, 26, .72);
+  color: #fff;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.view3d-mode:hover { background: rgba(40, 44, 52, .85); }
+.view3d-mode.is-on {
+  background: var(--accent);
+  border-color: transparent;
+  color: var(--accent-ink);
+}
+.view3d-hint {
   padding: 4px 9px;
   border-radius: 999px;
   background: rgba(20, 22, 26, .58);
   color: #fff;
   font-size: 11px;
-  pointer-events: none;
+  /* On a narrow card the hint gives way before the net readout does. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.view3d-net {
+  flex: none;
+  margin-left: auto;
+  color: #fff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+.view3d-net:not(:empty) {
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: rgba(20, 22, 26, .72);
 }
 @media print { .view3d { display: none !important; } }
+
+/* ---------- Gotham skin (both themes): flat, dense, squared, quiet ---------- */
+
+body::before {
+  display: none;
+}
+
+body {
+  font-size: 14px;
+}
+
+.glass,
+header.appbar,
+.panel,
+.tabs,
+.home .open,
+.connect .snippet,
+.toast,
+.board-card {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: var(--shadow-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+}
+
+button,
+.btn {
+  border-radius: var(--r-md);
+  background: var(--btn);
+  border-color: var(--btn-line);
+  box-shadow: var(--shadow-1);
+  font-weight: 500;
+  padding: 6px 12px;
+}
+
+button:hover,
+.btn:hover {
+  background: var(--btn-hover);
+  transform: none;
+}
+
+.btn.is-on,
+button.is-on,
+button.primary,
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.tabs {
+  gap: 0;
+  padding: 0;
+  /* A flex item in the panel column: never let it shrink under the panel. */
+  flex: none;
+}
+
+.tabs button {
+  border-radius: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 10px 6px;
+  border-bottom: 2px solid transparent;
+}
+
+.tabs button.active {
+  background: transparent;
+  color: var(--ink);
+  border-bottom-color: var(--accent);
+  box-shadow: none;
+}
+
+.panel h2,
+.legend-title,
+.steps li.phase,
+.home h2,
+.home .section {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+header h1 {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.legend span,
+.statuschip,
+.progress,
+.progress i,
+.view3d-legend span[data-legend],
+.view3d-mode {
+  border-radius: var(--r-md);
+}
+
+.panel > ul li:nth-child(odd),
+.steps li.active {
+  background: var(--sunken);
+}
+
+.steps li.active {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.toolbar,
+.legend {
+  font-size: 12px;
+}
+
+#board {
+  border-radius: var(--r-md);
+}
+
+::selection {
+  background: rgba(45, 114, 210, 0.45);
+}
+
+/* ---------- collapsible side panel ---------- */
+
+.panels-toggle {
+  align-self: flex-end;
+  font-size: 11px;
+  padding: 4px 10px;
+  margin-bottom: -4px;
+  color: var(--ink-2);
+  background: transparent;
+  box-shadow: none;
+}
+
+.panels-toggle .when-closed {
+  display: none;
+}
+
+.layout.collapsed {
+  grid-template-columns: minmax(0, 1fr) 44px;
+}
+
+.layout.collapsed .panels > :not(.panels-toggle) {
+  display: none;
+}
+
+.layout.collapsed .panels-toggle {
+  align-self: stretch;
+  writing-mode: vertical-rl;
+  padding: 14px 8px;
+  height: auto;
+  margin: 0;
+}
+
+.layout.collapsed .panels-toggle .when-open {
+  display: none;
+}
+
+.layout.collapsed .panels-toggle .when-closed {
+  display: inline;
+}
+
+/* ---------- status lights ---------- */
+
+.status-lights {
+  position: relative;
+  z-index: 40;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-2);
+  margin: 0 6px;
+}
+
+.status-lights.top-left {
+  margin-right: auto;
+}
+
+.status-lights.is-hidden .light {
+  display: none;
+}
+
+.lights-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 5px 8px 5px 10px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-1);
+}
+
+.light {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.light i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #5f6b7c;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25) inset;
+}
+
+.light.is-on i {
+  background: #32a467;
+  box-shadow: 0 0 6px rgba(50, 164, 103, 0.7);
+}
+
+.light.is-live i {
+  background: #4c90f0;
+  animation: light-blink 0.5s steps(2, start) infinite;
+}
+
+.light.is-on,
+.light.is-live {
+  color: var(--ink);
+}
+
+@keyframes light-blink {
+  0% { box-shadow: 0 0 8px rgba(76, 144, 240, 0.9); opacity: 1; }
+  100% { box-shadow: none; opacity: 0.35; }
+}
+
+.lights-gear {
+  padding: 2px 6px;
+  font-size: 12px;
+  background: transparent;
+  box-shadow: none;
+  border-color: transparent;
+  color: var(--ink-2);
+}
+
+.lights-settings {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  padding: 10px 12px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-2);
+  display: grid;
+  gap: 6px;
+  width: 260px;
+  font-family: var(--font-body);
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.status-lights.top-left .lights-settings {
+  right: auto;
+  left: 0;
+}
+
+.lights-settings label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.lights-settings p {
+  margin: 4px 0 0;
+  font-size: 11px;
+}
+
+@media print {
+  .status-lights { display: none !important; }
+}
+
+/* ---------- connect page lights ---------- */
+
+.conn-light {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-left: 10px;
+  font: 500 11px/1 var(--font-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  vertical-align: middle;
+}
+
+.conn-light i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #cd4246;
+  box-shadow: 0 0 5px rgba(205, 66, 70, 0.6);
+}
+
+.conn-light.is-on i {
+  background: #32a467;
+  box-shadow: 0 0 6px rgba(50, 164, 103, 0.7);
+}
+
+.conn-light.is-live i {
+  background: #32a467;
+  animation: light-blink 0.5s steps(2, start) infinite;
+}
+
+.conn-light.is-on,
+.conn-light.is-live {
+  color: var(--done);
+}
+
+/* ---------- home page folders ---------- */
+
+.org-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  font-size: 12px;
+}
+
+.org-shelf {
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: 10px 12px 12px;
+  margin-bottom: 10px;
+  background: var(--card);
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.org-shelf.is-unfiled {
+  background: transparent;
+  border-style: dashed;
+}
+
+.org-shelf.is-over {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.org-shelf h3 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-2);
+}
+
+.org-shelf h3 .count {
+  font-family: var(--font-mono);
+  font-weight: 400;
+  padding: 1px 7px;
+  border-radius: var(--r-md);
+  background: var(--sunken);
+}
+
+.org-actions {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.org-shelf:hover .org-actions,
+.org-shelf:focus-within .org-actions {
+  opacity: 1;
+}
+
+.org-actions .btn {
+  font-size: 11px;
+  padding: 3px 8px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.org-edit {
+  font: 600 12px var(--font-body);
+  padding: 2px 6px;
+  border: 1px solid var(--accent);
+  border-radius: var(--r-md);
+  background: var(--card);
+  color: var(--ink);
+  min-width: 180px;
+}
+
+.org-items {
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+}
+
+.org-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: grab;
+}
+
+.org-item.is-dragging {
+  opacity: 0.4;
+}
+
+.org-item .grip {
+  color: var(--ink-2);
+  font-size: 14px;
+  user-select: none;
+}
+
+.org-item a {
+  flex: 1;
+  min-width: 0;
+}
+
+.org-item a span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.org-item .badge {
+  font: 500 10px var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--done);
+  white-space: nowrap;
+  font-style: normal;
+}
+
+.org-item .badge.muted {
+  color: var(--ink-2);
+}
+
+.org-empty {
+  padding: 10px 12px;
+  font-size: 12px;
+  border: 1px dashed var(--line);
+  border-radius: var(--r-md);
+}

@@ -11,6 +11,8 @@ import type { Hole, Options, Sidecar } from '../src/layout/types.ts';
 import { emptySidecar } from '../src/layout/types.ts';
 import { parseNetlist, type Design } from '../src/netlist.ts';
 import { buildLayoutDoc, type LayoutDoc } from '../src/pipeline.ts';
+import { footprintPins } from '../src/layout/engine.ts';
+import { classify } from '../src/parts/catalog.ts';
 import { LED_COLOURS, type LedColour } from '../src/parts/led.ts';
 import { simulate, type SimResult } from '../src/sim/index.ts';
 import type { KicadCli } from './kicad-cli.ts';
@@ -40,8 +42,10 @@ export interface OpenProject {
 
 export interface ProjectEvent {
   projectId: string;
-  type: 'changed' | 'error' | 'closed';
+  type: 'changed' | 'error' | 'closed' | 'client';
   message?: string;
+  /** For 'client': the MCP client that was just heard from. */
+  client?: import('./clients.ts').ClientSeen;
 }
 
 export interface ServiceDeps {
@@ -293,6 +297,10 @@ export class Service {
       o.dipSwitchPositions = patch.dipSwitchPositions;
     }
     if (patch.packageOrder !== undefined) o.packageOrder = patch.packageOrder.filter((r) => p.design.components.has(r));
+    if (patch.wireStyle !== undefined) {
+      if (patch.wireStyle !== 'arc' && patch.wireStyle !== 'orthogonal') throw new ServiceError('wireStyle must be arc or orthogonal');
+      o.wireStyle = patch.wireStyle;
+    }
     if (patch.substitutions !== undefined) o.substitutions = { ...o.substitutions, ...patch.substitutions };
     return this.rebuild(p);
   }
@@ -301,8 +309,10 @@ export class Service {
     const p = this.get(id);
     const comp = p.design.components.get(ref);
     if (!comp) throw new ServiceError(`no component ${ref} in the schematic`, 404);
-    const expected = Object.keys(p.doc.pinHoles[ref] ?? {});
-    if (!expected.length) throw new ServiceError(`${ref} is not placed on the board, so it cannot be moved`);
+    // A part the auto-placer found no room for can still be pinned by hand:
+    // its pins come from the footprint instead of from holes it does not have.
+    const expected = Object.keys(p.doc.pinHoles[ref] ?? {}).length ? Object.keys(p.doc.pinHoles[ref]) : footprintPins(p.doc.footprints[ref] ?? classify(comp), comp);
+    if (!expected.length) throw new ServiceError(`${ref} is not a part that sits on the board, so it cannot be moved`);
     const missing = expected.filter((pin) => !holes[pin]);
     if (missing.length) throw new ServiceError(`move_part needs a hole for every pin of ${ref}; missing pin ${missing.join(', pin ')}`);
     const before = { ...p.sidecar.pinned };

@@ -1,6 +1,7 @@
 // Where KiCad keeps symbol libraries: the global sym-lib-table, the global
 // symbol directory, and the project directory for project-local libraries.
 
+import { L3_ID, l3Symbol } from '../src/parts/lab3.ts';
 import { access, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { KICAD_SYM_LIB_TABLE } from './config.ts';
@@ -58,6 +59,7 @@ export function createLibraryLookup(opts: { symbolDir: string; tableFile?: strin
   const cache = new Map<string, string>();
   return {
     async symbolText(libId: string) {
+      if (libId === L3_ID) return l3Symbol();
       const i = libId.indexOf(':');
       if (i <= 0) throw new LibraryError(`"${libId}" is not a lib_id; use the form Library:Symbol, for example Device:R`);
       const nickname = libId.slice(0, i);

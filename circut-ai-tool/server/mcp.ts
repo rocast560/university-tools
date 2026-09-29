@@ -98,7 +98,7 @@ export function createMcpServer(service: Service): McpServer {
       if (!step) return fail(`no step ${highlight_step}; there are ${p.doc.steps.length}`);
       highlight = step.wire !== undefined ? { wire: step.wire } : step.ref ? { ref: step.ref } : null;
     }
-    const svg = renderSvg(p.doc, { highlight });
+    const svg = renderSvg(p.doc, { highlight, wireStyle: p.sidecar.options.wireStyle });
     const caption = `${p.info.name}: ${summarize(p.doc).split('\n')[0]}${highlight ? ` Highlighted: ${JSON.stringify(highlight)}.` : ''}`;
     if (!pngAvailable()) return { content: [text(caption), text(svg)] };
     return { content: [image(Buffer.from(renderPng(svg)).toString('base64'), 'image/png'), text(caption)] };
@@ -161,7 +161,7 @@ export function createMcpServer(service: Service): McpServer {
 
   server.registerTool('list_supported_parts', { title: 'Supported parts', description: 'Part names and KiCad lib_ids that add_component accepts and the layout engine can place.', inputSchema: {}, annotations: { readOnlyHint: true } }, guard(async () => ({ content: [text(PART_ALIASES.map((a) => `${a.alias}  (${a.libId})  ${a.description}`).join('\n'))], structuredContent: { parts: PART_ALIASES } })));
 
-  server.registerTool('set_layout_options', { title: 'Layout options', description: 'Board size, rail split, folding separate switches into one DIP switch, chip order, value substitutions. Layout only; the circuit is unchanged.', inputSchema: { project, board: z.enum(['auto', 'half', 'full']).optional(), railSplit: z.boolean().nullable().optional(), dipSwitchPositions: z.number().int().min(0).max(16).optional().describe('0 = separate switches; N = fold them into an N-position DIP switch'), packageOrder: z.array(z.string()).optional(), substitutions: z.record(z.string(), z.string()).optional().describe('ref -> value shown on the board') } }, ({ project: id, ...patch }) => guard(async () => {
+  server.registerTool('set_layout_options', { title: 'Layout options', description: 'Board size, rail split, folding separate switches into one DIP switch, chip order, value substitutions. Layout only; the circuit is unchanged.', inputSchema: { project, board: z.enum(['auto', 'half', 'full']).optional(), railSplit: z.boolean().nullable().optional(), dipSwitchPositions: z.number().int().min(0).max(16).optional().describe('0 = separate switches; N = fold them into an N-position DIP switch'), packageOrder: z.array(z.string()).optional(), substitutions: z.record(z.string(), z.string()).optional().describe('ref -> value shown on the board'), wireStyle: z.enum(['arc', 'orthogonal']).optional().describe('how the 2D board draws jumpers: bowed arcs, or square-cornered runs that never share a line') } }, ({ project: id, ...patch }) => guard(async () => {
     const p = await service.setOptions((await open(id)).info.id, patch);
     return { content: [text(`Options now ${JSON.stringify(p.sidecar.options)}. ${p.doc.packages.some((x) => x.kind === 'dipswitch') ? 'The board uses a DIP switch. ' : ''}${summarize(p.doc)}`)], structuredContent: { options: p.sidecar.options, checks: p.doc.checks } };
   })());

@@ -9,6 +9,7 @@
 // is a Thevenin source, an input is a resistance to Vcc - so the nonlinear
 // solver underneath needs to know nothing about logic at all.
 
+import { demuxOutputs } from '../../parts/gates.ts';
 import { SEGMENT_DIGITS, evalGate } from '../index.ts';
 import { driveOf, inputLoad, initialLevel, readLevel } from './digital.ts';
 import type { Device } from './dc.ts';
@@ -81,7 +82,12 @@ export function solveMixed(model: AnalogModel, opts: MixedOptions = {}): MixedRe
   for (let pass = 0; pass < maxOuter && !settled; pass++) {
     outerPasses = pass + 1;
     const stamped = base.slice();
-    for (const chip of model.chips) {
+    // Every chip reads its inputs from the same solve before any chip drives.
+    // Reading and driving chip by chip let a later chip's stale read of a node
+    // overwrite the level an earlier chip had just driven onto it, so two
+    // passes could look identical while a gate output was still changing.
+    const reads: Record<string, 0 | 1> = {};
+    const levelFns = model.chips.map((chip) => {
       const vcc = supplyOf(chip, out!.nodes);
       const level = (node: string): 0 | 1 => {
         const v = out!.nodes[node];
@@ -90,21 +96,27 @@ export function solveMixed(model: AnalogModel, opts: MixedOptions = {}): MixedRe
         if (v === undefined) return 1;
         return readLevel(v, vcc, chip.family, levels[node] ?? 1);
       };
-      for (const node of chip.inputNodes) levels[node] = level(node);
+      for (const node of chip.inputNodes) reads[node] = level(node);
+      return { chip, vcc, level };
+    });
+    const driven: Record<string, 0 | 1> = {};
+    for (const { chip, vcc, level } of levelFns) {
       for (const out2 of driveNodes(chip, level)) {
         const d = driveOf(out2.level, chip.family, vcc);
-        levels[out2.node] = out2.level;
+        driven[out2.node] = out2.level;
         stamped.push({ kind: 'conductance', ref: `${out2.ref}:g`, a: out2.node, b: chip.gndNode, siemens: 1 / d.rout });
         stamped.push({ kind: 'isource', ref: `${out2.ref}:d`, from: chip.gndNode, to: out2.node, amps: d.volts / d.rout });
         digitalState[out2.ref] = out2.level;
       }
     }
+    // A driven node reports what drives it, not what a reader saw last pass.
+    Object.assign(levels, reads, driven);
     const next = operatingPoint(stamped, model.ground);
     if (!next) return null;
     out = next;
-    // The discrete state is the whole fixed point: if no level moved, the
-    // analog solution underneath it is the answer.
-    const key = JSON.stringify(levels);
+    // The discrete state is the whole fixed point: if no input read and no
+    // driven output moved, the analog solution underneath it is the answer.
+    const key = JSON.stringify([reads, driven]);
     if (key === previous) settled = true;
     previous = key;
   }
@@ -140,6 +152,13 @@ function driveNodes(chip: AnalogChip, level: (node: string) => 0 | 1): { ref: st
       // A 7447 drives a common-anode display, so its outputs are active low.
       out.push({ ref: `${chip.ref}.${seg}`, node, level: dec.kind === '7447' ? (on ? 0 : 1) : on ? 1 : 0 });
     }
+  }
+  const dm = chip.demux;
+  if (dm) {
+    const levels = demuxOutputs(dm.select.map(level), dm.enableLow.map(level), level(dm.enableHigh));
+    dm.outputs.forEach((node, i) => {
+      if (node !== undefined) out.push({ ref: `${chip.ref}.O${i}`, node, level: levels[i] });
+    });
   }
   return out;
 }

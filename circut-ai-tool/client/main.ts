@@ -9,6 +9,9 @@ import { api, ApiError } from './api.ts';
 import { renderConnect } from './connect.ts';
 import { mountBoard } from './board.ts';
 import { renderPanels } from './panels.ts';
+import { close3d } from './view3d.ts';
+import { mountLights, noteClient, placeLights } from './lights.ts';
+import { mountOrganizer } from './organizer.ts';
 import { loadDone, parseRoute, store, type AppState } from './state.ts';
 
 const app = document.getElementById('app')!;
@@ -44,12 +47,26 @@ export async function loadProject(id: string) {
 }
 
 async function renderHome() {
+  // The header is rebuilt below; the lights follow it once it exists.
+  queueMicrotask(placeLights);
+  setTimeout(placeLights, 300);
   app.replaceChildren(h(`<main class="home"><header><h1>Circuit AI Tool</h1><p class="sub">Open a KiCad schematic and get a breadboard wiring diagram, a build guide, checks and a logic simulator.</p></header>
     <section class="open"><div id="drop" class="dropzone"><b>Drop a .kicad_sch here</b><span class="muted">or</span><button class="primary" type="button" id="pick">Import…</button><input type="file" id="file" accept=".kicad_sch" hidden></div>
       <form id="open-form"><label>Or open one in place <input name="path" placeholder="absolute path to a .kicad_sch" required></label><button type="submit">Open</button></form></section>
-    <section><h2>Recent</h2><ul id="recent" class="projects"></ul></section>
-    <section><h2>Library</h2><ul id="found" class="projects"></ul></section>
+    <section><h2>Lab 3 · BCD to 7-segment</h2><p>L3 Auxiliary supplies inverted inputs and segments a–d. This example completes e–g with gates and a common-anode display. W is the 8-bit weight; Z is the 1-bit weight. A low output lights a segment.</p><button type="button" id="lab3-example">Create Lab 3 prelab example</button><p class="muted">Header numbers follow the instructor’s board labels, not its internal IC. Inputs 10–15 are don’t-care cases. The electrical model is approximate.</p></section>
+    <section class="organizer"><h2>Projects</h2><div id="organizer"><p class="muted">Loading…</p></div></section>
     <footer><a href="#/connect">Connect Claude, ChatGPT or Claude Code</a> · <a href="/openapi.json">OpenAPI</a></footer></main>`));
+  app.querySelector<HTMLButtonElement>('#lab3-example')!.addEventListener('click', async (event) => {
+    const button = event.currentTarget as HTMLButtonElement;
+    button.disabled = true;
+    try {
+      const response = await fetch('/api/examples/lab3', { method: 'POST' });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? 'Could not create example');
+      location.hash = `#/p/${result.id}`;
+    } catch (error) { toast((error as Error).message); }
+    finally { button.disabled = false; }
+  });
   const form = app.querySelector<HTMLFormElement>('#open-form')!;
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -91,30 +108,7 @@ async function renderHome() {
     const lists = await api.list();
     const sep = lists.projectsDir.includes('\\') ? '\\' : '/';
     form.querySelector<HTMLInputElement>('input[name=path]')!.placeholder = `${lists.projectsDir}${sep}lab1${sep}lab1.kicad_sch`;
-    app.querySelector('#recent')!.innerHTML = lists.recent.map((p) => `<li><a href="#/p/${p.id}" data-path="${esc(p.path)}"><b>${esc(p.name)}</b><span>${esc(p.path)}</span></a></li>`).join('') || '<li class="muted">nothing yet</li>';
-    app.querySelector('#found')!.innerHTML = lists.found.map((p) => `<li><a href="#/" data-open="${esc(p.path)}"><b>${esc(p.name)}</b><span>${esc(p.path)}</span></a></li>`).join('') || '<li class="muted">nothing imported yet</li>';
-    app.querySelectorAll<HTMLAnchorElement>('a[data-open]').forEach((a) =>
-      a.addEventListener('click', async (e) => {
-        e.preventDefault();
-        try {
-          const s = await api.open(a.dataset.open!);
-          location.hash = `#/p/${s.id}`;
-        } catch (err) {
-          toast((err as Error).message);
-        }
-      }),
-    );
-    app.querySelectorAll<HTMLAnchorElement>('#recent a').forEach((a) =>
-      a.addEventListener('click', async (e) => {
-        e.preventDefault();
-        try {
-          const s = await api.open(a.dataset.path!);
-          location.hash = `#/p/${s.id}`;
-        } catch (err) {
-          toast((err as Error).message);
-        }
-      }),
-    );
+    await mountOrganizer(app.querySelector<HTMLElement>('#organizer')!, lists);
   } catch (e) {
     toast(`Server not reachable: ${(e as Error).message}`);
   }
@@ -130,9 +124,12 @@ function renderProject(s: AppState) {
   }
   if (!app.querySelector('.project[data-id="' + p.id + '"]')) {
     boardUnmount?.();
+    // The card is about to be replaced, so anything mounted into it has to go
+    // with it or its renderer keeps running against a detached canvas.
+    close3d();
     app.replaceChildren(h(`<main class="project" data-id="${p.id}">
       <header class="appbar"><a href="#/" class="back">← Projects</a><h1>${esc(p.name)}</h1><span class="path" title="${esc(p.path)}">${esc(p.path)}</span><div class="spacer"></div><a class="btn ghost" href="#/connect">Connect</a><button type="button" id="theme">${s.theme === 'dark' ? 'Light' : 'Dark'}</button></header>
-      <div class="layout"><section class="boardcol"><div class="board-card"><div id="board"></div><div id="toolbar" class="toolbar"></div><div id="legend" class="legend"></div></div></section><aside id="panels" class="panels"></aside></div></main>`));
+      <div class="layout ${localStorage.getItem('panelsCollapsed') === '1' ? 'collapsed' : ''}"><section class="boardcol"><div class="board-card"><div id="board"></div><div id="toolbar" class="toolbar"></div><div id="legend" class="legend"></div></div></section><aside id="panels" class="panels"></aside></div></main>`));
     boardUnmount = mountBoard(app.querySelector('#board')!);
     app.querySelector('#theme')!.addEventListener('click', () => {
       const theme = store.get().theme === 'dark' ? 'light' : 'dark';
@@ -146,6 +143,7 @@ function renderProject(s: AppState) {
   }
   app.querySelector('#theme')!.textContent = s.theme === 'dark' ? 'Light' : 'Dark';
   renderPanels(app.querySelector('#panels')!, app.querySelector('#toolbar')!, app.querySelector('#legend')!, s);
+  placeLights();
 }
 
 function render(s: AppState) {
@@ -173,7 +171,9 @@ function onRoute() {
 addEventListener('hashchange', onRoute);
 onRoute();
 
+mountLights();
 api.events((ev) => {
+  if (ev.type === 'client' && ev.client) return noteClient(ev.client);
   const p = store.get().project;
   if (!p || ev.projectId !== p.id) return;
   if (ev.type === 'changed') {

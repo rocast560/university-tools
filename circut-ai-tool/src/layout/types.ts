@@ -15,6 +15,8 @@ export interface Options {
   dipSwitchPositions: number;
   packageOrder: string[];
   substitutions: Record<string, string>;
+  /** How the flat board draws jumpers: bowed arcs, or square-cornered runs along the corridors between rows. */
+  wireStyle: 'arc' | 'orthogonal';
 }
 
 export interface Sidecar {
@@ -34,7 +36,7 @@ export interface Sidecar {
   ledColors: Record<string, LedColour>;
 }
 
-export const defaultOptions = (): Options => ({ board: 'auto', railSplit: null, dipSwitchPositions: 0, packageOrder: [], substitutions: {} });
+export const defaultOptions = (): Options => ({ board: 'auto', railSplit: null, dipSwitchPositions: 0, packageOrder: [], substitutions: {}, wireStyle: 'arc' });
 
 export const emptySidecar = (): Sidecar => ({ version: 1, options: defaultOptions(), pinned: {}, colors: {}, placed: {}, ledColors: {} });
 
@@ -54,6 +56,7 @@ export function normalizeSidecar(x: unknown): Sidecar {
   if (typeof opt.railSplit === 'boolean') s.options.railSplit = opt.railSplit;
   if (Number.isInteger(opt.dipSwitchPositions) && (opt.dipSwitchPositions as number) >= 0) s.options.dipSwitchPositions = opt.dipSwitchPositions as number;
   if (Array.isArray(opt.packageOrder)) s.options.packageOrder = opt.packageOrder.filter((r) => typeof r === 'string');
+  if (opt.wireStyle === 'arc' || opt.wireStyle === 'orthogonal') s.options.wireStyle = opt.wireStyle;
   if (opt.substitutions && typeof opt.substitutions === 'object') for (const [k, v] of Object.entries(opt.substitutions)) if (typeof v === 'string') s.options.substitutions[k] = v;
   if (o.pinned && typeof o.pinned === 'object') {
     for (const [ref, pins] of Object.entries(o.pinned)) {
@@ -97,7 +100,7 @@ export interface Supply {
 
 export interface Package {
   id: string;
-  kind: 'dip' | 'dipswitch' | 'sevenseg';
+  kind: 'dip' | 'dipswitch' | 'sevenseg' | 'module';
   name: string;
   col0: number;
   pins: number;
@@ -105,6 +108,8 @@ export interface Package {
   /** dipswitch: position number -> switch ref. */
   map?: Record<string, string>;
   common?: 'cathode' | 'anode';
+  /** module: the strip row its header sits in (a or j); the body hangs outward from it. */
+  row?: Row;
 }
 
 export interface PlacedPart {

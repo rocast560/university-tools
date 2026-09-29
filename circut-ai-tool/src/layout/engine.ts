@@ -11,12 +11,14 @@ import { displayName, isUnconnected } from '../netlist.ts';
 import { classify, powerKind, type Footprint, type PowerKind } from '../parts/catalog.ts';
 import type { LedColour } from '../parts/led.ts';
 import { compareRefs } from '../parts/values.ts';
+import { L3_BOARD, l3CoveredCols } from '../parts/lab3.ts';
 import { BOT_ROWS, Board, LayoutError, MID_ROWS, Occupancy, PART_ROWS, RAILS, TOP_ROWS, WIRE_ROWS, hole, isRail, stripCol, stripHalf, stripOf } from './board.ts';
 import type { BoardSpec, Hole, NetInfo, Options, Package, PlacedPart, Row, Sidecar, Supply, Wire } from './types.ts';
 
 export { LayoutError };
 
-export const PALETTE = ['#E3B505', '#2E9E4F', '#F26B1D', '#7B3FBF', '#1F6FE0', '#8B5A2B', '#0FA3A3', '#D6336C', '#5C7C2A', '#3E4A61', '#B8860B', '#4682B4'];
+/** Signal jumper colours: the lab kit has red, black, blue, green, orange, yellow and white wires; red is +5V and black is ground, so signals cycle through the rest. */
+export const PALETTE = ['#1F6FE0', '#2E9E4F', '#F26B1D', '#E3B505', '#F4F4F0'];
 export const COLOR_PLUS = '#D7263D';
 export const COLOR_GND = '#1E1E1E';
 export const COLOR_MINUS = '#1F6FE0';
@@ -39,7 +41,41 @@ export interface EngineResult {
   error: string | null;
 }
 
+/** The pins a footprint puts in holes, in the order the layout numbers them. */
+export function footprintPins(fp: Footprint, comp: Component): string[] {
+  switch (fp.kind) {
+    case 'module':
+    case 'dip':
+    case 'sevenseg':
+      return [...comp.pins.keys()].filter((p) => /^\d+$/.test(p)).sort((a, b) => Number(a) - Number(b));
+    case 'lead2':
+      return [fp.a, fp.b];
+    case 'to92':
+    case 'pot3':
+      return [...fp.legs];
+    case 'dipswitch':
+      return fp.pairs.flat();
+    default:
+      return [];
+  }
+}
+
 type Half = 'T' | 'B';
+
+/** Rows under a single-digit display's 19 mm body when it straddles the gutter. */
+const SEVENSEG_BODY_ROWS: Row[] = ['c', 'd', 'e', 'f', 'g', 'h'];
+
+/** Columns a two-lead part's body may run along a row: a quarter-watt resistor with bent leads reaches about 0.6 inch. */
+const MAX_LEAD_SPAN = 6;
+
+interface TwoLeadPlan {
+  x: DesignPin;
+  y: DesignPin;
+  strip: string;
+  row: Row;
+  hb: { kind: 'rail' } | { kind: 'near'; strip: string } | { kind: 'col'; col: number };
+  cost: number;
+}
 const pinKey = (ref: string, pin: string) => `${ref} ${pin}`;
 const uniq = <T,>(xs: T[]): T[] => [...new Set(xs)];
 
@@ -70,6 +106,8 @@ class Engine {
   private pinHole = new Map<string, Hole>();
   private homes = new Map<string, string[]>();
   private pkgCols = new Set<number>();
+  /** Column runs already taken by a two-lead body lying along a strip row, so no two bodies overlap in one row. */
+  private spans: { row: Row; c1: number; c2: number }[] = [];
   private dipMap = new Map<string, number>();
   private board: Board | null = null;
   private supply: Supply | null = null;
@@ -135,36 +173,23 @@ class Engine {
   }
 
   private pinsOf(ref: string): string[] {
-    const fp = this.fp.get(ref)!;
-    const comp = this.d.components.get(ref)!;
-    switch (fp.kind) {
-      case 'dip':
-      case 'sevenseg':
-        return [...comp.pins.keys()].filter((p) => /^\d+$/.test(p)).sort((a, b) => Number(a) - Number(b));
-      case 'lead2':
-        return [fp.a, fp.b];
-      case 'to92':
-      case 'pot3':
-        return [...fp.legs];
-      case 'dipswitch':
-        return fp.pairs.flat();
-      default:
-        return [];
-    }
+    return footprintPins(this.fp.get(ref)!, this.d.components.get(ref)!);
   }
 
   private packageWidth(fp: Footprint): number {
-    return fp.kind === 'dip' ? fp.pins / 2 : fp.kind === 'dipswitch' ? fp.positions : fp.kind === 'sevenseg' ? fp.pins / 2 : 0;
+    return fp.kind === 'module' ? fp.pins : fp.kind === 'dip' ? fp.pins / 2 : fp.kind === 'dipswitch' ? fp.positions : fp.kind === 'sevenseg' ? fp.pins / 2 : 0;
   }
 
   private isPackage(fp: Footprint): boolean {
-    return fp.kind === 'dip' || fp.kind === 'dipswitch' || fp.kind === 'sevenseg';
+    return fp.kind === 'module' || fp.kind === 'dip' || fp.kind === 'dipswitch' || fp.kind === 'sevenseg';
   }
 
   private packageRefs(): string[] {
     const refs = [...this.fp.entries()].filter(([, f]) => this.isPackage(f)).map(([r]) => r);
     const ordered = this.opt.packageOrder.filter((r) => refs.includes(r));
-    const rank = (r: string) => ({ dipswitch: 0, dip: 1, sevenseg: 2 })[this.fp.get(r)!.kind as 'dipswitch' | 'dip' | 'sevenseg'];
+    // The L3 board goes last: it is placed from the right end, where the
+    // rails its body covers are the ones nothing else wanted.
+    const rank = (r: string) => ({ dipswitch: 0, dip: 1, sevenseg: 2, module: 3 })[this.fp.get(r)!.kind as 'dipswitch' | 'dip' | 'sevenseg' | 'module'];
     const rest = refs.filter((r) => !ordered.includes(r)).sort((a, b) => rank(a) - rank(b) || compareRefs(a, b));
     return [...ordered, ...rest];
   }
@@ -212,21 +237,48 @@ class Engine {
       for (let c = col0; c < col0 + w; c++) this.pkgCols.add(c);
     };
     switch (fp.kind) {
+      case 'module': {
+        const row = holes['1']?.row ?? 'a';
+        this.packages.push({ id: ref, kind: 'module', name: value, col0, pins: fp.pins, row });
+        addCols(fp.pins);
+        // The body hangs outward over the supply rails on its side of the
+        // board, so nothing else may land in the rail holes it covers.
+        for (const h of this.moduleBodyHoles(col0, row)) {
+          if (this.occ.isFree(h)) this.occ.claim(h, `${ref} body`);
+          else this.warnings.push(`${ref}: the L3 board covers hole ${h.row}${h.col}, which ${this.occ.owner(h)} is using`);
+        }
+        break;
+      }
       case 'dip':
         this.packages.push({ id: ref, kind: 'dip', name: value, col0, pins: fp.pins });
         addCols(fp.pins / 2);
         break;
-      case 'sevenseg':
+      case 'sevenseg': {
         this.packages.push({ id: ref, kind: 'sevenseg', name: value, col0, pins: fp.pins, common: fp.common });
         addCols(fp.pins / 2);
+        // The body covers rows c to h of its columns; only the pin holes
+        // themselves are usable there.
+        const pinHoles = new Set(Object.values(holes).map((h) => `${h.row}${h.col}`));
+        for (let c = col0; c < col0 + fp.pins / 2; c++) {
+          for (const r of SEVENSEG_BODY_ROWS) {
+            const h = hole(c, r);
+            if (pinHoles.has(`${r}${c}`)) continue;
+            if (this.occ.isFree(h)) this.occ.claim(h, `${ref} body`);
+            else this.warnings.push(`${ref}: the display's body covers hole ${r}${c}, which ${this.occ.owner(h)} is using`);
+          }
+        }
         break;
+      }
       case 'dipswitch':
         this.packages.push({ id: ref, kind: 'dipswitch', name: value, col0, pins: fp.positions * 2, positions: fp.positions, map: Object.fromEntries(fp.pairs.map((_, i) => [String(i + 1), ref])) });
         addCols(fp.positions);
         break;
-      case 'lead2':
-        this.parts.push({ id: ref, kind: 'lead2', style: fp.style, value, holes: [holes[fp.a], holes[fp.b]], pins: [fp.a, fp.b], nets: [netOf(fp.a), netOf(fp.b)], polarized: fp.polarized, labels: [fp.aLabel, fp.bLabel] });
+      case 'lead2': {
+        const [ha, hb] = [holes[fp.a], holes[fp.b]];
+        if (ha.row === hb.row && !isRail(ha.row)) this.spans.push({ row: ha.row, c1: Math.min(ha.col, hb.col), c2: Math.max(ha.col, hb.col) });
+        this.parts.push({ id: ref, kind: 'lead2', style: fp.style, value, holes: [ha, hb], pins: [fp.a, fp.b], nets: [netOf(fp.a), netOf(fp.b)], polarized: fp.polarized, labels: [fp.aLabel, fp.bLabel] });
         break;
+      }
       case 'to92':
         this.parts.push({ id: ref, kind: 'to92', style: fp.names.join(''), value, holes: fp.legs.map((p) => holes[p]), pins: [...fp.legs], nets: fp.legs.map(netOf), polarized: false, labels: [...fp.names] });
         break;
@@ -258,6 +310,15 @@ class Engine {
       if (bad) {
         this.warnings.push(`pinned placement for ${ref} dropped: hole ${bad.row}${bad.col} is off the board or already taken`);
         continue;
+      }
+      if (fp.kind === 'module') {
+        const row = holes[pins[0]].row;
+        const col0 = holes[pins[0]].col;
+        const shape = pins.every((p, i) => holes[p].row === row && holes[p].col === col0 + i);
+        if (!shape || (row !== 'a' && row !== 'j')) {
+          this.warnings.push(`pinned placement for ${ref} dropped: the L3 board's header is one row of ${fp.pins} consecutive columns in row a or row j, with the body hanging off that edge of the breadboard`);
+          continue;
+        }
       }
       const clean: Record<string, Hole> = {};
       for (const p of pins) {
@@ -293,6 +354,36 @@ class Engine {
     throw new LayoutError(`no room for ${owner} (${width} columns) on a ${this.b.kind}-size board`);
   }
 
+  /** Rail holes under the L3 board's body when its pin 1 is in `col0` of an outer row. */
+  private moduleBodyHoles(col0: number, row: Row): Hole[] {
+    const rails: Row[] = row === 'j' ? ['B+', 'B-'] : ['T+', 'T-'];
+    const out: Hole[] = [];
+    for (const c of l3CoveredCols(col0)) {
+      if (this.b.railExists(c)) for (const r of rails) out.push(hole(c, r));
+      // The board's end margins also cover the header row past the end pins.
+      if ((c < col0 || c >= col0 + L3_BOARD.pins) && c >= 1 && c <= this.b.cols) out.push(hole(c, row));
+    }
+    return out;
+  }
+
+  /**
+   * A column for the L3 board: its header takes row a of `pins` consecutive
+   * columns, kept clear of other packages like any chip, and the rail holes
+   * under its body must still be free. Searched from the right end of the
+   * board inward, so the body covers the rails past the last package rather
+   * than the ones every supply jumper and bridge is competing for.
+   */
+  private findModuleColumn(pins: number, owner: string): number {
+    for (let col = this.b.cols - 2 - pins + 1; col >= 3; col--) {
+      let ok = true;
+      for (let c = col - 2; c <= col + pins + 1 && ok; c++) if (this.pkgCols.has(c)) ok = false;
+      for (let c = col; c < col + pins && ok; c++) if (!this.occ.isFree(hole(c, 'a'))) ok = false;
+      for (const h of this.moduleBodyHoles(col, 'a')) if (!this.occ.isFree(h)) ok = false;
+      if (ok) return col;
+    }
+    throw new LayoutError(`no room for ${owner} (the L3 board needs ${pins} header columns in row a plus ${L3_BOARD.endMargin} columns of rail on each side) on a ${this.b.kind}-size board`);
+  }
+
   private placePackages() {
     const folded = this.foldedSwitches();
     if (folded.length) {
@@ -324,18 +415,25 @@ class Engine {
       const width = this.packageWidth(fp);
       let col0: number;
       try {
-        col0 = this.findPackageColumn(width, ref);
+        col0 = fp.kind === 'module' ? this.findModuleColumn(fp.pins, ref) : this.findPackageColumn(width, ref);
       } catch (e) {
         this.unplaced.push({ ref, reason: (e as Error).message });
         continue;
       }
       const holes: Record<string, Hole> = {};
-      if (fp.kind === 'dip' || fp.kind === 'sevenseg') {
+      if (fp.kind === 'module') {
+        for (const p of this.pinsOf(ref)) holes[p] = hole(col0 + Number(p) - 1, 'a');
+      } else if (fp.kind === 'dip' || fp.kind === 'sevenseg') {
+        // A DIP straddles the gutter with its rows in e and f. A single-digit
+        // display's pin rows are about 0.6 inch apart and its 19 mm body
+        // reaches from row c to row h, so its pins go in d and g and the rows
+        // between are covered; its jumpers land in a, b, i and j.
         const n = fp.pins;
         const half = n / 2;
+        const [bottom, top]: [Row, Row] = fp.kind === 'sevenseg' ? ['g', 'd'] : ['f', 'e'];
         for (const p of this.pinsOf(ref)) {
           const k = Number(p);
-          holes[p] = k <= half ? hole(col0 + k - 1, 'f') : hole(col0 + (n - k), 'e');
+          holes[p] = k <= half ? hole(col0 + k - 1, bottom) : hole(col0 + (n - k), top);
         }
       } else if (fp.kind === 'dipswitch') {
         fp.pairs.forEach(([t, bt], i) => {
@@ -372,9 +470,16 @@ class Engine {
     throw new LayoutError(`no free ${rail} rail hole near column ${nearCol} for ${owner}`);
   }
 
-  private freeBlock(half: Half, near: number, width: number, owner: string): number {
+  /** True when no two-lead body already lies along `row` anywhere in columns c1..c2. */
+  private spanClear(row: Row, c1: number, c2: number): boolean {
+    const lo = Math.min(c1, c2);
+    const hi = Math.max(c1, c2);
+    return !this.spans.some((sp) => sp.row === row && lo <= sp.c2 && sp.c1 <= hi);
+  }
+
+  private freeBlock(half: Half, near: number, width: number, owner: string, extra: (c: number) => boolean = () => true): number {
     const rows = half === 'T' ? TOP_ROWS : BOT_ROWS;
-    const ok = (c: number) => c >= 1 && c + width - 1 <= this.b.cols && Array.from({ length: width }, (_, i) => c + i).every((cc) => !this.pkgCols.has(cc) && rows.every((r) => this.occ.isFree(hole(cc, r))));
+    const ok = (c: number) => c >= 1 && c + width - 1 <= this.b.cols && extra(c) && Array.from({ length: width }, (_, i) => c + i).every((cc) => !this.pkgCols.has(cc) && rows.every((r) => this.occ.isFree(hole(cc, r))));
     const dists = [2, 3, 1, ...Array.from({ length: this.b.cols }, (_, i) => i + 4)];
     for (const dist of dists) for (const c of [near + dist, near - dist - width + 1]) if (ok(c)) return c;
     if (ok(near)) return near;
@@ -480,49 +585,93 @@ class Engine {
     }
   }
 
+  /**
+   * Where a two-lead part could go if it started at `x`'s net: the strip and
+   * row for that lead, where the other lead lands, and a cost that grows with
+   * the body's run and jumps when the start hole already sits inside another
+   * body or the run has to cross one. Nothing is claimed here.
+   */
+  private planTwoLead(ref: string, x: DesignPin, y: DesignPin, isSwitch: boolean): TwoLeadPlan | null {
+    if (this.power(x.net) || isUnconnected(x.net) || !this.homes.get(x.net)?.length) return null;
+    const toRail = !!this.power(y.net) && !isSwitch && !!this.railFor(y.net, 'T');
+    let strip: string;
+    try {
+      strip = this.pickStrip(x.net);
+    } catch (e) {
+      if (!(e instanceof LayoutError)) throw e;
+      return null;
+    }
+    const col = stripCol(strip);
+    const half = stripHalf(strip);
+    const order = toRail ? PART_ROWS : MID_ROWS;
+    const rows = this.freeRows(strip, order);
+    if (!rows.length) return null;
+    const row = rows.find((r) => this.spanClear(r, col, col)) ?? rows[0];
+    const base = this.spanClear(row, col, col) ? 0 : 50;
+    if (toRail) return { x, y, strip, row, hb: { kind: 'rail' }, cost: base };
+    const near = (this.homes.get(y.net) ?? [])
+      .filter((s) => stripHalf(s) === half && stripCol(s) !== col && Math.abs(stripCol(s) - col) <= 2)
+      .sort((a, b) => Math.abs(stripCol(a) - col) - Math.abs(stripCol(b) - col));
+    if (near.length && this.freeRows(near[0], MID_ROWS).length) return { x, y, strip, row, hb: { kind: 'near', strip: near[0] }, cost: base + Math.abs(stripCol(near[0]) - col) };
+    // The body lies along the row from the start hole to the new column, so
+    // that run must not cross another body in the row, and it should be no
+    // longer than a part's leads comfortably reach.
+    try {
+      const c = this.freeBlock(half, col, 1, ref, (cc) => this.spanClear(row, col, cc) && Math.abs(cc - col) <= MAX_LEAD_SPAN);
+      return { x, y, strip, row, hb: { kind: 'col', col: c }, cost: base + Math.abs(c - col) };
+    } catch (e) {
+      if (!(e instanceof LayoutError)) throw e;
+    }
+    try {
+      const c = this.freeBlock(half, col, 1, ref);
+      return { x, y, strip, row, hb: { kind: 'col', col: c }, cost: 100 + base + Math.abs(c - col) };
+    } catch (e) {
+      if (!(e instanceof LayoutError)) throw e;
+      return null;
+    }
+  }
+
   private tryPlaceTwoLead(ref: string, force: boolean): boolean {
     const fp = this.fp.get(ref) as Extract<Footprint, { kind: 'lead2' }>;
     const comp = this.d.components.get(ref)!;
     const pa0 = comp.pins.get(fp.a);
     const pb0 = comp.pins.get(fp.b);
     if (!pa0 || !pb0) throw new LayoutError(`${ref} is missing pin ${!pa0 ? fp.a : fp.b} in the netlist`);
-    let pair: [DesignPin, DesignPin] | null = null;
-    for (const [x, y] of [[pa0, pb0], [pb0, pa0]] as [DesignPin, DesignPin][]) {
-      if (!this.power(x.net) && !isUnconnected(x.net) && this.homes.get(x.net)?.length) {
-        pair = [x, y];
-        break;
-      }
-    }
-    if (!pair) {
-      if (this.power(pa0.net) && this.power(pb0.net)) pair = [pa0, pb0];
-      else if (force) pair = [pa0, pb0];
-      else return false;
-    }
-    const [pa, pb] = pair;
     const isSwitch = fp.style === 'SW' || fp.style === 'BTN';
-    const toRail = !!this.power(pb.net) && !isSwitch && !!this.railFor(pb.net, 'T');
+    // Either lead may be the one that starts on a net that already has a
+    // home; take whichever gives the shorter, cleaner body.
+    const plans = [this.planTwoLead(ref, pa0, pb0, isSwitch), this.planTwoLead(ref, pb0, pa0, isSwitch)].filter((p): p is TwoLeadPlan => !!p).sort((a, b) => a.cost - b.cost);
     let ha: Hole;
-    if (this.homes.get(pa.net)?.length && !this.power(pa.net)) {
-      ha = this.take(this.pickStrip(pa.net), toRail ? PART_ROWS : MID_ROWS, ref);
+    let hb: Hole;
+    let pa: DesignPin;
+    let pb: DesignPin;
+    if (plans.length) {
+      const plan = plans[0];
+      pa = plan.x;
+      pb = plan.y;
+      const toRail = plan.hb.kind === 'rail';
+      ha = this.take(plan.strip, toRail ? PART_ROWS : MID_ROWS, ref, plan.row);
+      const half = stripHalf(stripOf(ha));
+      if (plan.hb.kind === 'rail') hb = this.railHole(this.railFor(pb.net, half)!, ha.col, ref);
+      else if (plan.hb.kind === 'near') hb = this.take(plan.hb.strip, MID_ROWS, ref, ha.row);
+      else {
+        hb = this.occ.claim(hole(plan.hb.col, ha.row), ref);
+        this.addHome(pb.net, `${half}${plan.hb.col}`);
+        if (Math.abs(plan.hb.col - ha.col) > MAX_LEAD_SPAN) this.warnings.push(`${ref} spans ${Math.abs(plan.hb.col - ha.col)} columns from ${ha.row}${ha.col} to ${hb.row}${hb.col}; a part's leads reach about ${MAX_LEAD_SPAN}, so bend them or pin it closer`);
+      }
     } else {
+      if (this.power(pa0.net) && this.power(pb0.net)) [pa, pb] = [pa0, pb0];
+      else if (force) [pa, pb] = [pa0, pb0];
+      else return false;
+      const toRail = !!this.power(pb.net) && !isSwitch && !!this.railFor(pb.net, 'T');
       const c = this.freeBlock('T', this.packages[0]?.col0 ?? 3, 1, ref);
       ha = this.occ.claim(hole(c, 'a'), ref);
       this.addHome(pa.net, `T${c}`);
-    }
-    const half = stripHalf(stripOf(ha));
-    let hb: Hole;
-    if (toRail) {
-      hb = this.railHole(this.railFor(pb.net, half)!, ha.col, ref);
-    } else {
-      const near = (this.homes.get(pb.net) ?? [])
-        .filter((s) => stripHalf(s) === half && stripCol(s) !== ha.col && Math.abs(stripCol(s) - ha.col) <= 2)
-        .sort((x, y) => Math.abs(stripCol(x) - ha.col) - Math.abs(stripCol(y) - ha.col));
-      if (near.length && this.freeRows(near[0], MID_ROWS).length) {
-        hb = this.take(near[0], MID_ROWS, ref, ha.row);
-      } else {
-        const c = this.freeBlock(half, ha.col, 1, ref);
-        hb = this.occ.claim(hole(c, ha.row), ref);
-        this.addHome(pb.net, `${half}${c}`);
+      if (toRail) hb = this.railHole(this.railFor(pb.net, 'T')!, ha.col, ref);
+      else {
+        const c2 = this.freeBlock('T', ha.col, 1, ref, (cc) => this.spanClear('a', ha.col, cc));
+        hb = this.occ.claim(hole(c2, 'a'), ref);
+        this.addHome(pb.net, `T${c2}`);
       }
     }
     this.pinHole.set(pinKey(ref, pa.num), ha);

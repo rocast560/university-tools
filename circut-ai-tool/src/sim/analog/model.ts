@@ -7,11 +7,12 @@
 // than what the schematic says, and it is the only model a hand-placed part
 // with no schematic net can participate in.
 
+import { l3Gates } from '../../parts/lab3.ts';
 import { connectivity, holeNode, supplyVolts } from '../../checks/index.ts';
 import type { EngineResult } from '../../layout/engine.ts';
 import type { Hole } from '../../layout/types.ts';
 import type { Design } from '../../netlist.ts';
-import { DECODER_PINS, icInfo, type GateKind } from '../../parts/gates.ts';
+import { DECODER_PINS, DEMUX_PINS, icInfo, type GateKind } from '../../parts/gates.ts';
 import { parseFarads, parseHenries, parseOhms } from '../../parts/values.ts';
 import type { Device } from './dc.ts';
 import type { Family } from './digital.ts';
@@ -34,6 +35,15 @@ export interface AnalogDecoder {
   outputs: Record<string, string>;
 }
 
+/** A 74138 3-to-8 decoder, pins resolved to nodes. */
+export interface AnalogDemux {
+  select: string[];
+  enableLow: string[];
+  enableHigh: string;
+  /** O0-O7 nodes; undefined where the pin is not placed. */
+  outputs: (string | undefined)[];
+}
+
 /** A logic chip placed on the board, as the mixed solver sees it. */
 export interface AnalogChip {
   ref: string;
@@ -43,6 +53,7 @@ export interface AnalogChip {
   gndNode: string;
   gates: AnalogGate[];
   decoder: AnalogDecoder | null;
+  demux?: AnalogDemux | null;
   /** Every input pin of the chip, for the input load. */
   inputNodes: string[];
   iccMax: number;
@@ -161,11 +172,17 @@ export function buildAnalogModel(design: Design, res: EngineResult, switches: Re
       // A colour chosen on the board overrides the schematic value, and it is
       // a real electrical choice: blue sits about 1.2 V higher than red, so
       // the same series resistor gives noticeably less current.
-      else if (fp.style === 'LED') devices.push({ ...(res.ledColors?.[ref] ? diodeForColour(res.ledColors[ref]) : diodeFor(value || 'LED')), ref, anode: b, cathode: a });
+      // The footprint already says LED, so a value that is only a label
+      // ("Z1", "F") still gets an LED model rather than a silicon diode.
+      else if (fp.style === 'LED') devices.push({ ...(res.ledColors?.[ref] ? diodeForColour(res.ledColors[ref]) : diodeFor(`LED ${value}`)), ref, anode: b, cathode: a });
       else if (fp.style === 'D' || fp.style === 'Z') devices.push({ ...diodeFor(value), ref, anode: b, cathode: a });
       else if (fp.style === 'C' || fp.style === 'Cpol') devices.push({ kind: 'capacitor', ref, a, b, farads: parseFarads(value) ?? DEFAULT_FARADS });
       else if (fp.style === 'L') devices.push({ kind: 'inductor', ref, a, b, henries: parseHenries(value) ?? DEFAULT_HENRIES });
       else notModelled.push(`${ref} (${value})`);
+    } else if (fp.kind === 'module') {
+      const gates = l3Gates(at, ref);
+      chips.push({ ref, code: 'L3', family: 'LS', vccNode: at('1'), gndNode: at('2'), gates, decoder: null, inputNodes: [...new Set(gates.flatMap(g => g.inputs))], iccMax: 0 });
+      notModelled.push(`${ref}: L3 uses an approximate LS gate model; internal chip, supply current and output drive are unspecified by the instructor`);
     } else if (fp.kind === 'dip') {
       const info = icInfo(value, fp.pins);
       const spec = info?.spec;
@@ -197,7 +214,26 @@ export function buildAnalogModel(design: Design, res: EngineResult, switches: Re
         decoder = { kind: spec.decoder, inputs: ins, lampTest: at(String(p.lampTest)), blanking: at(String(p.blanking)), outputs };
         inputNodes.push(...Object.values(ins), decoder.lampTest, decoder.blanking);
       }
-      chips.push({ ref, code: spec.code, family: info.family, vccNode, gndNode, gates, decoder, inputNodes: inputNodes.filter(Boolean), iccMax: spec.iccMax });
+      let demux: AnalogDemux | null = null;
+      if (spec.demux) {
+        const p = DEMUX_PINS;
+        const pin = (n: number) => at(String(n));
+        demux = { select: p.select.map(pin), enableLow: p.enableLow.map(pin), enableHigh: pin(p.enableHigh), outputs: p.outputs.map(pin) };
+        inputNodes.push(...demux.select, ...demux.enableLow, demux.enableHigh);
+      }
+      chips.push({ ref, code: spec.code, family: info.family, vccNode, gndNode, gates, decoder, demux, inputNodes: inputNodes.filter(Boolean), iccMax: spec.iccMax });
+    } else if (fp.kind === 'dipswitch') {
+      // Each way is its own switch, keyed the way the board and the boolean
+      // simulator key it, so flipping one slider reaches the solver and only
+      // that way changes. Without this a real DIP switch was simply not
+      // modelled and a running board could not be driven at all.
+      fp.pairs.forEach(([pinA, pinB], i) => {
+        const a = at(pinA);
+        const b = at(pinB);
+        if (a === undefined || b === undefined) return;
+        const key = `${ref}:${i + 1}`;
+        devices.push({ kind: 'switch', ref: key, a, b, closed: !!switches[key] });
+      });
     } else notModelled.push(`${ref} (${value})`);
   }
 

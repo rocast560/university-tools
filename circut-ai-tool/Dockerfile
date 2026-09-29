@@ -61,6 +61,7 @@ COPY --chown=kicad:kicad --from=client /app/node_modules ./node_modules
 COPY --chown=kicad:kicad client ./client
 COPY --chown=kicad:kicad scripts ./scripts
 COPY --chown=kicad:kicad test ./test
+COPY --chown=kicad:kicad examples ./examples
 COPY --chown=kicad:kicad index.html vite.config.ts ./
 RUN bun run typecheck && bun test
 

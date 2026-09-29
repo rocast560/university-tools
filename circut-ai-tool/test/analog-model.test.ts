@@ -53,6 +53,31 @@ describe('buildAnalogModel switches', () => {
   });
 });
 
+describe('buildAnalogModel DIP switches', () => {
+  // Each way of a real DIP switch has to reach the solver on its own key, or
+  // a running board cannot be driven by the part it is actually wired to.
+  const pins: Record<string, [string, string, string]> = { '1': ['~', 'passive', '+5V'], '4': ['~', 'passive', '/MID'], '2': ['~', 'passive', '+5V'], '3': ['~', 'passive', '/OTHER'] };
+  const design = makeDesign({
+    SW1: { lib: 'Switch', part: 'SW_DIP_x02', value: 'SW_DIP_x02', pins },
+    R1: R('1k', '/MID', 'GND'),
+    R2: R('1k', '/OTHER', 'GND'),
+  });
+  const res = layout(design, emptySidecar());
+
+  test('every way becomes its own switch, keyed the way the board keys it', () => {
+    const model = buildAnalogModel(design, res, {});
+    expect(model.devices.filter((d) => d.kind === 'switch').map((d) => d.ref)).toEqual(['SW1:1', 'SW1:2']);
+    expect(model.notModelled).toEqual([]);
+  });
+
+  test('closing one way leaves the other one open', () => {
+    const model = buildAnalogModel(design, res, { 'SW1:1': true });
+    const out = solveDC(model.devices, model.ground)!;
+    expect(out.nodes[model.pinNodes.R1['1']]).toBeCloseTo(5, 3);
+    expect(out.nodes[model.pinNodes.R2['1']]).toBeCloseTo(0, 6);
+  });
+});
+
 describe('buildAnalogModel on the PL1_1 fixture', () => {
   const design = parseNetlist(readFixture('PL1_1.net'));
   const res = layout(design, emptySidecar());

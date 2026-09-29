@@ -93,3 +93,62 @@ describe('solveMixed on PL1_1', () => {
     }
   });
 });
+
+describe('solveMixed on lab4 with one 74LS08 (two AND stages in one chip)', () => {
+  // Z1 = (M0.M4).M1 and Z2 = (M0.M4).(M5.M6): a gate output feeds gates in the
+  // same package, then a 74LS04. A stale downstream read must not end the
+  // solve before the second stage has propagated.
+  const d8 = parseNetlist(readFixture('lab4-74ls08.net'));
+  const res8 = layout(d8, emptySidecar());
+  const Z1: (0 | 1)[] = [0, 0, 1, 1, 0, 1, 1, 1];
+  const Z2: (0 | 1)[] = [0, 1, 1, 1, 0, 0, 0, 1];
+
+  test('every row matches the pre-lab truth table on the board', () => {
+    for (let m = 0; m < 8; m++) {
+      const [c, b, a] = [(m >> 2) & 1, (m >> 1) & 1, m & 1];
+      // DIP position 1 = C, 2 = B, 3 = A; ON (closed) reads 0
+      const model = buildAnalogModel(d8, res8, { 'SW1:1': c === 0, 'SW1:2': b === 0, 'SW1:3': a === 0 });
+      const got = solveMixed(model)!;
+      expect(got.converged).toBe(true);
+      const row = { m, z1: got.levels[model.nodeOfNet['/Z1']], z2: got.levels[model.nodeOfNet['/Z2']], d1: (got.brightness.D1 ?? 0) > 0, d2: (got.brightness.D2 ?? 0) > 0 };
+      expect(row).toEqual({ m, z1: Z1[m], z2: Z2[m], d1: !!Z1[m], d2: !!Z2[m] });
+    }
+  });
+
+  test('a driven level agrees with the voltage it settles to', () => {
+    const model = buildAnalogModel(d8, res8, { 'SW1:1': true, 'SW1:2': true, 'SW1:3': true });
+    const got = solveMixed(model)!;
+    for (const net of ['/P', '/Q', '/Z1', '/Z2']) {
+      const node = model.nodeOfNet[net];
+      expect({ net, level: got.levels[node] }).toEqual({ net, level: got.nodes[node] > 1.4 ? 1 : 0 });
+    }
+  });
+});
+
+describe('solveMixed on lab4 (74LS138 decoder)', () => {
+  const d4 = parseNetlist(readFixture('lab4-decoder.net'));
+  const res4 = layout(d4, emptySidecar());
+  const bool4 = buildSimModel(d4, res4);
+  const nets = ['Net-(U1-A0)', 'Net-(U1-A1)', 'Net-(U1-A2)'];
+
+  test('the 74LS138 is modelled', () => {
+    expect(buildAnalogModel(d4, res4).notModelled).toEqual([]);
+  });
+
+  test('it agrees with the boolean simulator on every switch setting', () => {
+    // DIP positions 1-3 pull A0-A2 to ground when closed.
+    for (let code = 0; code < 8; code++) {
+      const closed = [0, 1, 2].map((i) => ((code >> i) & 1) === 1);
+      const levels = Object.fromEntries(nets.map((n, i) => [n, closed[i] ? 0 : 1])) as Record<string, 0 | 1>;
+      const want = simulate(bool4, levels);
+      const model = buildAnalogModel(d4, res4, { 'SW1:1': closed[0], 'SW1:2': closed[1], 'SW1:3': closed[2] });
+      const got = solveMixed(model)!;
+      expect(got.converged).toBe(true);
+      for (const o of ['O0', 'O1', 'O4', 'O5', 'O6']) {
+        const net = `Net-(U1-${o})`;
+        expect({ net, code, level: got.levels[model.nodeOfNet[net]] }).toEqual({ net, code, level: want.nets[net] });
+      }
+      for (const ref of ['D1', 'D2']) expect({ ref, code, lit: (got.brightness[ref] ?? 0) > 0 }).toEqual({ ref, code, lit: want.leds[ref] });
+    }
+  });
+});

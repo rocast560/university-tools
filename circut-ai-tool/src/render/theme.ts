@@ -1,11 +1,16 @@
 // Concrete colours for the renderer.
 //
-// The breadboard is a physical object: it does not follow the page theme. Both
-// palettes are identical, so the board looks the same in light and dark mode.
-// The client mounts the SVG in a constant light well (--well in
-// client/styles.css) because the supply leads and their +5V/GND labels are
-// drawn in the margin OUTSIDE the board rect, where dark ink on a dark card
-// would be invisible.
+// The breadboard is a physical object: it does not follow the page theme, and
+// every colour of the board itself is the same in both palettes. A real board
+// is tan under any lighting.
+//
+// What does differ is the margin. The renderer draws supply leads, their
+// +5V/GND labels and the rail-split note OUTSIDE the board rect, on whatever
+// the board is sitting on, and the two callers sit it on opposite surfaces:
+// the client mounts it in a near-black well (--well in client/styles.css) so
+// running LEDs read as lamps, while server/png.ts renders onto a light page
+// because an exported PNG goes into a build guide. Theme.margin is the ink for
+// that surround, and it is the only colour the two palettes disagree about.
 
 export interface Theme {
   name: 'light' | 'dark';
@@ -15,6 +20,8 @@ export interface Theme {
   hole: string;
   text: string;
   textMuted: string;
+  /** Ink for anything drawn outside the board rect, onto the surround. */
+  margin: string;
   railPlus: string;
   railMinus: string;
   chip: string;
@@ -39,6 +46,7 @@ export const LIGHT: Theme = {
   hole: '#6E7079',
   text: '#1E2229',
   textMuted: '#5B6270',
+  margin: '#5B6270',
   railPlus: '#D7263D',
   railMinus: '#2F6FBF',
   chip: '#2B2D33',
@@ -55,7 +63,7 @@ export const LIGHT: Theme = {
   dim: 0.18,
 };
 
-// Deliberately identical to LIGHT apart from the name: see the note above.
-// `?theme=dark` (server/api.ts) and the DARK import in client/board.ts are
-// therefore inert, but are kept so the API and its OpenAPI enum still work.
-export const DARK: Theme = { ...LIGHT, name: 'dark' };
+// The board itself is identical to LIGHT: same tan, same rails, same holes.
+// Only the margin ink changes, because this is the palette used when the board
+// is sitting on the client's near-black well rather than on a printed page.
+export const DARK: Theme = { ...LIGHT, name: 'dark', margin: '#AEB7C7' };

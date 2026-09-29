@@ -51,6 +51,21 @@ export interface TunnelStatus {
   mcpUrl: string | null;
 }
 
+export interface ClientSeen {
+  id: string;
+  kind: 'claude-code' | 'claude-desktop' | 'codex' | 'chatgpt' | 'other';
+  name: string;
+  transport: 'http' | 'stdio' | 'tunnel';
+  lastSeen: number;
+  lastMethod: string;
+  calls: number;
+}
+
+export interface Organizer {
+  folders: { id: string; name: string; order: number }[];
+  placements: Record<string, string>;
+}
+
 export interface ConnectInfo {
   appUrl: string;
   mcpUrl: string;
@@ -87,8 +102,14 @@ export const api = {
   ledColor: (id: string, ref: string, color: string | null) => post<LayoutDoc>(`/api/projects/${id}/layout/ledcolor`, { ref, color }),
   reset: (id: string) => post<LayoutDoc>(`/api/projects/${id}/layout/reset`, {}),
   connect: () => call<ConnectInfo>('/api/connect'),
+  organizer: () => call<Organizer>('/api/organizer'),
+  createFolder: (name: string) => post<Organizer['folders'][number]>('/api/organizer/folders', { name }),
+  renameFolder: (id: string, name: string) => call<Organizer['folders'][number]>(`/api/organizer/folders/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }) }),
+  deleteFolder: (id: string) => call<{ ok: boolean }>(`/api/organizer/folders/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  moveProject: (path: string, folderId: string | null) => post<{ ok: boolean }>('/api/organizer/move', { path, folderId }),
+  clients: () => call<ClientSeen[]>('/api/clients'),
   tunnel: (action: 'start' | 'stop') => post<TunnelStatus>('/api/tunnel', { action }),
-  events(onEvent: (ev: { projectId: string; type: string; message?: string }) => void): () => void {
+  events(onEvent: (ev: { projectId: string; type: string; message?: string; client?: ClientSeen }) => void): () => void {
     const es = new EventSource('/api/events');
     const handler = (e: MessageEvent) => {
       try {
@@ -99,6 +120,7 @@ export const api = {
     };
     es.addEventListener('changed', handler);
     es.addEventListener('error', handler as EventListener);
+    es.addEventListener('client', handler);
     return () => es.close();
   },
 };

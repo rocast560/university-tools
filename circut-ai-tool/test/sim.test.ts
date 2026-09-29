@@ -84,6 +84,42 @@ describe('7447 decoder with a common-anode display', () => {
   });
 });
 
+describe('lab4: 74LS138 decoder into AND gates and inverters', () => {
+  // F1 = NAND(O0, O1, O4) and F2 = NAND(O0, O4, O5, O6) on the inverter
+  // outputs; the LEDs sink into them, so each lights when its F is 0.
+  const d = parseNetlist(readFixture('lab4-decoder.net'));
+  const model = buildSimModel(d, layout(d, emptySidecar()));
+  const minterm = (a0: number, a1: number, a2: number) => a0 + 2 * a1 + 4 * a2;
+
+  test('the 74LS138 is simulated', () => {
+    expect(model.notSimulated).toEqual([]);
+  });
+
+  test('only the selected output goes low while E1, E2 low and E3 high', () => {
+    const r = simulate(model, { 'Net-(U1-A0)': 1, 'Net-(U1-A1)': 0, 'Net-(U1-A2)': 1 });
+    expect(['O0', 'O1', 'O4', 'O5', 'O6'].map((o) => r.nets[`Net-(U1-${o})`])).toEqual([1, 1, 1, 0, 1]);
+  });
+
+  test('decoder select inputs are listed MSB first, so rows count in minterm order', () => {
+    expect(model.inputs.map((i) => i.net)).toEqual(['Net-(U1-A2)', 'Net-(U1-A1)', 'Net-(U1-A0)']);
+  });
+
+  test('the LEDs follow the minterms on every row', () => {
+    const t = truthTable(model)!;
+    expect(t.rows).toHaveLength(8);
+    t.rows.forEach((row, i) => {
+      const m = minterm(row.inputs[2], row.inputs[1], row.inputs[0]);
+      expect(m).toBe(i);
+      expect({ m, leds: row.leds }).toEqual({ m, leds: [![0, 1, 4].includes(m), ![0, 4, 5, 6].includes(m)] });
+    });
+  });
+
+  test('a disabled 138 holds every output high', () => {
+    const r = simulate(model, { 'Net-(U1-A0)': 0, 'Net-(U1-A1)': 0, 'Net-(U1-A2)': 0, 'Net-(U1-E3)': 0 });
+    expect(['O0', 'O1', 'O4', 'O5', 'O6'].map((o) => r.nets[`Net-(U1-${o})`])).toEqual([1, 1, 1, 1, 1]);
+  });
+});
+
 describe('parts outside the simulator', () => {
   test('op-amps are listed as not simulated and too many inputs disables the table', () => {
     const spec: Parameters<typeof makeDesign>[0] = {

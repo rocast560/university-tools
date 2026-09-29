@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
     <meta name="theme-color" content="#f2efe8" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#0e1014" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#1c2127" media="(prefers-color-scheme: dark)" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>Circuit AI Tool</title>
     <script>
@@ -17,7 +17,7 @@
         var t = 'light';
         try {
           var saved = localStorage.getItem('theme');
-          t = saved === 'light' || saved === 'dark' ? saved : matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          t = saved === 'light' || saved === 'dark' ? saved : 'dark';
         } catch (e) {
           /* storage or matchMedia blocked */
         }

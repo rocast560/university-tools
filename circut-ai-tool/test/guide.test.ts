@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { buildPartsList, buildPinouts, buildSteps } from '../src/guide.ts';
 import { layout } from '../src/layout/engine.ts';
 import { emptySidecar } from '../src/layout/types.ts';
-import { parseNetlist } from '../src/netlist.ts';
+import { makeDesign, parseNetlist } from '../src/netlist.ts';
 import { buildSimModel } from '../src/sim/index.ts';
 import { readFixture } from './smoke.test.ts';
 
@@ -45,5 +45,35 @@ describe('buildPinouts and buildPartsList', () => {
     expect(list.some((l) => /1 × 74LS00 quad 2-input NAND \(U3\)/.test(l))).toBe(true);
     expect(list.some((l) => /2 × 1k resistor \(R1, R2\)/.test(l))).toBe(true);
     expect(list[list.length - 1]).toMatch(/jumper wires/);
+  });
+});
+
+describe('the DIP switch step', () => {
+  // Positions 1 and 2 drive the inputs; 3 to 7 are spare ways of the same
+  // seven-way switch, which is what the lab's red one looks like.
+  const pins: Record<string, [string, string, string]> = { '1': ['~', 'passive', '/A'], '14': ['~', 'passive', 'GND'], '2': ['~', 'passive', '/B'], '13': ['~', 'passive', 'GND'] };
+  for (let pos = 3; pos <= 7; pos++) {
+    pins[String(pos)] = ['~', 'passive', `unconnected-(SW1-Pad${pos})`];
+    pins[String(15 - pos)] = ['~', 'passive', `unconnected-(SW1-Pad${15 - pos})`];
+  }
+  const dip = makeDesign({
+    SW1: { lib: 'Switch', part: 'SW_DIP_x07', value: 'SW_DIP_x07', pins },
+    R1: { lib: 'Device', part: 'R', value: '1k', pins: { '1': ['1', 'passive', '+5V'], '2': ['2', 'passive', '/A'] } },
+    R2: { lib: 'Device', part: 'R', value: '1k', pins: { '1': ['1', 'passive', '+5V'], '2': ['2', 'passive', '/B'] } },
+    U1: { lib: '74xx', part: '74LS86', value: '74LS86', pins: { '1': ['~', 'input', '/A'], '2': ['~', 'input', '/B'], '3': ['~', 'output', '/Y'], '7': ['GND', 'power_in', 'GND'], '14': ['VCC', 'power_in', '+5V'] } },
+  });
+  const dipRes = layout(dip, emptySidecar());
+  const step = buildSteps(dip, dipRes, buildSimModel(dip, dipRes)).find((x) => x.ref === 'SW1')!;
+
+  test('names the real part rather than calling it "the SW_DIP_x07"', () => {
+    expect(step.label).toContain('Place SW1 (SW_DIP_x07) across the gutter');
+  });
+  test('names the input on each wired position', () => {
+    expect(step.label).toContain('position 1 (column 3) is input A');
+    expect(step.label).toContain('position 2 (column 4) is input B');
+  });
+  test('calls the unwired positions spare instead of claiming they are inputs', () => {
+    for (let pos = 3; pos <= 7; pos++) expect(step.label).toContain(`position ${pos} (column ${pos + 2}) is spare, leave it alone`);
+    expect(step.label).not.toContain('is input SW1');
   });
 });
