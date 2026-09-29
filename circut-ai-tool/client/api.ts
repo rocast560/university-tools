@@ -111,7 +111,7 @@ export const api = {
   moveProject: (path: string, folderId: string | null) => post<{ ok: boolean }>('/api/organizer/move', { path, folderId }),
   clients: () => call<ClientSeen[]>('/api/clients'),
   tunnel: (action: 'start' | 'stop') => post<TunnelStatus>('/api/tunnel', { action }),
-  events(onEvent: (ev: { projectId: string; type: string; message?: string; client?: ClientSeen }) => void): () => void {
+  events(onEvent: (ev: { projectId: string; type: string; message?: string; source?: 'edit' | 'watch'; client?: ClientSeen }) => void): () => void {
     const es = new EventSource('/api/events');
     const handler = (e: MessageEvent) => {
       try {

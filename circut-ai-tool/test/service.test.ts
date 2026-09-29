@@ -117,20 +117,38 @@ describe('Service', () => {
     expect(service.has(p.info.id)).toBe(false);
   });
 
-  test('an edit made through the service does not come back as a "changed" event', async () => {
+  test('an edit announces itself once with source "edit", and the watcher does not echo it', async () => {
     const { service, sch, events } = await makeService({ watch: true, watchPollMs: 100 });
     const p = await service.open(sch);
     const got: ProjectEvent[] = [];
     events.subscribe((e) => got.push(e));
     await new Promise((r) => setTimeout(r, 250));
     await service.setValue(p.info.id, 'R1', '2k');
+    // Emitted synchronously after the refresh, so MCP/REST edits reach open pages.
+    expect(got.filter((e) => e.type === 'changed')).toEqual([{ projectId: p.info.id, type: 'changed', source: 'edit' }]);
+    // Long enough for the poller and its debounce to see the write: no second event.
     await new Promise((r) => setTimeout(r, 1200));
-    expect(got.filter((e) => e.type === 'changed')).toEqual([]);
-    // An external save afterwards is still announced.
+    expect(got.filter((e) => e.type === 'changed')).toEqual([{ projectId: p.info.id, type: 'changed', source: 'edit' }]);
+    // An external save afterwards is still announced, by the watcher.
     writeFileSync(sch, `${readFileSync(sch, 'utf8')}
 `);
     await new Promise((r) => setTimeout(r, 1200));
-    expect(got.some((e) => e.type === 'changed')).toBe(true);
+    expect(got.filter((e) => e.type === 'changed' && e.source === 'watch').length).toBe(1);
+    service.close(p.info.id);
+  });
+
+  test('an external save is announced even after something else refreshed first', async () => {
+    const { service, sch, events } = await makeService({ watch: true, watchPollMs: 100 });
+    const p = await service.open(sch);
+    const got: ProjectEvent[] = [];
+    events.subscribe((e) => got.push(e));
+    await new Promise((r) => setTimeout(r, 250));
+    writeFileSync(sch, `${readFileSync(sch, 'utf8')}
+`);
+    // A REST /refresh racing the watcher leaves the open project matching the file on disk.
+    await service.refresh(p.info.id);
+    await new Promise((r) => setTimeout(r, 1200));
+    expect(got.some((e) => e.type === 'changed' && e.source === 'watch')).toBe(true);
     service.close(p.info.id);
   });
 
@@ -142,6 +160,7 @@ describe('Service', () => {
     writeFileSync(sch, `${readFileSync(sch, 'utf8')}\n`);
     const ev = await Promise.race([got, new Promise<ProjectEvent>((_, reject) => setTimeout(() => reject(new Error('no event within 3 s')), 3000))]);
     expect(ev.type).toBe('changed');
+    expect(ev.source).toBe('watch');
     service.close(p.info.id);
   });
 });

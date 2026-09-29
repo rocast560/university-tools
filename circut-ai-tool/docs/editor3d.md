@@ -73,7 +73,7 @@ Covered: moves, turns and flips. They run one at a time, in order.
 
 Not covered: value edits and deletes. They change the schematic, and the server saves a copy of the `.kicad_sch` before each one in a `.circuit-ai-backups` folder next to the schematic (the newest 20 are kept). Restore from there by hand.
 
-The history is cleared when the project changes or the editor closes.
+The history is cleared when the project changes, when the schematic reloads (any value edit or delete, from the card, an agent or KiCad), and when the editor closes. If an undo or redo fails (the part is gone, the server refused), that step is dropped with a message and the next Ctrl+Z reaches the one before it.
 
 ## What changes what
 
@@ -109,7 +109,7 @@ Ctrl, Cmd and Alt chords other than the undo and redo ones are left to the brows
 
 - **3D is blank.** WebGL is off or unavailable. Enable hardware acceleration in the browser, or try another browser.
 - **A part will not move.** Read the hint line while dragging; it gives the reason. Select the part first: an unselected part orbits instead of moving.
-- **My change vanished.** When the `.kicad_sch` is changed on disk by something else (KiCad, an agent), the board reloads. That resets the selection and the undo history. Edits made from the card do not trigger this.
+- **The board reloaded by itself.** Any schematic change reloads the board: a value edit or delete from the card, an agent's edit over MCP or the REST API, or a save in KiCad. The selection, switches, running simulation, walk-through step and followed net carry over where they still exist in the new design; the undo history does not. Only a change made outside the tool (KiCad, another program) shows the "Schematic changed on disk" notice.
 
 ## Coming next
 

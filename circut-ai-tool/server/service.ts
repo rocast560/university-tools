@@ -44,6 +44,12 @@ export interface ProjectEvent {
   projectId: string;
   type: 'changed' | 'error' | 'closed' | 'client';
   message?: string;
+  /**
+   * For 'changed': 'edit' when Service.edit() wrote the schematic (the MCP
+   * server, REST /edit/*, or a card in some page), 'watch' when the file
+   * changed on disk underneath us. Clients reload quietly for 'edit'.
+   */
+  source?: 'edit' | 'watch';
   /** For 'client': the MCP client that was just heard from. */
   client?: import('./clients.ts').ClientSeen;
 }
@@ -150,17 +156,20 @@ export class Service {
       watchFile(
         file,
         async () => {
-          // Our own edit() wrote this file (and is refreshing from it): not news.
+          // Our own edit() wrote this file, refreshed from it and already
+          // announced it with source 'edit': a second refresh and event would
+          // be noise. Only our own recorded write counts; matching the open
+          // project's mtime/size would also swallow a genuine external save
+          // once anything else had refreshed first.
           try {
             const st = await stat(file);
             const mine = this.selfWrites.get(id);
-            const open = this.open_.get(id);
-            if ((mine && st.mtimeMs === mine.mtimeMs && st.size === mine.size) || (open && st.mtimeMs === open.mtimeMs && st.size === open.size)) return;
+            if (mine && st.mtimeMs === mine.mtimeMs && st.size === mine.size) return;
           } catch {
             /* missing: fall through, refresh reports it */
           }
           this.refresh(id)
-            .then(() => this.deps.events.emit({ projectId: id, type: 'changed' }))
+            .then(() => this.deps.events.emit({ projectId: id, type: 'changed', source: 'watch' }))
             .catch((e) => this.deps.events.emit({ projectId: id, type: 'error', message: (e as Error).message }));
         },
         { pollMs: this.deps.watchPollMs ?? 0 },
@@ -180,6 +189,7 @@ export class Service {
     this.stops.get(id)?.();
     this.stops.delete(id);
     this.open_.delete(id);
+    this.selfWrites.delete(id);
     this.deps.events.emit({ projectId: id, type: 'closed' });
   }
 
@@ -245,6 +255,10 @@ export class Service {
       }
       await writeSidecar(p.info.path, p.sidecar);
       const fresh = await this.refresh(id);
+      // Tell every open page (and the watcher knows to stay quiet about this
+      // write via selfWrites). Without this, MCP and REST edits never reach
+      // the browser.
+      this.deps.events.emit({ projectId: id, type: 'changed', source: 'edit' });
       return { project: fresh, backup, notes: result.notes, ref: result.ref, unit: result.unit };
     } catch (e) {
       // The schematic write already succeeded at this point; say so and name the backup so the

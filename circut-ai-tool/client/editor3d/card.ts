@@ -104,10 +104,8 @@ export function attachCard(ws: Workspace): () => void {
     if (!p || !ref) return;
     const value = input.value.trim();
     if (!value) return toast('A value cannot be empty');
-    // After the reload, keep the same part selected so the card comes back.
-    void busy(() => api.editValue(p.id, ref, value)).then((ok) => {
-      if (ok && store.get().project?.id === p.id) store.setProject({ selectedRef: ref });
-    });
+    // loadProject keeps the selection across a same-project reload, so the card comes back by itself.
+    void busy(() => api.editValue(p.id, ref, value));
   });
 
   card.addEventListener('click', (e) => {
