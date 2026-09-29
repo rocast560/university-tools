@@ -35,7 +35,11 @@ const typing = (t: EventTarget | null) => {
   return !!el && (el.isContentEditable || /^(input|textarea|select)$/i.test(el.tagName));
 };
 
-export async function openWorkspace(onClosed: () => void): Promise<Workspace | null> {
+/**
+ * Open the editor. Aborting `signal` while three is still loading takes the
+ * shell down again and resolves null; after that, `Workspace.close` is the way.
+ */
+export async function openWorkspace(onClosed: () => void, signal?: AbortSignal): Promise<Workspace | null> {
   const p = store.get().project;
   if (!p) return null;
   const root = document.createElement('div');
@@ -56,9 +60,26 @@ export async function openWorkspace(onClosed: () => void): Promise<Workspace | n
   const hintEl = root.querySelector<HTMLElement>('.ws-hint')!;
   const stepEl = root.querySelector<HTMLElement>('.ws-step')!;
 
-  const { mount3d } = await import('../board3d.ts');
+  const dismantle = () => {
+    root.remove();
+    document.body.classList.remove('ws-open');
+  };
+  signal?.addEventListener('abort', dismantle, { once: true });
+  let mount3d: typeof import('../board3d.ts').mount3d;
+  try {
+    // Test-only: lets a scenario hold the download open long enough to race it.
+    const delay = location.search.includes('e2e') ? (window as { __e3dDelay?: number }).__e3dDelay : 0;
+    if (delay) await new Promise((r) => setTimeout(r, delay));
+    ({ mount3d } = await import('../board3d.ts'));
+  } catch (e) {
+    dismantle();
+    throw e;
+  }
   // Closed again while three was still downloading.
-  if (!root.isConnected) return null;
+  if (signal?.aborted || !root.isConnected) {
+    dismantle();
+    return null;
+  }
   let mountedStyle = p.sidecar.options.wireStyle;
   let mountedDoc = p.doc;
   const board = mount3d(canvasHost, p.doc, {
@@ -151,6 +172,11 @@ export async function openWorkspace(onClosed: () => void): Promise<Workspace | n
   // Keys: later tasks register handlers; these are the shell's own, tried last.
   const onKey = (e: KeyboardEvent) => {
     if (typing(e.target)) return;
+    // Ctrl, Cmd and Alt chords (Ctrl+F is the browser's find) are the browser's, unless a handler claims them.
+    if (e.ctrlKey || e.metaKey || e.altKey) {
+      if (!board.flying) for (const fn of keyHandlers) if (fn(e, ws)) return void e.preventDefault();
+      return;
+    }
     if (board.flying) {
       if (e.key === 'f' || e.key === 'F' || e.key === 'Escape') {
         e.preventDefault();

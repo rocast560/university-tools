@@ -188,6 +188,17 @@ const SCENARIOS: Record<string, (page: CDP, id: string) => Promise<void>> = {
     await page.until(`!document.querySelector('.ws')`, 'Back to close');
     await page.until(`document.querySelector('[data-action=view3d]').textContent.trim() === '3D'`, 'the toolbar button to read 3D again');
   },
+  async 'Back during load leaves no editor behind'(page) {
+    // Hold the three download open so Back can land while it is pending.
+    await page.eval(`window.__e3dDelay = 1500`);
+    await page.eval(`document.querySelector('[data-action=view3d]').click()`);
+    await page.until(`document.querySelector('.ws')`, 'the shell to appear');
+    await page.eval(`history.back()`);
+    await sleep(2500);
+    const left = await page.eval<boolean>(`!document.querySelector('.ws') && !document.body.classList.contains('ws-open') && !window.__e3d`);
+    if (!left) throw new Error('an editor was left behind');
+    await page.until(`document.querySelector('[data-action=view3d]').textContent.trim() === '3D'`, 'the toolbar button to read 3D');
+  },
 };
 
 void main();

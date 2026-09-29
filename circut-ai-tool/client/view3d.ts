@@ -6,10 +6,12 @@
 // dynamically), so a user who never opens 3D never downloads it.
 
 import { openWorkspace, type Workspace } from './editor3d/workspace.ts';
+import { toast } from './main.ts';
 import { store } from './state.ts';
 
 let ws: Workspace | null = null;
 let opening = false;
+let loading: AbortController | null = null;
 let onPop: (() => void) | null = null;
 
 export const is3dOpen = () => !!ws;
@@ -23,13 +25,22 @@ export async function open3d() {
   history.pushState({ ...(history.state ?? {}), view3d: true }, '');
   onPop = () => close3d(false);
   addEventListener('popstate', onPop);
+  const ac = (loading = new AbortController());
   try {
     ws = await openWorkspace(() => {
       ws = null;
       // Repaint the page toolbar so its button reads 3D again.
       store.setProject({});
-    });
+    }, ac.signal);
+    // Nothing to show (no project): undo the history entry and listener.
+    if (!ws && !ac.signal.aborted) close3d();
+  } catch (e) {
+    if (!ac.signal.aborted) {
+      close3d();
+      toast(`Could not open the 3D editor: ${(e as Error).message}`);
+    }
   } finally {
+    if (loading === ac) loading = null;
     opening = false;
   }
 }
@@ -41,6 +52,8 @@ export function close3d(viaHistory = true) {
     onPop = null;
   }
   if (viaHistory && (history.state as { view3d?: boolean } | null)?.view3d) history.back();
+  loading?.abort();
+  loading = null;
   ws?.close();
   ws = null;
 }
