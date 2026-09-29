@@ -27,7 +27,7 @@ export function mountBoard(container: HTMLElement): () => void {
   let view = { x: -100, y: 0, w: 0, h: 350 };
   let lastKey = '';
   let leds = new Map<string, LedNodes>();
-  let drag: { ref: string; columnsOnly: boolean; startX: number; startY: number; origin: Record<string, { col: number; row: never }>; preview: string | null; valid: boolean } | null = null;
+  let drag: { ref: string; columnsOnly: boolean; startX: number; startY: number; origin: Record<string, { col: number; row: never }>; preview: string | null; valid: boolean; holesKey: string } | null = null;
   let panning: { x: number; y: number; vx: number; vy: number } | null = null;
 
   const svgPoint = (e: PointerEvent) => {
@@ -136,7 +136,7 @@ export function mountBoard(container: HTMLElement): () => void {
       const ref = part.getAttribute('data-ref')!;
       if (!p.doc.pinHoles[ref]) return;
       const { x, y } = svgPoint(e);
-      drag = { ref, columnsOnly: part.classList.contains('pkg'), startX: x, startY: y, origin: p.doc.pinHoles[ref] as never, preview: null, valid: true };
+      drag = { ref, columnsOnly: part.classList.contains('pkg'), startX: x, startY: y, origin: p.doc.pinHoles[ref] as never, preview: null, valid: true, holesKey: '' };
       container.querySelector('svg')!.classList.add('dragging');
       (e.currentTarget as Element).setPointerCapture(e.pointerId);
       return;
@@ -160,8 +160,14 @@ export function mountBoard(container: HTMLElement): () => void {
       const holes = shiftHoles(drag.origin, x - drag.startX, y - drag.startY, p.doc.board, drag.columnsOnly);
       if (!holes) {
         drag.valid = false;
+        drag.holesKey = '';
         return;
       }
+      // Routing square wires is slow on a big board, so rebuild the preview
+      // only when the snapped holes change, not on every pointer move.
+      const key = JSON.stringify(holes);
+      if (key === drag.holesKey) return;
+      drag.holesKey = key;
       const sidecar = { ...p.sidecar, pinned: { ...p.sidecar.pinned, [drag.ref]: holes } };
       const doc = buildLayoutDoc(p.design, sidecar);
       drag.valid = !doc.warnings.some((w) => w.startsWith(`pinned placement for ${drag!.ref} dropped`));

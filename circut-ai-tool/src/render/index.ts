@@ -405,6 +405,7 @@ export function renderSvg(res: EngineResult & { routes?: WireRoute[] }, opts: Re
   const size = svgSize(res.board, res.packages);
   const ortho = opts.wireStyle === 'orthogonal';
   const controls = ortho ? [] : wireControls(res.wires);
+  // Fallback for bare EngineResult callers only: it ignores saved wirePaths (the pipeline routes with them).
   const routes = ortho ? (res.routes ?? routeWires(res).routes) : [];
   const ctx: SkinContext = { parts: res.parts, board: res.board, ledColors: res.ledColors ?? {}, leds: Object.fromEntries(res.parts.filter((p) => p.style === 'LED').map((p) => [p.id, ledState(p.id, sim)])) };
   const defs = sk.defs?.(ctx, t);
