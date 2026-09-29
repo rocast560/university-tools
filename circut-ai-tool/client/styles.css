@@ -1926,3 +1926,32 @@ body.ws-open { overflow: hidden; }
   .ws-hint { display: none; }
   .ws-step { max-width: 16ch; }
 }
+
+.ws-card {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 2;
+  width: 250px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(18, 21, 29, .94);
+  border: 1px solid rgba(77, 163, 255, .45);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .45);
+  font-size: 12.5px;
+  will-change: transform;
+}
+.ws-card.is-busy { opacity: .6; pointer-events: none; }
+.ws-card header { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+.ws-card header span { opacity: .65; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-card-x { margin-left: auto; background: none; border: 0; color: inherit; font-size: 16px; cursor: pointer; opacity: .7; }
+.ws-card label { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.ws-card input { flex: 1; min-width: 0; padding: 3px 6px; border-radius: 5px; border: 1px solid rgba(255, 255, 255, .2); background: rgba(0, 0, 0, .3); color: inherit; font: inherit; }
+.ws-card-pins { list-style: none; margin: 0 0 8px; padding: 0; max-height: 150px; overflow: auto; }
+.ws-card-pins li { display: grid; grid-template-columns: 2.5em 3.5em 1fr; gap: 6px; align-items: center; padding: 1px 0; }
+.ws-card-pins button { justify-self: start; background: rgba(255, 255, 255, .08); border: 0; border-radius: 8px; padding: 1px 7px; color: inherit; cursor: pointer; font: inherit; }
+.ws-card-pins i { opacity: .5; }
+.ws-card footer { display: flex; flex-wrap: wrap; gap: 6px; }
+.ws-card footer button, .ws-card-confirm button { padding: 3px 9px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, .16); background: rgba(40, 44, 52, .8); color: inherit; cursor: pointer; font: inherit; }
+.ws-card .danger { border-color: rgba(239, 68, 68, .6); }
+.ws-card-confirm { margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, .1); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }

@@ -15,6 +15,7 @@ import { esc } from '../main.ts';
 import { simState } from '../simstate.ts';
 import { store } from '../state.ts';
 import { history as editHistory } from './history.ts';
+import { attachCard } from './card.ts';
 import { attachManipulation } from './manipulate.ts';
 
 export interface Workspace {
@@ -91,12 +92,16 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
   let offSim = () => {};
   let offKey = () => {};
   let detachManip = () => {};
+  let detachCard = () => {};
+  let offDel = () => {};
   let offHistory = () => {};
   const release = () => {
     offStore();
     offSim();
     offKey();
     offHistory();
+    offDel();
+    detachCard();
     detachManip();
     disposeBoard();
     dismantle();
@@ -142,6 +147,15 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
     };
 
     detachManip = attachManipulation(ws);
+    detachCard = attachCard(ws);
+    offDel = addKeyHandler((e) => {
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return false;
+      const confirm = root.querySelector<HTMLElement>('.ws-card:not([hidden]) .ws-card-confirm');
+      if (!confirm) return false;
+      confirm.hidden = false;
+      confirm.querySelector<HTMLButtonElement>('[data-card=confirm]')!.focus();
+      return true;
+    });
 
     const undoBtn = root.querySelector<HTMLButtonElement>('[data-ws=undo]')!;
     const redoBtn = root.querySelector<HTMLButtonElement>('[data-ws=redo]')!;

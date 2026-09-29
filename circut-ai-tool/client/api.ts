@@ -97,6 +97,8 @@ export const api = {
   },
   sidecar: (id: string) => call<Sidecar>(`/api/projects/${id}/sidecar`),
   move: (id: string, ref: string, holes: Record<string, Hole>) => post<LayoutDoc>(`/api/projects/${id}/layout/move`, { ref, holes }),
+  editValue: (id: string, ref: string, value: string) => post<unknown>(`/api/projects/${id}/edit/value`, { ref, value }),
+  editRemove: (id: string, ref: string) => post<unknown>(`/api/projects/${id}/edit/remove`, { ref }),
   options: (id: string, patch: Partial<Options>) => post<LayoutDoc>(`/api/projects/${id}/layout/options`, patch),
   color: (id: string, net: string, color: string | null) => post<LayoutDoc>(`/api/projects/${id}/layout/colors`, { net, color }),
   ledColor: (id: string, ref: string, color: string | null) => post<LayoutDoc>(`/api/projects/${id}/layout/ledcolor`, { ref, color }),

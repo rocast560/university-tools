@@ -249,6 +249,8 @@ const SCENARIOS: Record<string, (page: CDP, id: string) => Promise<void>> = {
     // taken, and one of them must be free. If every nearby column is taken for
     // that part, try the next one before giving up.
     for (const { ref } of candidates.slice(0, 4)) {
+      // The previous part's card floats over the canvas and would catch this part's click.
+      await page.eval(`__e3d.select(null)`);
       // Asked again for each part: a refused drag leaves the camera alone, but a screen point is only good for the current view.
       const at = (await pickable(page)).find((c) => c.ref === ref);
       if (!at) continue;
@@ -340,6 +342,40 @@ const SCENARIOS: Record<string, (page: CDP, id: string) => Promise<void>> = {
     );
     const flipped = await page.eval<boolean>(`__e3d.holes(${JSON.stringify(ref)})['1'].row === 'e'`);
     console.log(`     (${flipped ? 'chip flipped' : "flip refused with a Can't flip toast"})`);
+  },
+  async 'the card edits a value and survives the reload'(page) {
+    await open3d(page);
+    const ref = (await page.eval<string[]>(`__e3d.lead2()`)).find(() => true)!;
+    await page.eval(`__e3d.select(${JSON.stringify(ref)})`);
+    await page.until(`document.querySelector('.ws-card:not([hidden])')?.dataset.ref === ${JSON.stringify(ref)}`, 'the card');
+    await page.eval(`(() => { const i = document.querySelector('.ws-card input[name=value]'); i.value = '4.7k'; i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); })()`);
+    await page.until(`document.querySelector('.ws-card input[name=value]')?.value === '4.7k' && !document.querySelector('.ws-card.is-busy')`, 'the new value after reload', 20000);
+    // The watcher's own 'changed' reload of our edit lands later; the card must outlast it.
+    await new Promise((r) => setTimeout(r, 2500));
+    await page.until(`document.querySelector('.ws-card:not([hidden])')?.dataset.ref === ${JSON.stringify(ref)} && __e3d.selected() === ${JSON.stringify(ref)}`, 'the card to survive the follow-up reload');
+  },
+  async 'Delete opens the confirm, but not while typing in the value'(page) {
+    await open3d(page);
+    const ref = (await page.eval<string[]>(`__e3d.lead2()`))[0];
+    await page.eval(`__e3d.select(${JSON.stringify(ref)})`);
+    await page.until(`document.querySelector('.ws-card:not([hidden])')`, 'the card');
+    await page.eval(`document.querySelector('.ws-card input[name=value]').focus()`);
+    await page.key('Backspace', 'Backspace');
+    await new Promise((r) => setTimeout(r, 400));
+    if (await page.eval<boolean>(`!document.querySelector('.ws-card-confirm').hidden`)) throw new Error('Backspace in the value field opened the delete confirm');
+    await page.eval(`document.activeElement.blur()`);
+    await page.key('Delete', 'Delete');
+    await page.until(`!document.querySelector('.ws-card-confirm').hidden`, 'the confirm to open');
+  },
+  async 'card closes when its part disappears'(page) {
+    await open3d(page);
+    const ref = (await page.eval<string[]>(`__e3d.lead2()`)).at(-1)!;
+    await page.eval(`__e3d.select(${JSON.stringify(ref)})`);
+    await page.until(`document.querySelector('.ws-card:not([hidden])')`, 'the card');
+    await page.eval(`document.querySelector('.ws-card [data-card=delete]').click()`);
+    await page.eval(`document.querySelector('.ws-card [data-card=confirm]').click()`);
+    await page.until(`!__e3d.parts().includes(${JSON.stringify(ref)})`, `${ref} to be removed`, 20000);
+    await page.until(`!document.querySelector('.ws-card:not([hidden])')`, 'the card to close');
   },
 };
 
