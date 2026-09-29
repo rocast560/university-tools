@@ -252,4 +252,23 @@ describe('hand-shaped wires', () => {
     const reset = await service.resetLayout(p.info.id);
     expect(reset.sidecar.wirePaths).toEqual({});
   });
+
+  test('setWirePath checks the shape as it will be drawn: a bend on its own hole is refused at save, not dropped at layout', async () => {
+    const { service, sch } = await makeService();
+    const p = await service.open(sch);
+    const w = p.doc.wires.find((k) => wireKey(k) === '+5V|T+11|a12')!;
+    // The first bend lands on the T+11 hole itself, so it simplifies away and the run leaves sideways.
+    const onHole = { points: [{ col: 11, gap: 'top', lane: 2 }, { col: 12, gap: 'top', lane: 2 }] };
+    await expect(service.setWirePath(p.info.id, wireKey(w), onHole)).rejects.toThrow(/leave each hole straight/);
+    expect((await service.setWirePath(p.info.id, '*', null)).sidecar.wirePaths).toEqual({});
+  });
+
+  test('a shape kept for a jumper that is gone can still be forgotten; a key nobody knows is a 404', async () => {
+    const { service, sch } = await makeService();
+    const p = await service.open(sch);
+    p.sidecar.wirePaths['/GONE|a1|a9'] = { points: [] };
+    const after = await service.setWirePath(p.info.id, '/GONE|a1|a9', null);
+    expect(after.sidecar.wirePaths['/GONE|a1|a9']).toBeUndefined();
+    await expect(service.setWirePath(p.info.id, '/GONE|a1|a9', null)).rejects.toThrow(/no jumper/);
+  });
 });

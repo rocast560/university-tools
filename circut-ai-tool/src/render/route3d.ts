@@ -195,6 +195,19 @@ export function pathToPlan(w: Wire, path: WirePath): Point[] | null {
   return [pt(w.a), ...pts, pt(w.b)];
 }
 
+/**
+ * A saved shape as the plan it will be drawn as (simplified, so a bend sitting
+ * on its own hole is gone), or why it cannot be one. Shared by the save check
+ * and the router so a shape that saves is a shape that lays out.
+ */
+export function shapePlan(w: Wire, path: WirePath, packages: Package[], board: BoardSpec): { plan: Point[]; why: null } | { plan: null; why: string } {
+  const raw = pathToPlan(w, path);
+  if (!raw) return { plan: null, why: 'it names a corridor this board does not have' };
+  const plan = simplify(raw);
+  const why = checkPlan(plan, packages, board);
+  return why ? { plan: null, why } : { plan, why: null };
+}
+
 /** A plan's bends in grid units, from the hole that sorts first; null when a bend is off the half-pitch grid. */
 export function planToPath(w: Wire, plan: Point[]): WirePath | null {
   const points: WirePoint[] = [];
@@ -707,11 +720,8 @@ export function routeWires(input: RouteInput, saved: Record<string, WirePath> = 
       warnings.push(`hand-shaped jumper for ${keyNet(key)} (${keyHoles(key)}) no longer matches a wire; dropped`);
       continue;
     }
-    const raw = pathToPlan(input.wires[i], path);
-    // Simplify first: a bend sitting on its own hole would otherwise pass the column check and then vanish.
-    const plan = raw && simplify(raw);
-    const why = plan ? checkPlan(plan, input.packages, input.board) : 'it names a corridor this board does not have';
-    if (!plan || why) {
+    const { plan, why } = shapePlan(input.wires[i], path, input.packages, input.board);
+    if (!plan) {
       warnings.push(`hand-shaped jumper for ${keyNet(key)} (${keyHoles(key)}) no longer fits (${why}); re-routed`);
       continue;
     }

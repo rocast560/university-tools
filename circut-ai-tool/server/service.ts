@@ -14,12 +14,14 @@ import { buildLayoutDoc, type LayoutDoc } from '../src/pipeline.ts';
 import { footprintPins } from '../src/layout/engine.ts';
 import { classify } from '../src/parts/catalog.ts';
 import { LED_COLOURS, type LedColour } from '../src/parts/led.ts';
-import { checkPlan, pathToPlan, wireKey } from '../src/render/route3d.ts';
+import { shapePlan, wireKey } from '../src/render/route3d.ts';
 import { simulate, type SimResult } from '../src/sim/index.ts';
 import type { KicadCli } from './kicad-cli.ts';
 import type { LibraryLookup } from './libraries.ts';
 import { importSchematic, mapHostPath, normalizePath, projectId, readSidecar, scanProjects, writeSidecar, type PathMapping, type ProjectInfo, type ProjectRegistry } from './projects.ts';
 import { watchFile, type Events } from './watch.ts';
+
+const PATH_HELP = 'path must be {"points": [{"col": 12.5, "gap": "c|d", "lane": 0}, ...]}, with corridors named "top", "T+|T-", "a|b" ... "B-|B+", "bottom"';
 
 export class ServiceError extends Error {
   constructor(
@@ -370,16 +372,20 @@ export class Service {
       return this.rebuild(p);
     }
     const wire = p.doc.wires.find((w) => wireKey(w) === key);
+    if (!wire && path === null && key in p.sidecar.wirePaths) {
+      // A shape for a jumper that is gone: let it be forgotten.
+      delete p.sidecar.wirePaths[key];
+      return this.rebuild(p);
+    }
     if (!wire) throw new ServiceError(`no jumper ${key} on the board (a key is net|holeA|holeB with the holes sorted, for example "/A|a12|e20")`, 404);
     if (path === null) {
       delete p.sidecar.wirePaths[key];
       return this.rebuild(p);
     }
     const clean = normalizeWirePath(path);
-    const plan = clean && pathToPlan(wire, clean);
-    if (!clean || !plan) throw new ServiceError('path must be {"points": [{"col": 12.5, "gap": "c|d", "lane": 0}, ...]}, with corridors named "top", "T+|T-", "a|b" ... "B-|B+", "bottom"');
-    const why = checkPlan(plan, p.doc.packages, p.doc.board);
-    if (why) throw new ServiceError(`cannot shape the ${wire.net} jumper: ${why}`);
+    if (!clean) throw new ServiceError(PATH_HELP);
+    const { why } = shapePlan(wire, clean, p.doc.packages, p.doc.board);
+    if (why) throw new ServiceError(why.startsWith('it names') ? PATH_HELP : `cannot shape the ${wire.net} jumper: ${why}`);
     p.sidecar.wirePaths[key] = clean;
     return this.rebuild(p);
   }
