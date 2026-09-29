@@ -87,7 +87,24 @@ export class Kit {
  * Left in linear space deliberately: a roughness or bump map is data, not
  * colour, and tagging it sRGB would bend the values on the way in.
  */
+/**
+ * mulberry32: a tiny seeded PRNG. Every procedural texture draws from its own
+ * fixed seed, so a rebuild after each move paints the same surface again
+ * instead of visibly re-rolling the speckle.
+ */
+export function seededRandom(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 function grain(kit: Kit, px: number, spread: number, mid = 0.5): THREE.CanvasTexture {
+  const random = seededRandom(0x9e3779b9);
   const cv = document.createElement('canvas');
   cv.width = cv.height = px;
   const g = cv.getContext('2d')!;
@@ -98,7 +115,7 @@ function grain(kit: Kit, px: number, spread: number, mid = 0.5): THREE.CanvasTex
     const x = i % px;
     const y = (i / px) | 0;
     const slow = Math.sin(x * 0.19) * Math.cos(y * 0.23) * 0.5 + 0.5;
-    const value = mid + (Math.random() - 0.5) * spread + (slow - 0.5) * spread * 0.6;
+    const value = mid + (random() - 0.5) * spread + (slow - 0.5) * spread * 0.6;
     const b = Math.max(0, Math.min(255, Math.round(value * 255)));
     img.data[i * 4] = img.data[i * 4 + 1] = img.data[i * 4 + 2] = b;
     img.data[i * 4 + 3] = 255;
@@ -168,12 +185,13 @@ function ceramic(kit: Kit): THREE.CanvasTexture {
   const g = cv.getContext('2d')!;
   g.fillStyle = '#e3cfa0';
   g.fillRect(0, 0, px, px);
+  const random = seededRandom(0x85ebca6b);
   for (let i = 0; i < 900; i++) {
-    const a = Math.random() * 0.09;
-    g.fillStyle = Math.random() > 0.5 ? `rgba(150,126,80,${a})` : `rgba(255,246,220,${a})`;
-    const r = 2 + Math.random() * 9;
+    const a = random() * 0.09;
+    g.fillStyle = random() > 0.5 ? `rgba(150,126,80,${a})` : `rgba(255,246,220,${a})`;
+    const r = 2 + random() * 9;
     g.beginPath();
-    g.arc(Math.random() * px, Math.random() * px, r, 0, Math.PI * 2);
+    g.arc(random() * px, random() * px, r, 0, Math.PI * 2);
     g.fill();
   }
   const tex = kit.keep(new THREE.CanvasTexture(cv));

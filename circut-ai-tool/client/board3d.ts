@@ -26,7 +26,7 @@ import { P, ROWY, X0 } from '../src/render/geometry.ts';
 import { wireControls } from '../src/render/routing.ts';
 import { wirePolylines } from '../src/render/ortho.ts';
 import type { AnalogState } from '../src/sim/analog/simulator.ts';
-import { at, BOARD_THICK, buildPackage, buildPart, grainMap, holeX, holeZ, Kit, MM, routeWire, TOP, tube, WIRE_CLEARANCE, WIRE_END_Y, type LedLamp, type Obstacle, type SevenSegLamp, type Way } from './board3d-parts.ts';
+import { at, BOARD_THICK, buildPackage, buildPart, grainMap, holeX, holeZ, Kit, MM, routeWire, seededRandom, TOP, tube, WIRE_CLEARANCE, WIRE_END_Y, type LedLamp, type Obstacle, type SevenSegLamp, type Way } from './board3d-parts.ts';
 import { easeOutCubic, frameBox } from './editor3d/focus-math.ts';
 import { flyControls } from './fly.ts';
 
@@ -49,10 +49,13 @@ function topTexture(doc: LayoutDoc, width: number, depth: number): THREE.CanvasT
 
   // Grain: a lot of very low contrast speckles beats a noise filter here,
   // because it stays crisp when you put the camera right down on the board.
+  // Seeded, because every move rebuilds the scene and a re-rolled grain makes
+  // the whole surface visibly shimmer.
+  const random = seededRandom(0xc2b2ae35);
   for (let i = 0; i < 26000; i++) {
-    const a = Math.random() * 0.05;
-    g.fillStyle = Math.random() > 0.5 ? `rgba(120,112,92,${a})` : `rgba(255,252,242,${a})`;
-    g.fillRect(Math.random() * width, Math.random() * depth, 1.4, 1.4);
+    const a = random() * 0.05;
+    g.fillStyle = random() > 0.5 ? `rgba(120,112,92,${a})` : `rgba(255,252,242,${a})`;
+    g.fillRect(random() * width, random() * depth, 1.4, 1.4);
   }
 
   const cols = doc.board.cols;
@@ -646,6 +649,11 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
   const hitOn = (layer: number, key: 'switchKey' | 'ref' | 'net', within: THREE.Object3D[]): { id: string; distance: number } | null => {
     ray.layers.set(layer);
     for (const hit of ray.intersectObjects(within, true)) {
+      // three's raycaster ignores `visible`, so a jumper hidden by a held
+      // highlight would still catch the click meant for what is behind it.
+      let hidden = false;
+      for (let o: THREE.Object3D | null = hit.object; o; o = o.parent) if (!o.visible) hidden = true;
+      if (hidden) continue;
       for (let o: THREE.Object3D | null = hit.object; o; o = o.parent) if (typeof o.userData[key] === 'string') return { id: o.userData[key] as string, distance: hit.distance };
     }
     return null;
@@ -773,6 +781,10 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
   let selectedRef: string | null = null;
   let hoveredRef: string | null = null;
   const setSelected = (ref: string | null) => {
+    // Every store change calls this; re-outlining an unchanged selection would
+    // throw away and rebuild its edge geometry for nothing. rebuild() clears
+    // the outline first, so its re-apply still goes through.
+    if (ref === selectedRef && (ref === null || outlines.sel.length > 0)) return;
     selectedRef = ref;
     outline('sel', ref);
     if (hoveredRef === ref) clearOutline('hov');
