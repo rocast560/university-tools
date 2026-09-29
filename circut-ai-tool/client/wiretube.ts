@@ -31,7 +31,7 @@ export interface WireMeshes {
   base: number;
 }
 
-const shapeOf = (plan: Point[], lifts: Lift[], base: number) => wireShape(plan, lifts, { base, endY: WIRE_END_Y, top: TOP, radius: WIRE_R, core: CORE_R, sides: 8, coreSides: 6 });
+const shapeOf = (plan: Point[], lifts: Lift[], base: number) => wireShape(plan, lifts, { base, endY: WIRE_END_Y, top: TOP, radius: WIRE_R, core: CORE_R, sides: 10, coreSides: 8 });
 
 /** A jumper's jacket and bare ends. `base` is the centre line's height where it lies flat. */
 export function buildWireMeshes(kit: Kit, plan: Point[], lifts: Lift[], base: number, jacket: THREE.Material, tin: THREE.Material): WireMeshes {

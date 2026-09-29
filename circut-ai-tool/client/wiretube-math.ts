@@ -18,8 +18,8 @@ export type V3 = [number, number, number];
 export const BEND_R = 4;
 /** Bend radius where the wire comes up out of its hole: a little tighter. */
 export const STUB_R = 3;
-/** One ring per this much turn in a fillet (30 degrees: the sagitta on a bend of radius 4 is 0.14, and the tube is smooth-shaded, so a 90 degree bend is 4 rings). */
-export const ARC_STEP = Math.PI / 6;
+/** One ring per this much turn in a fillet: 15 degrees, so a 90 degree bend is 6 segments. */
+export const ARC_STEP = Math.PI / 12;
 /** Bare wire showing above the board at each end, as a stripped jumper has. */
 export const STRIP = 7;
 /** Half the length of a hump over another wire: about two pitches in all. */
