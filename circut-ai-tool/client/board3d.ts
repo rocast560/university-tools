@@ -17,6 +17,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import type { Tint } from '../src/edit/placement.ts';
+import type { Handle } from '../src/edit/wireshape.ts';
 import { isRail } from '../src/layout/board.ts';
 import type { Hole } from '../src/layout/types.ts';
 import type { LayoutDoc } from '../src/pipeline.ts';
@@ -24,11 +25,13 @@ import { liftCrossings, type Span } from '../src/render/altitude.ts';
 import type { Highlight } from '../src/render/index.ts';
 import { P, ROWY, X0 } from '../src/render/geometry.ts';
 import { wireControls } from '../src/render/routing.ts';
-import { wirePolylines } from '../src/render/ortho.ts';
+import { routeWires, WIRE_R, type Point as PlanPoint, type WireRoute } from '../src/render/route3d.ts';
 import type { AnalogState } from '../src/sim/analog/simulator.ts';
 import { at, BOARD_THICK, buildPackage, buildPart, grainMap, holeX, holeZ, Kit, MM, routeWire, seededRandom, TOP, tube, WIRE_CLEARANCE, WIRE_END_Y, type LedLamp, type Obstacle, type SevenSegLamp, type Way } from './board3d-parts.ts';
 import { easeOutCubic, frameBox } from './editor3d/focus-math.ts';
 import { flyControls } from './fly.ts';
+import type { V3 } from './wiretube-math.ts';
+import { buildWireMeshes, reshapeWire, type WireMeshes } from './wiretube.ts';
 
 /**
  * The printed top surface, drawn once into a canvas: the moulded grain, the
@@ -148,7 +151,7 @@ const v = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
 /** Reused when driving a die towards white; allocating one per frame is waste. */
 const WHITE = new THREE.Color(0xffffff);
 
-export type Pick = { kind: 'part'; ref: string } | { kind: 'wire'; net: string } | { kind: 'switch'; key: string } | null;
+export type Pick = { kind: 'part'; ref: string } | { kind: 'wire'; net: string; index: number } | { kind: 'switch'; key: string } | null;
 
 export interface Board3D {
   dispose(): void;
@@ -195,6 +198,22 @@ export interface Board3D {
   readonly dom: HTMLCanvasElement;
   /** Orbit on or off; off while the editor owns a drag. */
   setOrbit(on: boolean): void;
+  /** Mark one jumper as selected with an accent line along its top; null clears it. */
+  setWireSelected(index: number | null): void;
+  /**
+   * Draw a jumper along `plan` while its handle is dragged, red when `bad`;
+   * null puts back its routed shape. Only this wire's buffers are rebuilt.
+   * Square wires only.
+   */
+  setWirePreview(index: number, plan: PlanPoint[] | null, bad?: boolean): void;
+  /** Draw drag handles (an empty list clears them); `selectedBend` is drawn picked. */
+  setHandles(list: Handle[], selectedBend?: number | null): void;
+  /** The handle under a pointer event, if any. */
+  pickHandle(e: { clientX: number; clientY: number }): { kind: 'segment' | 'bend'; index: number } | null;
+  /** Screen position (CSS px, relative to the canvas) of a point in the scene. */
+  project(x: number, y: number, z: number): { x: number; y: number; visible: boolean };
+  /** Screen position of the middle of a jumper, for the wire card. */
+  wireAnchor(index: number): { x: number; y: number; visible: boolean } | null;
 }
 
 export interface Board3DOptions {
@@ -208,6 +227,8 @@ export interface Board3DOptions {
   onMode?(mode: 'orbit' | 'fly'): void;
   /** Jumpers as bowed arcs, or as square-cornered runs matching the flat board's square view. */
   wireStyle?: 'arc' | 'orthogonal';
+  /** The browser took the WebGL context away (a GPU reset, too many contexts). The board is dead after this. */
+  onContextLost?(): void;
 }
 
 
@@ -226,10 +247,18 @@ interface Content {
   tinMat: Map<string, THREE.MeshStandardMaterial>;
   /** ref -> the group holding that part or package, for picking, outlines, nudges and focus. */
   partObj: Map<string, THREE.Object3D>;
+  /** Square wires, in wire order (null for arcs): their meshes, for the drag preview. */
+  shapes: (WireMeshes | null)[];
+  /** The routes those were built from, so a preview can be put back. */
+  routes: WireRoute[];
+  /** Every jumper's centre line, in wire order, for the selection line and the wire card. */
+  lines: V3[][];
+  /** Jackets of wires the router could not route cleanly, one material per net. */
+  warnMat: Map<string, THREE.MeshStandardMaterial>;
   doc: LayoutDoc;
 }
 
-export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOptions = {}): Board3D & { /** internal, e2e only */ _tintCount(): number } {
+export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOptions = {}): Board3D & { /** internal, e2e only */ _tintCount(): number; _wireTop(): number; _loseContext(): void; _handles(): { kind: 'segment' | 'bend'; index: number; x: number; y: number }[] } {
   const depth = 350;
   const cz = depth / 2;
   /** The middle of a doc's board along x; it widens when an edit adds columns. */
@@ -521,69 +550,44 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
       return top;
     };
     const square = wireStyle === 'orthogonal';
-    const plans = square ? wirePolylines(doc.wires, doc.packages, doc.board) : [];
-    // Square runs cross each other at right angles, so each wire takes the
-    // lowest level none of the wires it crosses is using: a graph colouring,
-    // greedy in wire order, which is enough for a breadboard.
-    const levels: number[] = new Array(doc.wires.length).fill(0);
-    if (square) {
-      const segs = plans.map((pts) => pts.slice(0, -1).map((p, k) => [p, pts[k + 1]] as const));
-      const crosses = (i: number, j: number) =>
-        segs[i].some(([a1, a2]) =>
-          segs[j].some(([b1, b2]) => {
-            const ah = a1[1] === a2[1];
-            const bh = b1[1] === b2[1];
-            if (ah === bh) return false;
-            const [h1, h2, v1, v2] = ah ? [a1, a2, b1, b2] : [b1, b2, a1, a2];
-            const [hx0, hx1] = [Math.min(h1[0], h2[0]), Math.max(h1[0], h2[0])];
-            const [vz0, vz1] = [Math.min(v1[1], v2[1]), Math.max(v1[1], v2[1])];
-            return v1[0] > hx0 && v1[0] < hx1 && h1[1] > vz0 && h1[1] < vz1;
-          }),
-        );
-      for (let i = 0; i < doc.wires.length; i++) {
-        const used = new Set<number>();
-        for (let j = 0; j < i; j++) if (crosses(i, j)) used.add(levels[j]);
-        while (used.has(levels[i])) levels[i]++;
+    const routes: WireRoute[] = square ? (doc.routes ?? routeWires(doc).routes) : [];
+    const shapes: (WireMeshes | null)[] = [];
+    const lines: V3[][] = [];
+    // A wire the router could not route cleanly keeps its colour but glows red.
+    const warnMat = new Map<string, THREE.MeshStandardMaterial>();
+    const warnFor = (net: string) => {
+      let m = warnMat.get(net);
+      if (!m) {
+        m = kit.std({ color: doc.nets[net]?.color ?? '#444', emissive: '#ff2a2a', emissiveIntensity: 0.55, roughness: 0.38, metalness: 0.02 });
+        warnMat.set(net, m);
       }
-    }
+      return m;
+    };
     for (const [i, w] of doc.wires.entries()) {
       const a = at(w.a, WIRE_END_Y);
       const b = at(w.b, WIRE_END_Y);
       const length = a.distanceTo(b);
       if (square) {
-        // Straight up out of each hole, along the plan at one level, straight
-        // down into the other: tinned where it is stripped, jacketed between.
-        const plan = plans[i];
-        const riseA = endRise(a);
-        const riseB = endRise(b);
-        let y = Math.max(riseA, riseB, TOP + 10) + levels[i] * 5;
-        // Anything the plan passes over has to be cleared too.
-        for (const o of obstacles) for (const [px, pz] of plan) if (px >= o.x0 - 2 && px <= o.x1 + 2 && pz >= o.z0 - 2 && pz <= o.z1 + 2) y = Math.max(y, o.top + WIRE_CLEARANCE + levels[i] * 5);
-        const objs: THREE.Object3D[] = [];
-        const strip = 7;
-        const jacket = jacketFor(w.net);
-        const add = (m: THREE.Mesh) => {
-          root.add(m);
-          objs.push(m);
-        };
-        add(tube(kit, a, a.clone().setY(WIRE_END_Y + strip), 2.1, tinFor(w.net), 8));
-        add(tube(kit, b, b.clone().setY(WIRE_END_Y + strip), 2.1, tinFor(w.net), 8));
-        const pts: THREE.Vector3[] = [a.clone().setY(WIRE_END_Y + strip), ...plan.map(([px, pz]) => v(px, y, pz)), b.clone().setY(WIRE_END_Y + strip)];
-        for (let k = 0; k + 1 < pts.length; k++) {
-          const m = tube(kit, pts[k], pts[k + 1], 4, jacket, 10);
-          m.userData.net = w.net;
-          add(m);
-          m.layers.enable(2);
-          wirePick.push(m);
-          if (k + 2 < pts.length) {
-            const corner = kit.mesh(new THREE.SphereGeometry(4, 12, 10), jacket);
-            corner.position.copy(pts[k + 1]);
-            add(corner);
-          }
-        }
-        wireObjs.push({ net: w.net, objs });
+        // Flat on the board, as a hand-wired board is: up out of each hole,
+        // down onto the plastic, along the routed plan with a hump wherever it
+        // crosses a wire laid before it, and down into the other hole.
+        const r = routes[i];
+        let base = TOP + WIRE_R;
+        // Only the simple router's fallback can pass over a body: lift it clear.
+        if (r.warning) for (const o of obstacles) for (const [px, pz] of r.plan) if (px >= o.x0 - 2 && px <= o.x1 + 2 && pz >= o.z0 - 2 && pz <= o.z1 + 2) base = Math.max(base, o.top + WIRE_CLEARANCE);
+        const jacket = r.warning ? warnFor(w.net) : jacketFor(w.net);
+        const built = buildWireMeshes(kit, r.plan, r.lifts, base, jacket, tinFor(w.net));
+        built.jacket.userData.net = w.net;
+        built.jacket.userData.wire = i;
+        built.jacket.layers.enable(2);
+        root.add(built.jacket, built.tin);
+        wirePick.push(built.jacket);
+        wireObjs.push({ net: w.net, objs: [built.jacket, built.tin] });
+        shapes.push(built);
+        lines.push(built.line);
         continue;
       }
+      shapes.push(null);
       // Putting both cubic controls on the quadratic's own control point keeps
       // the plan view identical to the arc the flat board draws, so only the
       // height is left to choose.
@@ -608,6 +612,8 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
       const jacket = new THREE.CatmullRomCurve3(pts.slice(cut, pts.length - cut));
       const mesh = kit.mesh(new THREE.TubeGeometry(jacket, 56, 4, 10, false), jacketFor(w.net));
       mesh.userData.net = w.net;
+      mesh.userData.wire = i;
+      lines.push(jacket.getPoints(56).map((p) => [p.x, p.y, p.z] as V3));
       root.add(mesh);
       mesh.layers.enable(2);
       wirePick.push(mesh);
@@ -627,7 +633,7 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
       root.add(tube(kit, end, end.clone().setY(TOP + 8), 2.1, M.tin, 8));
     }
 
-    return { kit, root, ways, displays, leds, pickable, wirePick, wireObjs, netMat, netColour, tinMat, partObj, doc };
+    return { kit, root, ways, displays, leds, pickable, wirePick, wireObjs, netMat, netColour, tinMat, partObj, shapes, routes, lines, warnMat, doc };
   }
   let c = build(doc);
   scene.add(c.root);
@@ -646,7 +652,7 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
     ray.setFromCamera(ndc, camera);
   };
   /** Nearest hit on one layer, walked up to the object that carries `key`, with how far away it is. */
-  const hitOn = (layer: number, key: 'switchKey' | 'ref' | 'net', within: THREE.Object3D[]): { id: string; distance: number } | null => {
+  const hitOn = (layer: number, key: 'switchKey' | 'ref' | 'net', within: THREE.Object3D[]): { id: string; distance: number; obj: THREE.Object3D } | null => {
     ray.layers.set(layer);
     for (const hit of ray.intersectObjects(within, true)) {
       // three's raycaster ignores `visible`, so a jumper hidden by a held
@@ -654,7 +660,7 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
       let hidden = false;
       for (let o: THREE.Object3D | null = hit.object; o; o = o.parent) if (!o.visible) hidden = true;
       if (hidden) continue;
-      for (let o: THREE.Object3D | null = hit.object; o; o = o.parent) if (typeof o.userData[key] === 'string') return { id: o.userData[key] as string, distance: hit.distance };
+      for (let o: THREE.Object3D | null = hit.object; o; o = o.parent) if (typeof o.userData[key] === 'string') return { id: o.userData[key] as string, distance: hit.distance, obj: o };
     }
     return null;
   };
@@ -668,7 +674,7 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
     const part = hitOn(1, 'ref', [...c.partObj.values()]);
     const wire = hitOn(2, 'net', c.wirePick);
     if (part && (!wire || part.distance <= wire.distance)) return { kind: 'part', ref: part.id };
-    return wire ? { kind: 'wire', net: wire.id } : null;
+    return wire ? { kind: 'wire', net: wire.id, index: wire.obj.userData.wire as number } : null;
   };
   const boardPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -TOP);
   const planeHit = new THREE.Vector3();
@@ -712,6 +718,7 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
       fade(m, faded);
       if (tin) fade(tin, faded);
     }
+    for (const [id, m] of c.warnMat) fade(m, !!net && id !== net);
   };
   const setHoveredNet = (net: string | null) => {
     if (net === hovered) return;
@@ -836,13 +843,98 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
   // ---------- where a part is on screen ----------
   const box = new THREE.Box3();
   const tmp = new THREE.Vector3();
+  const project = (x: number, y: number, z: number) => {
+    tmp.set(x, y, z).project(camera);
+    const rect = dom.getBoundingClientRect();
+    return { x: ((tmp.x + 1) / 2) * rect.width, y: ((1 - tmp.y) / 2) * rect.height, visible: tmp.z < 1 };
+  };
   const anchor = (ref: string) => {
     const obj = c.partObj.get(ref);
     if (!obj) return null;
     box.setFromObject(obj);
-    tmp.set((box.min.x + box.max.x) / 2, box.max.y, (box.min.z + box.max.z) / 2).project(camera);
-    const rect = dom.getBoundingClientRect();
-    return { x: ((tmp.x + 1) / 2) * rect.width, y: ((1 - tmp.y) / 2) * rect.height, visible: tmp.z < 1 };
+    return project((box.min.x + box.max.x) / 2, box.max.y, (box.min.z + box.max.z) / 2);
+  };
+  /** Halfway along a jumper, measured along it. */
+  const wireAnchor = (index: number) => {
+    const line = c.lines[index];
+    if (!line || line.length < 2) return null;
+    const lens = line.slice(1).map((p, i) => Math.hypot(p[0] - line[i][0], p[1] - line[i][1], p[2] - line[i][2]));
+    let left = lens.reduce((s, l) => s + l, 0) / 2;
+    for (let i = 0; i < lens.length; i++) {
+      if (left <= lens[i] || i === lens.length - 1) {
+        const k = lens[i] ? Math.min(1, left / lens[i]) : 0;
+        const [p, q] = [line[i], line[i + 1]];
+        return project(p[0] + (q[0] - p[0]) * k, p[1] + (q[1] - p[1]) * k + WIRE_R, p[2] + (q[2] - p[2]) * k);
+      }
+      left -= lens[i];
+    }
+    return null;
+  };
+
+  // ---------- a selected jumper ----------
+  // An accent line along the top of the wire, drawn over everything. A tube
+  // is smooth all round, so an EdgesGeometry outline would find nothing.
+  const wireLineMat = new THREE.LineBasicMaterial({ color: ACCENT, depthTest: false, transparent: true, opacity: 0.95 });
+  let wireLine: THREE.Line | null = null;
+  let selectedWire: number | null = null;
+  const setWireSelected = (index: number | null) => {
+    selectedWire = index;
+    if (wireLine) {
+      scene.remove(wireLine);
+      wireLine.geometry.dispose();
+      wireLine = null;
+    }
+    const line = index === null ? undefined : c.lines[index];
+    if (!line) return;
+    wireLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints(line.map(([x, y, z]) => new THREE.Vector3(x, y + WIRE_R + 0.6, z))), wireLineMat);
+    wireLine.renderOrder = 10;
+    wireLine.raycast = () => {};
+    scene.add(wireLine);
+  };
+
+  const badMat = new THREE.MeshStandardMaterial({ color: '#ef4444', emissive: '#7f1d1d', roughness: 0.4 });
+  const setWirePreview = (index: number, plan: PlanPoint[] | null, bad = false) => {
+    const shape = c.shapes[index];
+    const route = c.routes[index];
+    if (!shape || !route) return;
+    // While dragging, the wire lies flat: humps come back with the real route.
+    reshapeWire(c.kit, shape, plan ?? route.plan, plan ? [] : route.lifts, shape.base);
+    shape.jacket.material = plan && bad ? badMat : (shape.jacket.userData.rest as THREE.Material);
+    c.lines[index] = shape.line;
+    if (selectedWire === index) setWireSelected(index);
+  };
+
+  // ---------- handles ----------
+  // Discs floating just above the wires, on their own pick layer, drawn over
+  // everything so a handle under a part can still be found.
+  const HANDLE_LAYER = 4;
+  const HANDLE_Y = TOP + 2 * WIRE_R + 1.5;
+  const handleGeo = { segment: new THREE.CircleGeometry(5, 20).rotateX(-Math.PI / 2), bend: new THREE.CircleGeometry(3.6, 16).rotateX(-Math.PI / 2) };
+  const handleMat = new THREE.MeshBasicMaterial({ color: ACCENT, depthTest: false, transparent: true, opacity: 0.9, side: THREE.DoubleSide });
+  const handlePicked = new THREE.MeshBasicMaterial({ color: '#ffffff', depthTest: false, side: THREE.DoubleSide });
+  const handleGroup = new THREE.Group();
+  scene.add(handleGroup);
+  const setHandles = (list: Handle[], selectedBend: number | null = null) => {
+    handleGroup.clear();
+    for (const h of list) {
+      const m = new THREE.Mesh(handleGeo[h.kind], h.kind === 'bend' && h.index === selectedBend ? handlePicked : handleMat);
+      m.position.set(h.at[0], HANDLE_Y, h.at[1]);
+      m.renderOrder = 12;
+      m.userData.handle = `${h.kind}:${h.index}`;
+      m.layers.enable(HANDLE_LAYER);
+      handleGroup.add(m);
+    }
+    // Picked before the next frame is drawn (a click right after a save), so
+    // the world matrices cannot wait for the render to bring them up to date.
+    handleGroup.updateMatrixWorld(true);
+  };
+  const pickHandle = (e: { clientX: number; clientY: number }) => {
+    toNdc(e);
+    ray.layers.set(HANDLE_LAYER);
+    const hit = ray.intersectObjects(handleGroup.children, false)[0];
+    if (!hit) return null;
+    const [kind, index] = (hit.object.userData.handle as string).split(':');
+    return { kind: kind as 'segment' | 'bend', index: Number(index) };
   };
 
   // ---------- focus ----------
@@ -893,6 +985,10 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
     setHoveredNet(hit?.kind === 'wire' ? hit.net : null);
   };
   const onLeave = () => setHoveredNet(null);
+  // Losing the context loses every buffer: nothing here can be drawn again,
+  // so the owner is told and takes the board down.
+  const onLost = () => opts.onContextLost?.();
+  dom.addEventListener('webglcontextlost', onLost);
   dom.addEventListener('pointerdown', onDown);
   dom.addEventListener('pointerup', onUp);
   dom.addEventListener('pointermove', onMove);
@@ -963,6 +1059,9 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
     clearOutline('hov');
     if (sel && c.partObj.has(sel)) setSelected(sel);
     if (hov && c.partObj.has(hov)) setHovered(hov);
+    // The selection line follows the wire onto its new shape. Handles are the
+    // wire editor's; it has already placed them for the new doc.
+    setWireSelected(selectedWire !== null && selectedWire < c.lines.length ? selectedWire : null);
     // The held highlight hides wires by visibility, which the new wires do not
     // have yet; applying it again also repaints the nets.
     setHighlight(held);
@@ -1051,12 +1150,37 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
     onFrame: (fn) => (frameFns.add(fn), () => frameFns.delete(fn)),
     dom,
     setOrbit,
+    setWireSelected,
+    setWirePreview,
+    setHandles,
+    pickHandle,
+    project,
+    wireAnchor,
     // Internal, for the e2e hook: how many strip tints are showing.
     _tintCount: () => tintMesh.count,
+    // Internal, for the e2e hook: the highest point of any square jumper's jacket.
+    _wireTop: () =>
+      c.shapes.reduce((top, s) => {
+        if (!s) return top;
+        s.jacket.geometry.computeBoundingBox();
+        return Math.max(top, s.jacket.geometry.boundingBox!.max.y);
+      }, -Infinity),
+    // Internal, for the e2e hook: what a GPU reset does.
+    _loseContext: () => renderer.forceContextLoss(),
+    // Internal, for the e2e hook: the handles on screen (CSS px, page coordinates).
+    _handles: () => {
+      const rect = dom.getBoundingClientRect();
+      return handleGroup.children.map((m) => {
+        const [kind, index] = (m.userData.handle as string).split(':');
+        const at = project(m.position.x, m.position.y, m.position.z);
+        return { kind: kind as 'segment' | 'bend', index: Number(index), x: rect.left + at.x, y: rect.top + at.y };
+      });
+    },
     dispose() {
       alive = false;
       cancelAnimationFrame(raf);
       observer.disconnect();
+      dom.removeEventListener('webglcontextlost', onLost);
       dom.removeEventListener('pointerdown', onDown);
       dom.removeEventListener('pointerup', onUp);
       dom.removeEventListener('pointermove', onMove);
@@ -1070,6 +1194,14 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
       clearOutline('hov');
       lineMat.sel.dispose();
       lineMat.hov.dispose();
+      setWireSelected(null);
+      wireLineMat.dispose();
+      badMat.dispose();
+      handleGroup.clear();
+      handleGeo.segment.dispose();
+      handleGeo.bend.dispose();
+      handleMat.dispose();
+      handlePicked.dispose();
       tintGeo.dispose();
       tintMat.dispose();
       tintMesh.dispose();

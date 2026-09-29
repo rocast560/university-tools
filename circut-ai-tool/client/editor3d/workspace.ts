@@ -18,6 +18,7 @@ import { store } from '../state.ts';
 import { history as editHistory } from './history.ts';
 import { attachCard } from './card.ts';
 import { attachManipulation, commitMove } from './manipulate.ts';
+import { wireKey } from '../../src/render/route3d.ts';
 
 export interface Workspace {
   board: Board3D;
@@ -132,6 +133,13 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
       },
       onMode(mode) {
         hintEl.textContent = mode === 'fly' ? FLY_HINT : ORBIT_HINT;
+      },
+      onContextLost() {
+        // Every buffer went with the context, so the board cannot be drawn
+        // again. Close the way Back does; pressing 3D mounts a fresh one.
+        if (closed) return;
+        toast('The 3D view lost its graphics context and was closed. Press 3D to open it again.');
+        history.back();
       },
     });
     hintEl.textContent = ORBIT_HINT;
@@ -314,6 +322,16 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
         wireStyle: () => store.get().project?.sidecar.options.wireStyle ?? null,
         // A layout move from outside the pointer path, to change the doc under a live drag.
         move: (ref: string, holes: Parameters<typeof commitMove>[1]) => commitMove(ref, holes),
+        // Wires (phase 2).
+        routes: () => store.get().project?.doc.routes?.map((r) => r.plan) ?? null,
+        wires: () => store.get().project?.doc.wires.map(wireKey) ?? [],
+        wireScreen(i: number) {
+          const a = board.wireAnchor(i);
+          const r = canvasHost.getBoundingClientRect();
+          return a ? { x: r.left + a.x, y: r.top + a.y } : null;
+        },
+        wireTop: () => (board as unknown as { _wireTop(): number })._wireTop(),
+        loseContext: () => (board as unknown as { _loseContext(): void })._loseContext(),
       };
     }
     return ws;

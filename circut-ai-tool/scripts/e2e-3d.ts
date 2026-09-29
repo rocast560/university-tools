@@ -188,6 +188,15 @@ async function settles(page: CDP, expression: string, ms: number) {
   return page.until(expression, '', ms).then(() => true, () => false);
 }
 
+/** Square wires and no hand shapes, set on the server and picked up by a fresh page. */
+async function squareWires(page: CDP, id: string) {
+  const post = (url: string, body: unknown) => fetch(`${base}${url}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  await post(`/api/projects/${id}/layout/options`, { wireStyle: 'orthogonal' });
+  await post(`/api/projects/${id}/layout/wire`, { key: '*', path: null });
+  await page.reload();
+  await page.until(`document.querySelector('[data-action=view3d]')`, 'the project page');
+}
+
 const SCENARIOS: Record<string, (page: CDP, id: string) => Promise<void>> = {
   async 'workspace opens full screen'(page) {
     await open3d(page);
@@ -440,6 +449,27 @@ const SCENARIOS: Record<string, (page: CDP, id: string) => Promise<void>> = {
     await page.eval(`document.querySelector('.ws-card [data-card=confirm]').click()`);
     await page.until(`!__e3d.parts().includes(${JSON.stringify(ref)})`, `${ref} to be removed`, 20000);
     await page.until(`!document.querySelector('.ws-card:not([hidden])')`, 'the card to close');
+  },
+  async 'square wires lie flat on the board and match the flat board'(page, id) {
+    await squareWires(page, id);
+    await open3d(page);
+    await page.until(`__e3d.routes() && __e3d.routes().length === __e3d.wires().length`, 'routed square wires');
+    // Flat: the centre line sits one radius up, a hump adds one diameter, the jacket one more radius.
+    const top = await page.eval<number>(`__e3d.wireTop()`);
+    if (!(top > 0 && top <= 4 + 8 + 4 + 0.5)) throw new Error(`the highest jacket reaches y = ${top}; flat wires stay under 16.5`);
+    // The page's flat board draws the very same paths.
+    const same = await page.eval<boolean>(
+      `(() => { const d = [...document.querySelectorAll('#board .wire')].map((g) => g.querySelectorAll('path')[1]?.getAttribute('d')); const want = __e3d.routes().map((p) => p.map(([x, y], k) => (k ? 'L ' : 'M ') + x + ' ' + y).join(' ')); return d.length === want.length && d.every((v, i) => v === want[i]); })()`,
+    );
+    if (!same) throw new Error('the flat board and the 3D board draw different wire paths');
+  },
+  async 'losing the WebGL context closes the editor with a toast, and 3D opens again'(page) {
+    await open3d(page);
+    await page.eval(`__e3d.loseContext()`);
+    await page.until(`!document.querySelector('.ws') && !window.__e3d`, 'the editor to close');
+    await page.until(`(document.getElementById('toast')?.textContent ?? '').includes('graphics context')`, 'the context-loss toast');
+    await page.until(`document.querySelector('[data-action=view3d]').textContent.trim() === '3D'`, 'the toolbar button to read 3D');
+    await open3d(page);
   },
 };
 
