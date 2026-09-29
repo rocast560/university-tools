@@ -350,8 +350,9 @@ const SCENARIOS: Record<string, (page: CDP, id: string) => Promise<void>> = {
     await page.until(`document.querySelector('.ws-card:not([hidden])')?.dataset.ref === ${JSON.stringify(ref)}`, 'the card');
     await page.eval(`(() => { const i = document.querySelector('.ws-card input[name=value]'); i.value = '4.7k'; i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); })()`);
     await page.until(`document.querySelector('.ws-card input[name=value]')?.value === '4.7k' && !document.querySelector('.ws-card.is-busy')`, 'the new value after reload', 20000);
-    // The watcher's own 'changed' reload of our edit lands later; the card must outlast it.
-    await new Promise((r) => setTimeout(r, 2500));
+    // The server must not echo our own edit back as a "changed on disk" reload.
+    await new Promise((r) => setTimeout(r, 3000));
+    if (await page.eval<boolean>(`(document.getElementById('toast')?.textContent ?? '').includes('changed on disk')`)) throw new Error('our own edit came back as "changed on disk"');
     await page.until(`document.querySelector('.ws-card:not([hidden])')?.dataset.ref === ${JSON.stringify(ref)} && __e3d.selected() === ${JSON.stringify(ref)}`, 'the card to survive the follow-up reload');
   },
   async 'Delete opens the confirm, but not while typing in the value'(page) {

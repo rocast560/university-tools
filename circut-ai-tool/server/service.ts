@@ -140,13 +140,25 @@ export class Service {
     return { info, schematic, design, sidecar, doc, netlistText, mtimeMs: s.mtimeMs, size: s.size };
   }
 
+  /** What edit() last wrote per project, so the watcher can tell its own write from an external one. */
+  private selfWrites = new Map<string, { mtimeMs: number; size: number }>();
+
   private startWatch(id: string, file: string) {
     this.stops.get(id)?.();
     this.stops.set(
       id,
       watchFile(
         file,
-        () => {
+        async () => {
+          // Our own edit() wrote this file (and is refreshing from it): not news.
+          try {
+            const st = await stat(file);
+            const mine = this.selfWrites.get(id);
+            const open = this.open_.get(id);
+            if ((mine && st.mtimeMs === mine.mtimeMs && st.size === mine.size) || (open && st.mtimeMs === open.mtimeMs && st.size === open.size)) return;
+          } catch {
+            /* missing: fall through, refresh reports it */
+          }
           this.refresh(id)
             .then(() => this.deps.events.emit({ projectId: id, type: 'changed' }))
             .catch((e) => this.deps.events.emit({ projectId: id, type: 'error', message: (e as Error).message }));
@@ -208,6 +220,8 @@ export class Service {
     // This is against the SAME p.mtimeMs/p.size captured before run(), not a fresh read of "now".
     await this.assertFresh(p);
     await writeFile(p.info.path, result.text);
+    const written = await stat(p.info.path);
+    this.selfWrites.set(id, { mtimeMs: written.mtimeMs, size: written.size });
     try {
       const removed = result.placed['-'];
       if (removed) {

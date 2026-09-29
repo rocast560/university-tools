@@ -117,6 +117,23 @@ describe('Service', () => {
     expect(service.has(p.info.id)).toBe(false);
   });
 
+  test('an edit made through the service does not come back as a "changed" event', async () => {
+    const { service, sch, events } = await makeService({ watch: true, watchPollMs: 100 });
+    const p = await service.open(sch);
+    const got: ProjectEvent[] = [];
+    events.subscribe((e) => got.push(e));
+    await new Promise((r) => setTimeout(r, 250));
+    await service.setValue(p.info.id, 'R1', '2k');
+    await new Promise((r) => setTimeout(r, 1200));
+    expect(got.filter((e) => e.type === 'changed')).toEqual([]);
+    // An external save afterwards is still announced.
+    writeFileSync(sch, `${readFileSync(sch, 'utf8')}
+`);
+    await new Promise((r) => setTimeout(r, 1200));
+    expect(got.some((e) => e.type === 'changed')).toBe(true);
+    service.close(p.info.id);
+  });
+
   test('reloads through the polling watcher when asked', async () => {
     const { service, sch, events } = await makeService({ watch: true, watchPollMs: 100 });
     const p = await service.open(sch);

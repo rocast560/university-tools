@@ -150,8 +150,10 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
     detachCard = attachCard(ws);
     offDel = addKeyHandler((e) => {
       if (e.key !== 'Delete' && e.key !== 'Backspace') return false;
-      const confirm = root.querySelector<HTMLElement>('.ws-card:not([hidden]) .ws-card-confirm');
-      if (!confirm) return false;
+      const card = root.querySelector<HTMLElement>('.ws-card:not([hidden])');
+      const confirm = card?.querySelector<HTMLElement>('.ws-card-confirm');
+      // A card whose part is off-screen is invisible: don't act on it unseen.
+      if (!card || !confirm || card.style.visibility === 'hidden') return false;
       confirm.hidden = false;
       confirm.querySelector<HTMLButtonElement>('[data-card=confirm]')!.focus();
       return true;

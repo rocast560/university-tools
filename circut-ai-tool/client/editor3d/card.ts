@@ -24,29 +24,6 @@ export function attachCard(ws: Workspace): () => void {
   let shownFor: string | null = null;
   let docFor: unknown = null;
   let last = '';
-  // Our own edit rewrites the schematic, and the server's file watcher then
-  // announces that change too: a second loadProject, a moment after the first,
-  // with nothing selected. So after an edit the part stays selected across any
-  // reload of the same project for a few seconds (only a reload counts; the
-  // user clicking away changes no doc and is left alone).
-  let keep: { id: string; ref: string; until: number } | null = null;
-  let seen = store.get().project;
-  const KEEP_MS = 5000;
-
-  const restore = () => {
-    const p = store.get().project;
-    const prev = seen;
-    seen = p;
-    if (!keep) return;
-    if (!p || p.id !== keep.id || Date.now() > keep.until) {
-      keep = null;
-      return;
-    }
-    if (p === prev || p.doc === prev?.doc || p.selectedRef) return;
-    if (!p.doc.pinHoles[keep.ref]) keep = null;
-    else store.setProject({ selectedRef: keep.ref });
-  };
-
   const render = () => {
     const p = store.get().project;
     const ref = p?.selectedRef ?? null;
@@ -102,15 +79,17 @@ export function attachCard(ws: Workspace): () => void {
     card.style.visibility = a.visible ? 'visible' : 'hidden';
   };
 
-  const busy = async (work: () => Promise<unknown>) => {
+  const busy = async (work: () => Promise<unknown>): Promise<boolean> => {
     const p = store.get().project;
-    if (!p) return;
+    if (!p) return false;
     card.classList.add('is-busy');
     try {
       await work();
       await loadProject(p.id);
+      return true;
     } catch (e) {
       toast((e as Error).message);
+      return false;
     } finally {
       card.classList.remove('is-busy');
     }
@@ -126,9 +105,8 @@ export function attachCard(ws: Workspace): () => void {
     const value = input.value.trim();
     if (!value) return toast('A value cannot be empty');
     // After the reload, keep the same part selected so the card comes back.
-    keep = { id: p.id, ref, until: Date.now() + KEEP_MS };
-    void busy(() => api.editValue(p.id, ref, value)).then(() => {
-      if (store.get().project?.id === p.id) store.setProject({ selectedRef: ref });
+    void busy(() => api.editValue(p.id, ref, value)).then((ok) => {
+      if (ok && store.get().project?.id === p.id) store.setProject({ selectedRef: ref });
     });
   });
 
@@ -145,7 +123,7 @@ export function attachCard(ws: Workspace): () => void {
     if (what === 'focus') ws.board.focus(ref);
     if (what === 'delete') confirm.hidden = false;
     if (what === 'cancel') confirm.hidden = true;
-    if (what === 'confirm') void busy(() => api.editRemove(p.id, ref)).then(() => store.get().project?.id === p.id && store.setProject({ selectedRef: null }));
+    if (what === 'confirm') void busy(() => api.editRemove(p.id, ref)).then((ok) => ok && store.get().project?.id === p.id && store.setProject({ selectedRef: null }));
     if (what === 'rotate' || what === 'flip') {
       const holes = p.doc.pinHoles[ref];
       const part = p.doc.parts.find((x) => x.id === ref);
@@ -156,7 +134,7 @@ export function attachCard(ws: Workspace): () => void {
     }
   });
 
-  const offStore = store.subscribe(() => (restore(), render()));
+  const offStore = store.subscribe(render);
   const offFrame = ws.board.onFrame(place);
   render();
   return () => {
