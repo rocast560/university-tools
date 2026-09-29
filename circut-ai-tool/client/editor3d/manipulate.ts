@@ -7,12 +7,13 @@
 // turning orbit off half-way through a gesture leaves it stuck.
 
 import type { Hole } from '../../src/layout/types.ts';
-import { validatePlacement, type Verdict } from '../../src/edit/placement.ts';
+import { flipDip, rotateLead2, validatePlacement, type Verdict } from '../../src/edit/placement.ts';
 import { buildLayoutDoc } from '../../src/pipeline.ts';
 import { api } from '../api.ts';
 import { shiftHoles } from '../drag.ts';
 import { toast } from '../main.ts';
 import { store } from '../state.ts';
+import { history } from './history.ts';
 import { addKeyHandler, type Workspace } from './workspace.ts';
 
 /** Movement under this, in CSS px, is a click rather than a drag (twice that for touch). */
@@ -30,12 +31,20 @@ export async function commitMove(ref: string, holes: Record<string, Hole>): Prom
   if (!p) return false;
   try {
     const doc = await api.move(p.id, ref, holes);
-    store.setProject({ doc, sidecar: { ...p.sidecar, pinned: { ...p.sidecar.pinned, [ref]: holes } } });
+    // The store may have moved on while the server worked; build on what is there now.
+    const q = store.get().project;
+    if (!q || q.id !== p.id) return false;
+    store.setProject({ doc, sidecar: { ...q.sidecar, pinned: { ...q.sidecar.pinned, [ref]: holes } } });
     return true;
   } catch (err) {
     toast((err as Error).message);
     return false;
   }
+}
+
+/** A move as an undoable command: the holes before and after, nothing else. */
+export function moveCommand(ref: string, before: Record<string, Hole>, after: Record<string, Hole>, label = `move ${ref}`) {
+  return { label, run: () => commitMove(ref, after), undo: () => commitMove(ref, before) };
 }
 
 export function attachManipulation(ws: Workspace): () => void {
@@ -56,12 +65,13 @@ export function attachManipulation(ws: Workspace): () => void {
     lastKey: string;
   } | null = null;
 
-  const endDrag = () => {
+  /** `keepNudge`: leave the mesh where it was dropped until the commit settles, so it does not snap back and forth. */
+  const endDrag = (keepNudge = false) => {
     if (!drag) return;
     const d = drag;
     // Cleared first, so the lostpointercapture that releasing fires finds nothing left to end.
     drag = null;
-    board.nudge(d.ref, 0, 0);
+    if (!keepNudge) board.nudge(d.ref, 0, 0);
     board.setStripTint([]);
     board.setOrbit(true);
     if (dom.hasPointerCapture(d.pointerId)) dom.releasePointerCapture(d.pointerId);
@@ -75,7 +85,7 @@ export function attachManipulation(ws: Workspace): () => void {
   };
 
   const onDown = (e: PointerEvent) => {
-    if (e.button !== 0 || board.flying) return;
+    if (e.button !== 0 || board.flying || drag) return;
     const hit = board.pick(e);
     press = { x: e.clientX, y: e.clientY, t: performance.now(), touch: e.pointerType === 'touch', ref: hit?.kind === 'part' ? hit.ref : null };
     const p = store.get().project;
@@ -95,11 +105,17 @@ export function attachManipulation(ws: Workspace): () => void {
 
   const onUp = (e: PointerEvent) => {
     if (drag) {
+      if (e.pointerId !== drag.pointerId) return;
       const d = drag;
-      endDrag();
+      const moved = !!d.holes && !!d.verdict?.ok && JSON.stringify(d.holes) !== JSON.stringify(d.origin);
+      endDrag(moved);
       press = null;
-      if (d.holes && d.verdict?.ok && JSON.stringify(d.holes) !== JSON.stringify(d.origin)) void commitMove(d.ref, d.holes);
-      else if (d.verdict && !d.verdict.ok) toast(`Not moved: ${d.verdict.reason}`);
+      if (moved) {
+        // A successful commit rebuilds the scene from the new doc; only a refusal needs the mesh put back.
+        void history.execute(moveCommand(d.ref, d.origin, d.holes!)).then((ok) => {
+          if (!ok) board.nudge(d.ref, 0, 0);
+        });
+      } else if (d.verdict && !d.verdict.ok) toast(`Not moved: ${d.verdict.reason}`);
       return;
     }
     const start = press;
@@ -117,11 +133,13 @@ export function attachManipulation(ws: Workspace): () => void {
 
   const onMove = (e: PointerEvent) => {
     if (drag) {
+      if (e.pointerId !== drag.pointerId) return;
       const p = store.get().project;
       const at = board.boardPoint(e);
       if (!p || !at) return;
       const dx = at[0] - drag.grab[0];
-      const dy = at[1] - drag.grab[1];
+      // A package only slides along its strips, so its mesh does too.
+      const dy = drag.columnsOnly ? 0 : at[1] - drag.grab[1];
       // The mesh follows the pointer smoothly; the holes it would drop into snap.
       board.nudge(drag.ref, dx, dy);
       const holes = shiftHoles(drag.origin, dx, dy, p.doc.board, drag.columnsOnly);
@@ -174,15 +192,40 @@ export function attachManipulation(ws: Workspace): () => void {
 
   // The browser took the pointer away (a touch that became a scroll, a lost
   // capture): neither a click nor a drop.
-  const onCancel = () => {
+  const onCancel = (e: PointerEvent) => {
+    if (drag && e.pointerId !== drag.pointerId) return;
     press = null;
     endDrag();
   };
 
   // Escape, or the doc changing underneath (a reload, an edit elsewhere), cancels a drag.
   const offKey = addKeyHandler((e) => {
-    if (e.key !== 'Escape' || !drag) return false;
+    if (!drag) return false;
+    // F would start a focus glide under the drag; swallow it.
+    if (e.key === 'f' || e.key === 'F') return true;
+    if (e.key !== 'Escape') return false;
     endDrag();
+    return true;
+  });
+  const offTurn = addKeyHandler((e) => {
+    if (e.key !== 'r' && e.key !== 'R') return false;
+    const p = store.get().project;
+    const ref = p?.selectedRef;
+    if (!p || !ref || e.ctrlKey || e.metaKey || e.altKey || drag) return false;
+    const holes = p.doc.pinHoles[ref];
+    const part = p.doc.parts.find((x) => x.id === ref);
+    const pkg = p.doc.packages.find((x) => x.id === ref);
+    let next: Record<string, Hole> | null = null;
+    if (e.shiftKey) {
+      if (pkg?.kind !== 'dip') return toast('Only chips flip; R turns a two-lead part'), true;
+      next = flipDip(holes);
+    } else {
+      if (part?.kind !== 'lead2') return toast(pkg ? 'Chips only flip: Shift+R' : 'This part does not turn'), true;
+      next = rotateLead2(holes, [part.pins[0], part.pins[1]]);
+    }
+    const verdict = next ? validatePlacement(p.doc, p.design, ref, next) : { ok: false as const, reason: 'the turned leg would leave the board' };
+    if (!next || !verdict.ok) return toast(`Can't ${e.shiftKey ? 'flip' : 'turn'} ${ref}: ${verdict.ok ? '' : verdict.reason}`), true;
+    void history.execute(moveCommand(ref, holes, next, `${e.shiftKey ? 'flip' : 'turn'} ${ref}`));
     return true;
   });
   let docSeen = store.get().project?.doc;
@@ -203,6 +246,7 @@ export function attachManipulation(ws: Workspace): () => void {
   dom.addEventListener('lostpointercapture', onCancel);
   return () => {
     offKey();
+    offTurn();
     offStore();
     endDrag();
     cancelHover();

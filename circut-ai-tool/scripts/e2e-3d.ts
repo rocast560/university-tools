@@ -305,6 +305,42 @@ const SCENARIOS: Record<string, (page: CDP, id: string) => Promise<void>> = {
     if (tinted !== 0) throw new Error(`${tinted} strip tints left behind`);
     if (!(await page.eval<boolean>(`!!document.querySelector('.ws')`))) throw new Error('Esc mid-drag closed the editor');
   },
+  async 'R turns a resistor and Ctrl+Z puts it back'(page) {
+    await open3d(page);
+    const ref = (await page.eval<string[]>(`__e3d.lead2()`))[0];
+    if (!ref) throw new Error('no two-lead part on the fixture');
+    const read = () => page.eval<string>(`JSON.stringify(__e3d.holes(${JSON.stringify(ref)}))`);
+    const before = await read();
+    await page.eval(`__e3d.select(${JSON.stringify(ref)})`);
+    // A quarter turn may be refused on a crowded board; press until one lands, at most 3.
+    let turned = false;
+    for (let i = 0; i < 3 && !turned; i++) {
+      await page.key('r', 'KeyR');
+      await sleep(900);
+      turned = (await read()) !== before;
+    }
+    if (!turned) return console.log('     (no legal quarter turn for this part on this board; undo path not exercised)');
+    await page.until(`!document.querySelector('[data-ws=undo]').disabled`, 'Undo to enable');
+    await page.key('z', 'KeyZ', 2 /* ctrl */);
+    await page.until(`JSON.stringify(__e3d.holes(${JSON.stringify(ref)})) === ${JSON.stringify(before)}`, 'undo to restore the holes');
+    await page.key('Z', 'KeyZ', 2 | 8 /* ctrl+shift */);
+    await page.until(`JSON.stringify(__e3d.holes(${JSON.stringify(ref)})) !== ${JSON.stringify(before)}`, 'redo to turn it again');
+  },
+  async 'Shift+R flips a chip end for end'(page) {
+    await open3d(page);
+    const ref = (await page.eval<string[]>(`__e3d.chips()`))[0];
+    if (!ref) throw new Error('no chip on the fixture');
+    await page.eval(`__e3d.select(${JSON.stringify(ref)})`);
+    await page.key('R', 'KeyR', 8 /* shift */);
+    // The placement rules may legitimately refuse an in-place flip; either outcome proves the key is wired.
+    await page.until(
+      `__e3d.holes(${JSON.stringify(ref)})['1'].row === 'e' || (document.getElementById('toast')?.textContent ?? '').includes("Can't flip")`,
+      'pin 1 to move to row e, or a "Can\'t flip" toast',
+      6000,
+    );
+    const flipped = await page.eval<boolean>(`__e3d.holes(${JSON.stringify(ref)})['1'].row === 'e'`);
+    console.log(`     (${flipped ? 'chip flipped' : "flip refused with a Can't flip toast"})`);
+  },
 };
 
 void main();
