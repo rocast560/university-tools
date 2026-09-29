@@ -64,4 +64,35 @@ describe('History', () => {
     await h.undo();
     expect(n).toBe(2);
   });
+
+  test('a slow execute and an overlapping undo run in order and leave consistent stacks', async () => {
+    const h = new History();
+    const c = counter();
+    await h.execute(c.cmd(1));
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const slow: Command = { label: 'slow', run: async () => (await gate, true), undo: async () => true };
+    const pending = h.execute(slow);
+    const undone = h.undo();
+    release();
+    await pending;
+    await undone;
+    // The undo ran after the execute, so it undid `slow`, and nothing else is left to redo but that.
+    expect(h.canUndo).toBe(true);
+    expect(h.canRedo).toBe(true);
+    await h.execute(c.cmd(9));
+    expect(h.canRedo).toBe(false);
+    expect(c.value).toBe(10);
+  });
+
+  test('clear during an in-flight execute keeps it off the new stack', async () => {
+    const h = new History();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const p = h.execute({ label: 'slow', run: async () => (await gate, true), undo: async () => true });
+    h.clear();
+    release();
+    await p;
+    expect(h.canUndo).toBe(false);
+  });
 });

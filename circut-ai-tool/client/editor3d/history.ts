@@ -17,6 +17,16 @@ export class History {
   private undos: Command[] = [];
   private redos: Command[] = [];
   private fns = new Set<() => void>();
+  private tail: Promise<unknown> = Promise.resolve();
+  // Bumped by clear(); an operation begun before it must not touch the stacks after it.
+  private gen = 0;
+
+  /** One operation at a time, in the order asked. */
+  private queue<T>(f: () => Promise<T>): Promise<T> {
+    const r = this.tail.then(f);
+    this.tail = r.then(() => {}, () => {});
+    return r;
+  }
 
   get canUndo() {
     return this.undos.length > 0;
@@ -34,39 +44,54 @@ export class History {
     for (const fn of this.fns) fn();
   }
 
-  async execute(cmd: Command): Promise<boolean> {
-    if (!(await cmd.run())) return false;
-    this.undos.push(cmd);
-    this.redos = [];
-    this.changed();
-    return true;
-  }
-
-  async undo(): Promise<boolean> {
-    const cmd = this.undos.pop();
-    if (!cmd) return false;
-    if (!(await cmd.undo())) {
+  execute(cmd: Command): Promise<boolean> {
+    // Taken when asked, not when its turn comes: a clear() in between must cancel it.
+    const g = this.gen;
+    return this.queue(async () => {
+      if (g !== this.gen) return false;
+      if (!(await cmd.run())) return false;
+      if (g !== this.gen) return true;
       this.undos.push(cmd);
-      return false;
-    }
-    this.redos.push(cmd);
-    this.changed();
-    return true;
+      this.redos = [];
+      this.changed();
+      return true;
+    });
   }
 
-  async redo(): Promise<boolean> {
-    const cmd = this.redos.pop();
-    if (!cmd) return false;
-    if (!(await cmd.run())) {
+  undo(): Promise<boolean> {
+    // Taken when asked, not when its turn comes: a clear() in between must cancel it.
+    const g = this.gen;
+    return this.queue(async () => {
+      if (g !== this.gen) return false;
+      const cmd = this.undos[this.undos.length - 1];
+      if (!cmd) return false;
+      if (!(await cmd.undo())) return false;
+      if (g !== this.gen) return true;
+      this.undos.pop();
       this.redos.push(cmd);
-      return false;
-    }
-    this.undos.push(cmd);
-    this.changed();
-    return true;
+      this.changed();
+      return true;
+    });
+  }
+
+  redo(): Promise<boolean> {
+    // Taken when asked, not when its turn comes: a clear() in between must cancel it.
+    const g = this.gen;
+    return this.queue(async () => {
+      if (g !== this.gen) return false;
+      const cmd = this.redos[this.redos.length - 1];
+      if (!cmd) return false;
+      if (!(await cmd.run())) return false;
+      if (g !== this.gen) return true;
+      this.redos.pop();
+      this.undos.push(cmd);
+      this.changed();
+      return true;
+    });
   }
 
   clear() {
+    this.gen++;
     this.undos = [];
     this.redos = [];
     this.changed();

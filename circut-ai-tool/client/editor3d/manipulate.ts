@@ -113,7 +113,8 @@ export function attachManipulation(ws: Workspace): () => void {
       if (moved) {
         // A successful commit rebuilds the scene from the new doc; only a refusal needs the mesh put back.
         void history.execute(moveCommand(d.ref, d.origin, d.holes!)).then((ok) => {
-          if (!ok) board.nudge(d.ref, 0, 0);
+          // Not if a newer drag of the same part has begun; it owns the nudge now.
+          if (!ok && drag?.ref !== d.ref) board.nudge(d.ref, 0, 0);
         });
       } else if (d.verdict && !d.verdict.ok) toast(`Not moved: ${d.verdict.reason}`);
       return;
@@ -202,7 +203,7 @@ export function attachManipulation(ws: Workspace): () => void {
   const offKey = addKeyHandler((e) => {
     if (!drag) return false;
     // F would start a focus glide under the drag; swallow it.
-    if (e.key === 'f' || e.key === 'F') return true;
+    if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey && !e.altKey) return true;
     if (e.key !== 'Escape') return false;
     endDrag();
     return true;
@@ -212,7 +213,9 @@ export function attachManipulation(ws: Workspace): () => void {
     const p = store.get().project;
     const ref = p?.selectedRef;
     if (!p || !ref || e.ctrlKey || e.metaKey || e.altKey || drag) return false;
+    if (e.repeat) return true;
     const holes = p.doc.pinHoles[ref];
+    if (!holes) return toast('This part is not on the board'), true;
     const part = p.doc.parts.find((x) => x.id === ref);
     const pkg = p.doc.packages.find((x) => x.id === ref);
     let next: Record<string, Hole> | null = null;
