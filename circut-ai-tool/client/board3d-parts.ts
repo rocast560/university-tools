@@ -367,7 +367,7 @@ export function buildPackage(kit: Kit, pkg: Package, doc: LayoutDoc): BuiltPacka
   else group.add(markingPlane(kit, chipMarking(kit, pkg, doc, length), length, BODY_HALF_Z * 2, cx, yTop + 0.15, cz));
 
   // Legs: out of the body side, angled down, then straight into the socket.
-  const legs = new THREE.InstancedMesh(kit.keep(new THREE.BoxGeometry(1, 1, 1)), kit.M.leg, pins.length * 2);
+  const legs = kit.keep(new THREE.InstancedMesh(kit.keep(new THREE.BoxGeometry(1, 1, 1)), kit.M.leg, pins.length * 2));
   legs.castShadow = true;
   const m4 = new THREE.Matrix4();
   pins.forEach(([, hole], i) => {
@@ -424,9 +424,9 @@ function buildModule(kit: Kit, pkg: Package, doc: LayoutDoc): BuiltPackage {
   strip.position.set(cx, TOP + HEADER_H / 2, zh);
   group.add(strip);
   const pinTop = pcbTop + 1.5 * MM;
-  const pins = new THREE.InstancedMesh(kit.keep(new THREE.BoxGeometry(0.64 * MM, 1, 0.64 * MM)), kit.M.leg, holes.length);
+  const pins = kit.keep(new THREE.InstancedMesh(kit.keep(new THREE.BoxGeometry(0.64 * MM, 1, 0.64 * MM)), kit.M.leg, holes.length));
   pins.castShadow = true;
-  const pads = new THREE.InstancedMesh(kit.keep(new THREE.CylinderGeometry(0.95 * MM, 0.95 * MM, 0.08 * MM, 18)), kit.std({ color: '#c7a544', roughness: 0.32, metalness: 0.85 }), holes.length);
+  const pads = kit.keep(new THREE.InstancedMesh(kit.keep(new THREE.CylinderGeometry(0.95 * MM, 0.95 * MM, 0.08 * MM, 18)), kit.std({ color: '#c7a544', roughness: 0.32, metalness: 0.85 }), holes.length));
   holes.forEach((h, i) => {
     const x = holeX(h);
     pins.setMatrixAt(i, m4.makeTranslation(x, (TOP - 5 + pinTop) / 2, zh).scale(new THREE.Vector3(1, pinTop - (TOP - 5), 1)));
@@ -575,7 +575,7 @@ function buildSevenSeg(kit: Kit, pkg: Package, doc: LayoutDoc): BuiltPackage {
 
   // Legs straight down from the body into the sockets.
   const pins = Object.entries(doc.pinHoles[pkg.id] ?? {});
-  const legs = new THREE.InstancedMesh(kit.keep(new THREE.BoxGeometry(0.5 * MM, 1, 0.5 * MM)), kit.M.leg, holes.length);
+  const legs = kit.keep(new THREE.InstancedMesh(kit.keep(new THREE.BoxGeometry(0.5 * MM, 1, 0.5 * MM)), kit.M.leg, holes.length));
   legs.castShadow = true;
   const m4 = new THREE.Matrix4();
   holes.forEach((hole, i) => legs.setMatrixAt(i, spanMatrix(m4, v3(holeX(hole), yBottom + 1, holeZ(hole)), v3(holeX(hole), TOP - 5, holeZ(hole)), 3.4, 2)));

@@ -303,6 +303,8 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
   // among the parts to see which hole a lead lands in. Fly mode is the second
   // way to move, and only one of the two drives the camera at a time.
   const fly = flyControls(camera, renderer.domElement);
+  /** Off while the editor owns a drag; landing from flight must not turn it back on. */
+  let orbitOn = true;
   const setFly = (on: boolean) => {
     if (on === fly.active) return;
     if (on) {
@@ -315,7 +317,7 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
     }
   };
   fly.onExit = () => {
-    controls.enabled = true;
+    controls.enabled = orbitOn;
     // Hand orbit a pivot in front of wherever the flight ended, or the first
     // drag after landing would swing the camera back across the board.
     const ahead = new THREE.Vector3();
@@ -403,7 +405,8 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
     const rows = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'] as const;
     for (const row of rows) for (let c = 1; c <= cols; c++) holes.push({ col: c, row });
     for (const row of ['T+', 'T-', 'B-', 'B+'] as const) for (let c = 1; c <= cols; c++) if (c % doc.board.railGapEvery !== 0) holes.push({ col: c, row });
-    const socket = new THREE.InstancedMesh(kit.keep(new THREE.BoxGeometry(6.4, 7, 6.4)), M.socket, holes.length);
+    // Kept, like the geometry: only the mesh's own dispose frees its instance buffers.
+    const socket = kit.keep(new THREE.InstancedMesh(kit.keep(new THREE.BoxGeometry(6.4, 7, 6.4)), M.socket, holes.length));
     socket.receiveShadow = true;
     const m4 = new THREE.Matrix4();
     holes.forEach((h, i) => socket.setMatrixAt(i, m4.makeTranslation(holeX(h), TOP - 3.2, holeZ(h))));
@@ -639,22 +642,25 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
     ndc.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
     ray.setFromCamera(ndc, camera);
   };
-  /** First hit on one layer, walked up to the object that carries `key`. */
-  const hitOn = (layer: number, key: 'switchKey' | 'ref' | 'net', within: THREE.Object3D[]): string | null => {
+  /** Nearest hit on one layer, walked up to the object that carries `key`, with how far away it is. */
+  const hitOn = (layer: number, key: 'switchKey' | 'ref' | 'net', within: THREE.Object3D[]): { id: string; distance: number } | null => {
     ray.layers.set(layer);
     for (const hit of ray.intersectObjects(within, true)) {
-      for (let o: THREE.Object3D | null = hit.object; o; o = o.parent) if (typeof o.userData[key] === 'string') return o.userData[key] as string;
+      for (let o: THREE.Object3D | null = hit.object; o; o = o.parent) if (typeof o.userData[key] === 'string') return { id: o.userData[key] as string, distance: hit.distance };
     }
     return null;
   };
   const pick = (e: { clientX: number; clientY: number }): Pick => {
     toNdc(e);
-    const key = hitOn(3, 'switchKey', c.pickable);
-    if (key) return { kind: 'switch', key };
-    const ref = hitOn(1, 'ref', [...c.partObj.values()]);
-    if (ref) return { kind: 'part', ref };
-    const net = hitOn(2, 'net', c.wirePick);
-    return net ? { kind: 'wire', net } : null;
+    const sw = hitOn(3, 'switchKey', c.pickable);
+    if (sw) return { kind: 'switch', key: sw.id };
+    // A part and a jumper are judged by depth: a jumper arching over a chip is
+    // in front of it and must still be followable, and a chip in front of a
+    // jumper hides it.
+    const part = hitOn(1, 'ref', [...c.partObj.values()]);
+    const wire = hitOn(2, 'net', c.wirePick);
+    if (part && (!wire || part.distance <= wire.distance)) return { kind: 'part', ref: part.id };
+    return wire ? { kind: 'wire', net: wire.id } : null;
   };
   const boardPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -TOP);
   const planeHit = new THREE.Vector3();
@@ -789,6 +795,9 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
   const TINT_MAX = 128;
   const tintMesh = new THREE.InstancedMesh(tintGeo, tintMat, TINT_MAX);
   tintMesh.count = 0;
+  // Created empty, three would cache an empty bounding sphere at the origin
+  // and cull the tints whenever the origin is off screen.
+  tintMesh.frustumCulled = false;
   tintMesh.renderOrder = 5;
   tintMesh.raycast = () => {};
   scene.add(tintMesh);
@@ -845,7 +854,6 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
   // ---------- orbit hand-off ----------
   // The editor turns orbit off while it owns a drag, and with it the click
   // and hover handling below, which would otherwise fight the drag.
-  let orbitOn = true;
   const setOrbit = (on: boolean) => {
     orbitOn = on;
     if (!fly.active) controls.enabled = on;
@@ -1050,6 +1058,7 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
       lineMat.hov.dispose();
       tintGeo.dispose();
       tintMat.dispose();
+      tintMesh.dispose();
       c.kit.dispose();
       renderer.dispose();
       renderer.domElement.remove();
