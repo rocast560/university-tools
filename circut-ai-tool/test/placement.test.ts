@@ -15,7 +15,15 @@ const here = doc.pinHoles[part.id];
 /** A column whose top-half strip is empty of every leg and every net. */
 function emptyTopColumn(): number {
   const nets = stripNets(doc, design, null);
-  for (let c = doc.board.cols - 1; c > 1; c--) if (!nets.has(`T${c}`)) return c;
+  const taken = takenHoles(doc, null);
+  for (let c = doc.board.cols - 1; c > 1; c--) {
+    if (!nets.has(`T${c}`)) {
+      // Also check that no hole in rows a–e of that column appears in takenHoles
+      const rows: Row[] = ['a', 'b', 'c', 'd', 'e'];
+      const hasHole = rows.some((row) => taken.has(`${row}${c}`));
+      if (!hasHole) return c;
+    }
+  }
   throw new Error('fixture board has no empty column');
 }
 
