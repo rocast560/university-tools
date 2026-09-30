@@ -21,7 +21,7 @@ import { COLOR_GND, COLOR_PLUS, PALETTE } from '../../src/layout/engine.ts';
 import type { Wire, WirePath } from '../../src/layout/types.ts';
 import type { LayoutDoc } from '../../src/pipeline.ts';
 import { P } from '../../src/render/geometry.ts';
-import { planLength, planToPath, shapePlan, wireKey, type Point } from '../../src/render/route3d.ts';
+import { planLength, planToPath, shapePlan, takenNodes, wireKey, type Point, type Taken } from '../../src/render/route3d.ts';
 import { api } from '../api.ts';
 import { esc, toast } from '../main.ts';
 import { store } from '../state.ts';
@@ -36,6 +36,14 @@ const CLICK_PX = 4;
 /** A press held longer than this, in ms, is not a click (board3d's rule too). */
 const CLICK_MS = 600;
 
+/** The doc's legs and jumper ends, worked out once per doc: judge runs on every snapped pointer move. */
+const takenCache = new WeakMap<LayoutDoc, Taken>();
+const takenOf = (doc: LayoutDoc) => {
+  let t = takenCache.get(doc);
+  if (!t) takenCache.set(doc, (t = takenNodes(doc)));
+  return t;
+};
+
 /**
  * Whether an edited plan can be this jumper's shape: the saved form of it, or
  * why not. The same two steps the server's save check and the router take,
@@ -44,7 +52,7 @@ const CLICK_MS = 600;
 function judge(w: Wire, plan: Point[], doc: LayoutDoc): { path: WirePath; why: null } | { path: null; why: string } {
   const path = planToPath(w, plan);
   if (!path) return { path: null, why: 'it leaves the lane grid' };
-  const { why } = shapePlan(w, path, doc.packages, doc.board);
+  const { why } = shapePlan(w, path, doc.packages, doc.board, takenOf(doc));
   return why ? { path: null, why } : { path, why: null };
 }
 

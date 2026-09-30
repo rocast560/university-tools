@@ -86,7 +86,7 @@ With square wires, a selected wire has handles:
 
 Double-click a wire to put a small Z (two new bends) into the run under the pointer. Double-click a bend, or click it (it turns white) and press Delete, to take it out again. A bend that holds a wire's end straight out of its hole cannot be removed.
 
-While you drag, the wire follows the pointer. It turns red, and the hint line says why, when the shape would cross a chip or leave the board; releasing then leaves the wire as it was. When you release a valid shape it is saved and every other wire is routed again around it.
+While you drag, the wire follows the pointer. It turns red, and the hint line says why, when the shape would cross a chip, leave the board, or lie over a leg or another jumper's end; releasing then leaves the wire as it was. When you release a valid shape it is saved and every other wire is routed again around it.
 
 Deselecting a wire (Esc, or clicking off it) also lets go of the soft highlight on its net.
 
@@ -96,7 +96,7 @@ If the router cannot find a clean path in time, it draws that wire the simple wa
 
 ### How shapes are kept
 
-A shape is saved in the layout sidecar (`NAME.breadboard.json`, under `wirePaths`, at most 1024 of them), never in the schematic. It is keyed by the wire's net and its two holes, and it records only the bends, in board units (columns, the gap between two rows, and a lane within that gap), so it survives the board changing size. If a part moves so that the wire's holes change, the old shape no longer matches any wire: it is dropped, and the checks list a warning naming the net. The server checks a shape with the same test the router uses and refuses one that is not square, leaves the board or crosses a chip.
+A shape is saved in the layout sidecar (`NAME.breadboard.json`, under `wirePaths`, at most 1024 of them), never in the schematic. It is keyed by the wire's net and its two holes, and it records only the bends, in board units (columns, the gap between two rows, and a lane within that gap), so it survives the board changing size. If a part moves so that the wire's holes change, the old shape no longer matches any wire: it is dropped, and the checks list a warning naming the net. The server checks a shape with the same test the router uses and refuses one that is not square, leaves the board, crosses a chip or lies over a leg or another jumper's end.
 
 ## Undo
 

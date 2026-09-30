@@ -14,7 +14,7 @@ import { buildLayoutDoc, type LayoutDoc } from '../src/pipeline.ts';
 import { footprintPins } from '../src/layout/engine.ts';
 import { classify } from '../src/parts/catalog.ts';
 import { LED_COLOURS, type LedColour } from '../src/parts/led.ts';
-import { shapePlan, wireKey } from '../src/render/route3d.ts';
+import { shapePlan, takenNodes, wireKey } from '../src/render/route3d.ts';
 import { simulate, type SimResult } from '../src/sim/index.ts';
 import type { KicadCli } from './kicad-cli.ts';
 import type { LibraryLookup } from './libraries.ts';
@@ -362,7 +362,8 @@ export class Service {
    * wireKey() makes it: net|holeA|holeB with the holes sorted. Key "*" with
    * null forgets every one. Only the layout sidecar changes, never the
    * schematic. A shape that is not square, does not leave its holes along
-   * their columns, leaves the board or runs through a package is refused.
+   * their columns, leaves the board, runs through a package or lies over a
+   * leg or another jumper's end is refused.
    */
   async setWirePath(id: string, key: string, path: WirePath | null): Promise<OpenProject> {
     const p = this.get(id);
@@ -384,7 +385,7 @@ export class Service {
     }
     const clean = normalizeWirePath(path);
     if (!clean) throw new ServiceError(PATH_HELP);
-    const { why } = shapePlan(wire, clean, p.doc.packages, p.doc.board);
+    const { why } = shapePlan(wire, clean, p.doc.packages, p.doc.board, takenNodes(p.doc));
     if (why) throw new ServiceError(why.startsWith('it names') ? PATH_HELP : `cannot shape the ${wire.net} jumper: ${why}`);
     p.sidecar.wirePaths[key] = clean;
     return this.rebuild(p);

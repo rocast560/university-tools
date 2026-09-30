@@ -167,11 +167,42 @@ export function simplify(plan: Point[]): Point[] {
 export const planLength = (plan: Point[]) => plan.reduce((s, p, i) => (i ? s + Math.abs(p[0] - plan[i - 1][0]) + Math.abs(p[1] - plan[i - 1][1]) : 0), 0);
 
 /**
+ * Lattice nodes where a leg or a jumper end sits, by `nodeKey`, naming what
+ * is there: "a leg at d12" or "another jumper's end at d12". A wire may lie
+ * across an empty hole, never on one of these (bar its own two ends).
+ */
+export type Taken = Map<string, string>;
+
+/** A point's lattice node as "k,j" (half pitches from X0 and Y0), or null when it is off the lattice. */
+export function nodeKey([x, y]: Point): string | null {
+  const k = Math.round((x - X0) / LANE);
+  const j = Math.round((y - Y0) / LANE);
+  return Math.abs(X0 + k * LANE - x) < 0.01 && Math.abs(Y0 + j * LANE - y) < 0.01 ? `${k},${j}` : null;
+}
+
+/** Every leg and every jumper end on the board, for checkPlan and shapePlan. */
+export function takenNodes(input: Pick<RouteInput, 'pinHoles' | 'wires'>): Taken {
+  const out: Taken = new Map();
+  for (const w of input.wires) for (const h of [w.a, w.b]) {
+    const k = nodeKey(pt(h));
+    if (k) out.set(k, `another jumper's end at ${holeKey(h)}`);
+  }
+  // Legs last, so a hole holding both is named for the leg.
+  for (const pins of Object.values(input.pinHoles)) for (const h of Object.values(pins)) {
+    const k = nodeKey(pt(h));
+    if (k) out.set(k, `a leg at ${holeKey(h)}`);
+  }
+  return out;
+}
+
+/**
  * Why a plan cannot be a jumper on this board, or null when it can: square
  * corners only, straight out of each hole along its column, on the board,
- * and never through a package body (other than one holding its own end).
+ * never through a package body (other than one holding its own end), and,
+ * given `taken`, never over a leg or another jumper's end. The plan's own two
+ * ends are its holes, so they are the only taken nodes it may touch.
  */
-export function checkPlan(plan: Point[], packages: Package[], board: BoardSpec): string | null {
+export function checkPlan(plan: Point[], packages: Package[], board: BoardSpec, taken?: Taken): string | null {
   if (plan.length < 2) return 'a jumper needs two ends';
   for (let i = 0; i + 1 < plan.length; i++) if (Math.abs(plan[i][0] - plan[i + 1][0]) > 0.01 && Math.abs(plan[i][1] - plan[i + 1][1]) > 0.01) return 'the path must turn square corners';
   const n = plan.length;
@@ -182,6 +213,21 @@ export function checkPlan(plan: Point[], packages: Package[], board: BoardSpec):
   for (const r of chipRects(packages)) {
     if (ends.some((e) => inside(e, r))) continue;
     for (let i = 0; i + 1 < n; i++) if (crosses(plan[i], plan[i + 1], r)) return `the path runs through ${r.id}`;
+  }
+  if (taken?.size) {
+    const own = new Set([nodeKey(plan[0]), nodeKey(plan[n - 1])]);
+    // Every lattice node along every run, bends included: a run stretched
+    // along a strip would otherwise lie on the legs standing in it.
+    for (let i = 0; i + 1 < n; i++) {
+      const [a, b] = [plan[i], plan[i + 1]];
+      const steps = Math.round((Math.abs(b[0] - a[0]) + Math.abs(b[1] - a[1])) / LANE);
+      const [dx, dy] = [Math.sign(b[0] - a[0]) * LANE, Math.sign(b[1] - a[1]) * LANE];
+      for (let t = 0; t <= steps; t++) {
+        const k = nodeKey([a[0] + t * dx, a[1] + t * dy]);
+        const what = k && !own.has(k) ? taken.get(k) : undefined;
+        if (what) return `the path runs over ${what}`;
+      }
+    }
   }
   return null;
 }
@@ -200,14 +246,15 @@ export function pathToPlan(w: Wire, path: WirePath): Point[] | null {
 
 /**
  * A saved shape as the plan it will be drawn as (simplified, so a bend sitting
- * on its own hole is gone), or why it cannot be one. Shared by the save check
- * and the router so a shape that saves is a shape that lays out.
+ * on its own hole is gone), or why it cannot be one. Shared by the save check,
+ * the router and the editor's red preview, so a shape that saves is a shape
+ * that lays out. `taken` is takenNodes() of the same doc.
  */
-export function shapePlan(w: Wire, path: WirePath, packages: Package[], board: BoardSpec): { plan: Point[]; why: null } | { plan: null; why: string } {
+export function shapePlan(w: Wire, path: WirePath, packages: Package[], board: BoardSpec, taken: Taken): { plan: Point[]; why: null } | { plan: null; why: string } {
   const raw = pathToPlan(w, path);
   if (!raw) return { plan: null, why: 'it names a corridor this board does not have' };
   const plan = simplify(raw);
-  const why = checkPlan(plan, packages, board);
+  const why = checkPlan(plan, packages, board, taken);
   return why ? { plan: null, why } : { plan, why: null };
 }
 
@@ -717,13 +764,14 @@ export function routeWires(input: RouteInput, saved: Record<string, WirePath> = 
   const fixed: number[] = [];
 
   // 1. Hand-shaped wires, as saved.
+  const taken = takenNodes(input);
   for (const [key, path] of Object.entries(saved)) {
     const i = keys.indexOf(key);
     if (i < 0) {
       warnings.push(`hand-shaped jumper for ${keyNet(key)} (${keyHoles(key)}) no longer matches a wire; dropped`);
       continue;
     }
-    const { plan, why } = shapePlan(input.wires[i], path, input.packages, input.board);
+    const { plan, why } = shapePlan(input.wires[i], path, input.packages, input.board, taken);
     if (!plan) {
       warnings.push(`hand-shaped jumper for ${keyNet(key)} (${keyHoles(key)}) no longer fits (${why}); re-routed`);
       continue;

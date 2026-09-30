@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { ProjectRegistry, normalizePath, sidecarPath, type PathMapping } from '../server/projects.ts';
 import { Service, ServiceError, type ProjectEvent } from '../server/service.ts';
-import { LANE, planToPath, wireKey } from '../src/render/route3d.ts';
+import { moveSegment } from '../src/edit/wireshape.ts';
+import { LANE, planToPath, routeWires, wireKey } from '../src/render/route3d.ts';
 import { Events } from '../server/watch.ts';
 import { fakeKicad } from './fake-kicad.ts';
 import { FIXTURES, readFixture } from './smoke.test.ts';
@@ -237,7 +238,7 @@ describe('hand-shaped wires', () => {
     expect(all.sidecar.wirePaths).toEqual({});
   });
 
-  test('setWirePath refuses an unknown wire, a malformed path, a path through a chip and "*" with a path', async () => {
+  test('setWirePath refuses an unknown wire, a malformed path, a path through a chip or over a leg, and "*" with a path', async () => {
     const { service, sch } = await makeService();
     const p = await service.open(sch);
     const w = p.doc.wires[0];
@@ -249,6 +250,10 @@ describe('hand-shaped wires', () => {
     const through = { points: [{ col: 22, gap: 'e|f', lane: 0 }, { col: 27, gap: 'e|f', lane: 0 }] };
     await expect(service.setWirePath(p.info.id, wireKey(over), through)).rejects.toThrow('cannot shape the Net-(U3-Pad13) jumper: the path runs through U3');
     await expect(service.setWirePath(p.info.id, '*', { points: [] })).rejects.toThrow(/only clears/);
+    // g3 to g21 with its long run dragged below row j: the stub out of g3 would lie over the leg in j3.
+    const a = p.doc.wires.find((k) => wireKey(k) === '/A|g21|g3')!;
+    const overLeg = planToPath(a, moveSegment(routeWires(p.doc).routes[p.doc.wires.indexOf(a)].plan, 1, 273))!;
+    await expect(service.setWirePath(p.info.id, wireKey(a), overLeg)).rejects.toThrow('cannot shape the /A jumper: the path runs over a leg at j3');
     const reset = await service.resetLayout(p.info.id);
     expect(reset.sidecar.wirePaths).toEqual({});
   });

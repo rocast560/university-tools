@@ -1,11 +1,40 @@
 import { describe, expect, test } from 'bun:test';
 import { holeKey } from '../src/layout/board.ts';
+import type { WirePath } from '../src/layout/types.ts';
 import { pt } from '../src/render/geometry.ts';
 import { wirePolylines } from '../src/render/ortho.ts';
-import { checkPlan, GAPS, LANE, pathToPlan, planToPath, routeWires, wireKey, WIRE_D, type Point } from '../src/render/route3d.ts';
+import { handles, moveSegment } from '../src/edit/wireshape.ts';
+import { checkPlan, GAPS, LANE, nodeKey, pathToPlan, planToPath, routeWires, shapePlan, takenNodes, wireKey, WIRE_D, type Point, type WireRoute } from '../src/render/route3d.ts';
+import type { LayoutDoc } from '../src/pipeline.ts';
 import { docs, FIXTURES } from './route-fixtures.ts';
 
 const routed = Object.fromEntries(Object.entries(docs).map(([name, doc]) => [name, routeWires(doc)]));
+
+/**
+ * The legs and jumper ends a route lies on, other than its own two holes,
+ * as hole names. Worked out here from pinHoles and the wires directly, not
+ * through takenNodes, so the test does not just repeat checkPlan.
+ */
+function overTaken(doc: LayoutDoc, i: number, r: WireRoute): string[] {
+  const at = (p: Point) => `${Math.round(p[0] * 100)},${Math.round(p[1] * 100)}`;
+  const taken = new Map<string, string>();
+  for (const pins of Object.values(doc.pinHoles)) for (const h of Object.values(pins)) taken.set(at(pt(h)), holeKey(h));
+  doc.wires.forEach((w, j) => {
+    if (j === i) return;
+    for (const h of [w.a, w.b]) taken.set(at(pt(h)), holeKey(h));
+  });
+  const own = new Set([at(pt(doc.wires[i].a)), at(pt(doc.wires[i].b))]);
+  const out: string[] = [];
+  for (let s = 0; s + 1 < r.plan.length; s++) {
+    const [a, b] = [r.plan[s], r.plan[s + 1]];
+    const n = Math.round((Math.abs(b[0] - a[0]) + Math.abs(b[1] - a[1])) / LANE);
+    for (let t = 0; t <= n; t++) {
+      const k = at([a[0] + Math.sign(b[0] - a[0]) * t * LANE, a[1] + Math.sign(b[1] - a[1]) * t * LANE]);
+      if (!own.has(k) && taken.has(k)) out.push(taken.get(k)!);
+    }
+  }
+  return out;
+}
 
 describe('routeWires on the fixtures', () => {
   for (const name of Object.keys(FIXTURES)) {
@@ -22,8 +51,39 @@ describe('routeWires on the fixtures', () => {
     });
 
     test(`${name}: every run is square, leaves its holes along the column, stays on the board and clear of the chips`, () => {
-      const bad = routes.map((r, i) => [i, checkPlan(r.plan, doc.packages, doc.board)]).filter(([, why]) => why);
+      const taken = takenNodes(doc);
+      const bad = routes.map((r, i) => [i, checkPlan(r.plan, doc.packages, doc.board, taken)]).filter(([, why]) => why);
       expect(bad).toEqual([]);
+    });
+
+    test(`${name}: no route, automatic or hand-shaped, lies on a leg or another wire's end`, () => {
+      expect(routes.flatMap((r, i) => overTaken(doc, i, r).map((h) => `${wireKey(doc.wires[i])} over ${h}`))).toEqual([]);
+      // Hand shapes: every drag of a run the editor would accept (one lane
+      // step either way, then three pitches out), saved a few at a time and
+      // laid out with everything else routed round them.
+      const taken = takenNodes(doc);
+      const kept = new Map<string, WirePath>();
+      let accepted = 0;
+      routes.forEach((r, i) => {
+        const w = doc.wires[i];
+        for (const h of handles(r.plan).filter((h) => h.kind === 'segment')) {
+          for (const d of [-6, -2, -1, 1, 2, 6]) {
+            const v = (h.horizontal ? h.at[1] : h.at[0]) + d * LANE;
+            const path = planToPath(w, moveSegment(r.plan, h.index, v));
+            if (!path || shapePlan(w, path, doc.packages, doc.board, taken).why) continue;
+            accepted++;
+            const plan = shapePlan(w, path, doc.packages, doc.board, taken).plan!;
+            expect(overTaken(doc, i, { plan, lifts: [] })).toEqual([]);
+            if (!kept.has(wireKey(w)) && kept.size < 12) kept.set(wireKey(w), path);
+          }
+        }
+      });
+      expect(accepted).toBeGreaterThan(0);
+      const entries = [...kept];
+      for (let b = 0; b < entries.length; b += 4) {
+        const again = routeWires(doc, Object.fromEntries(entries.slice(b, b + 4)));
+        again.routes.forEach((r, i) => expect(overTaken(doc, i, r)).toEqual([]));
+      }
     });
 
     test(`${name}: every crossing has exactly one hump, one wire diameter high`, () => {
@@ -111,6 +171,30 @@ describe('hand-shaped wires', () => {
     expect(again.warnings).toEqual([]);
     expect(again.routes[i].plan).toEqual(shaped);
     expect(again.routes[i].locked).toBe(true);
+  });
+
+  test('a shape that runs over a leg is refused, naming the hole; its own two holes are fine', () => {
+    const k = doc.wires.findIndex((x) => wireKey(x) === '/A|g21|g3');
+    const own = routed.PL1_1.routes[k].plan;
+    const taken = takenNodes(doc);
+    expect(checkPlan(own, doc.packages, doc.board, taken)).toBeNull();
+    // Dragging its long run down past row j stretches the stub out of g3 over the leg in j3.
+    const path = planToPath(doc.wires[k], moveSegment(own, 1, 273))!;
+    expect(shapePlan(doc.wires[k], path, doc.packages, doc.board, new Map()).why).toBeNull();
+    expect(shapePlan(doc.wires[k], path, doc.packages, doc.board, taken).why).toBe('the path runs over a leg at j3');
+    // The router refuses the same saved shape and routes the wire itself.
+    const again = routeWires(doc, { [wireKey(doc.wires[k])]: path });
+    expect(again.warnings).toEqual([`hand-shaped jumper for /A (g21-g3) no longer fits (the path runs over a leg at j3); re-routed`]);
+    expect(again.routes[k].locked).toBeUndefined();
+  });
+
+  test("a jumper's end is taken for every other wire", () => {
+    const taken = takenNodes(doc);
+    const other = doc.wires.find((x) => x !== w)!;
+    expect(taken.get(nodeKey(pt(other.a))!)).toBe(`another jumper's end at ${holeKey(other.a)}`);
+    // A run straight down that jumper's column, through its hole.
+    const [ox, oy] = pt(other.a);
+    expect(checkPlan([[ox, oy - 2 * LANE], [ox, oy + 2 * LANE]], doc.packages, doc.board, taken)).toBe(`the path runs over another jumper's end at ${holeKey(other.a)}`);
   });
 
   test('a saved shape for a wire that is gone is dropped with a warning naming its net', () => {
