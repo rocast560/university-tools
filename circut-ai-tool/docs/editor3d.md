@@ -1,6 +1,6 @@
 # The 3D editor
 
-A full-screen 3D view of the breadboard where you can select parts, move them, turn or flip them, and edit their values. It works on the same project as the flat board.
+A full-screen 3D view of the breadboard where you can select parts, move them, turn or flip them, edit their values, and shape the jumper wires by hand. It works on the same project as the flat board.
 
 ## Opening and closing
 
@@ -66,13 +66,45 @@ Selecting a part shows a card beside it.
 
 The Delete key only works when the card is visible on screen and you are not typing in the value box.
 
+## Wires
+
+The **Wires** button switches between curved arcs and square wires. Square wires are the ones you can shape.
+
+Square wires lie flat on the board, the way a carefully hand-wired board looks: straight up out of each hole, down onto the plastic, along the gaps between the rows with tight square bends, and back down into the other hole. They never cross a chip. Wires that share a gap run side by side in lanes, ordered so that a bundle does not cross itself where its wires peel off. Where two wires still cross, the one laid later hops over the other. The flat board's square view draws exactly the same paths.
+
+Click a wire to select it. Its net is followed softly, an accent line runs along it, and the wire card opens beside it:
+
+- the net and the two holes it joins, and its length along the board;
+- colour swatches. Colour belongs to the net, so every jumper of that net changes. Keys 1 to 9 do the same: 1 red, 2 black, 3 blue, 4 green, 5 orange, 6 yellow, 7 white, 8 violet, 9 grey;
+- **Re-route** (only for a wire you have shaped, or one with no clean route) forgets its shape;
+- **Tidy all wires** (when any wire has been shaped) forgets every shape.
+
+With square wires, a selected wire has handles:
+
+- a large disc at the middle of every run longer than about two pitches. Drag it to slide that run sideways. It snaps to the lanes between the rows (or between the columns), never onto a row or column of holes. The run coming out of a hole cannot leave its hole, so it gets a small jog half a pitch out;
+- a small disc on every bend. Drag it to move the corner; the two runs either side follow.
+
+Double-click a wire to put a small Z (two new bends) into the run under the pointer. Double-click a bend, or click it (it turns white) and press Delete, to take it out again. A bend that holds a wire's end straight out of its hole cannot be removed.
+
+While you drag, the wire follows the pointer. It turns red, and the hint line says why, when the shape would cross a chip or leave the board; releasing then leaves the wire as it was. When you release a valid shape it is saved and every other wire is routed again around it.
+
+Deselecting a wire (Esc, or clicking off it) also lets go of the soft highlight on its net.
+
+### Wires with no clean route
+
+If the router cannot find a clean path in time, it draws that wire the simple way, which may pass over a chip. It shows red in 3D and dashed on the flat board, and the checks name it. Such a wire has no handles; its card says "No clean route: move nearby parts to make room, then Re-route." Shaping only works with square wires, so with arcs the card offers colour only.
+
+### How shapes are kept
+
+A shape is saved in the layout sidecar (`NAME.breadboard.json`, under `wirePaths`, at most 1024 of them), never in the schematic. It is keyed by the wire's net and its two holes, and it records only the bends, in board units (columns, the gap between two rows, and a lane within that gap), so it survives the board changing size. If a part moves so that the wire's holes change, the old shape no longer matches any wire: it is dropped, and the checks list a warning naming the net. The server checks a shape with the same test the router uses and refuses one that is not square, leaves the board or crosses a chip.
+
 ## Undo
 
 Ctrl+Z undoes, Ctrl+Shift+Z or Ctrl+Y redoes, and the bar has Undo and Redo buttons.
 
-Covered: moves, turns and flips. They run one at a time, in order.
+Covered: moves, turns and flips, and wire shapes (a drag, a new or removed bend, Re-route and Tidy all wires). They run one at a time, in order. Undoing Tidy all wires restores only the shapes whose wires still exist.
 
-Not covered: value edits and deletes. They change the schematic, and the server saves a copy of the `.kicad_sch` before each one in a `.circuit-ai-backups` folder next to the schematic (the newest 20 are kept). Restore from there by hand.
+Not covered: wire colours, value edits and deletes. They change the schematic, and the server saves a copy of the `.kicad_sch` before each one in a `.circuit-ai-backups` folder next to the schematic (the newest 20 are kept). Restore from there by hand.
 
 The history is cleared when the project changes, when the schematic reloads (any value edit or delete, from the card, an agent or KiCad), and when the editor closes. If an undo or redo fails (the part is gone, the server refused), that step is dropped with a message and the next Ctrl+Z reaches the one before it.
 
@@ -81,6 +113,8 @@ The history is cleared when the project changes, when the schematic reloads (any
 | Action | Changes the layout sidecar | Changes the .kicad_sch |
 |---|---|---|
 | Move, turn, flip (and their undo) | Yes (`NAME.breadboard.json`, pinned holes) | No |
+| Shape a wire, Re-route, Tidy all wires | Yes (`wirePaths`) | No |
+| Wire colour (swatch or 1 to 9) | Yes (`colors`, per net) | No |
 | Edit value | No | Yes, after a backup |
 | Delete part | No | Yes, after a backup |
 | Select, orbit, fly, focus | No | No |
@@ -90,7 +124,7 @@ The history is cleared when the project changes, when the schematic reloads (any
 
 | Key | Action |
 |---|---|
-| Click | Select a part |
+| Click | Select a part or a wire |
 | Drag (on the selected part) | Move it |
 | Drag (elsewhere) | Orbit |
 | Right-drag, scroll | Pan, zoom |
@@ -99,10 +133,14 @@ The history is cleared when the project changes, when the schematic reloads (any
 | W A S D, Space, C, Shift | Fly mode movement |
 | R | Turn a two-lead part |
 | Shift+R | Flip a chip |
-| Delete, Backspace | Open the delete confirm in the card |
+| Drag a wire handle | Slide a run, or move a bend |
+| Double-click a wire | Add a pair of bends |
+| Double-click a bend | Remove it |
+| 1 to 9 | Recolour the selected wire's net |
+| Delete, Backspace | With a bend picked, remove it; otherwise open the delete confirm in the part card |
 | Ctrl+Z | Undo |
 | Ctrl+Shift+Z, Ctrl+Y | Redo |
-| Esc | Cancel a drag; else deselect; else close. In fly mode, back to orbit |
+| Esc | Cancel a drag; else unpick a bend; else deselect the wire or part; else close. In fly mode, back to orbit |
 
 Ctrl, Cmd and Alt chords other than the undo and redo ones are left to the browser, so Ctrl+F finds and Ctrl+R reloads as usual.
 
@@ -110,11 +148,13 @@ Ctrl, Cmd and Alt chords other than the undo and redo ones are left to the brows
 
 - **3D is blank.** WebGL is off or unavailable. Enable hardware acceleration in the browser, or try another browser.
 - **A part will not move.** Read the hint line while dragging; it gives the reason. Select the part first: an unselected part orbits instead of moving.
+- **A wire is red in 3D, or dashed on the flat board.** The router could not find a clean path for it in time and drew it the simple way, which may pass over a chip. The checks name it. Moving a part to open up room usually fixes it; such a wire cannot be shaped until it has a clean route.
+- **A wire's shape went back to the automatic one.** One of its holes changed (a part moved), so the saved shape no longer matched the wire. The checks list which one.
+- **The 3D view closed with a "graphics context" message.** The browser took WebGL away (a GPU reset, or too many 3D pages open). Press 3D to open it again.
 - **The board reloaded by itself.** Any schematic change reloads the board: a value edit or delete from the card, an agent's edit over MCP or the REST API, or a save in KiCad. The selection, switches, running simulation, walk-through step and followed net carry over where they still exist in the new design; the undo history does not. Only a change made outside the tool (KiCad, another program) shows the "Schematic changed on disk" notice.
 
 ## Coming next
 
-- Phase 2: clean wire routing and hand-shaped wires.
 - Phase 3: a parts tray, dragging new parts and jumpers onto the board, and Duplicate.
 
 ## References
