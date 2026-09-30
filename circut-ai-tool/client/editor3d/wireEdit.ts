@@ -48,28 +48,37 @@ function judge(w: Wire, plan: Point[], doc: LayoutDoc): { path: WirePath; why: n
   return why ? { path: null, why } : { path, why: null };
 }
 
-/**
- * Save one wire's hand shape (null forgets it; key "*" with null forgets
- * them all) and take the server's doc. False, with a toast, when refused.
- */
-export async function commitWirePath(key: string, path: WirePath | null): Promise<boolean> {
+/** What to do about a jumper the router could only draw the simple way. */
+export const FALLBACK_HELP = "No clean route: move nearby parts to make room, then Re-route. It can't be hand-shaped yet.";
+
+/** Send one shape (see commitWirePath) and take the doc; the server's reason when refused, else null. */
+async function sendWirePath(key: string, path: WirePath | null): Promise<string | null> {
   const p = store.get().project;
-  if (!p) return false;
+  if (!p) return 'no project is open';
   try {
     const doc = await api.wirePath(p.id, key, path);
     const q = store.get().project;
-    if (!q || q.id !== p.id) return false;
+    if (!q || q.id !== p.id) return 'the project changed';
     const wirePaths = key === '*' ? {} : { ...q.sidecar.wirePaths };
     if (key !== '*') {
       if (path) wirePaths[key] = path;
       else delete wirePaths[key];
     }
     store.setProject({ doc, sidecar: { ...q.sidecar, wirePaths } });
-    return true;
+    return null;
   } catch (err) {
-    toast((err as Error).message);
-    return false;
+    return (err as Error).message;
   }
+}
+
+/**
+ * Save one wire's hand shape (null forgets it; key "*" with null forgets
+ * them all) and take the server's doc. False, with a toast, when refused.
+ */
+export async function commitWirePath(key: string, path: WirePath | null): Promise<boolean> {
+  const why = await sendWirePath(key, path);
+  if (why) toast(why);
+  return !why;
 }
 
 /** A wire reshape as an undoable command: the saved shape before and after (null: routed). */
@@ -77,13 +86,29 @@ export function wirePathCommand(key: string, before: WirePath | null, after: Wir
   return { label, run: () => commitWirePath(key, after), undo: () => commitWirePath(key, before) };
 }
 
-/** Forget every hand shape; undo puts each one back. */
-function tidyCommand(before: Record<string, WirePath>): Command {
+/**
+ * Forget every hand shape; undo puts back each one whose jumper is still on
+ * the board. A shape left behind by a moved part is skipped (the layout drops
+ * it anyway), and one the server refuses does not stop the rest: the undo
+ * still counts as done, with one toast for whatever could not come back.
+ */
+export function tidyCommand(before: Record<string, WirePath>): Command {
   return {
     label: 'tidy all wires',
     run: () => commitWirePath('*', null),
     async undo() {
-      for (const [key, path] of Object.entries(before)) if (!(await commitWirePath(key, path))) return false;
+      const live = new Set(store.get().project?.doc.wires.map(wireKey) ?? []);
+      let failed = 0;
+      let last = '';
+      for (const [key, path] of Object.entries(before)) {
+        if (!live.has(key)) continue;
+        const why = await sendWirePath(key, path);
+        if (why) {
+          failed++;
+          last = why;
+        }
+      }
+      if (failed) toast(`${failed} hand shape${failed === 1 ? '' : 's'} could not be put back (${last})`);
       return true;
     },
   };
@@ -124,7 +149,11 @@ export function attachWireEdit(ws: Workspace): WireEdit {
     if (!p || !selected) return null;
     const index = p.doc.wires.findIndex((w) => wireKey(w) === selected);
     if (index < 0) return null;
-    return { p, index, wire: p.doc.wires[index], route: p.doc.routes?.[index] ?? null, square: p.sidecar.options.wireStyle === 'orthogonal' };
+    const wire = p.doc.wires[index];
+    const route = p.doc.routes?.[index] ?? null;
+    // Drawn by the simple router: off the lane grid, so it has no handles to give.
+    const fallback = !!route && (!!route.warning || !planToPath(wire, route.plan));
+    return { p, index, wire, route, fallback, square: p.sidecar.options.wireStyle === 'orthogonal' };
   };
 
   const card = document.createElement('div');
@@ -151,9 +180,10 @@ export function attachWireEdit(ws: Workspace): WireEdit {
     card.innerHTML =
       `<header><b>${esc(c.p.doc.nets[c.wire.net]?.name ?? c.wire.net)}</b><span>${esc(holeKey(c.wire.a))} to ${esc(holeKey(c.wire.b))}</span><button type="button" class="ws-card-x" data-wire="close" title="Deselect (Esc)">×</button></header>` +
       `<p class="ws-card-note">${about}${saved ? ' · shaped by hand' : ''}${c.route?.warning ? ` · ${esc(c.route.warning)}` : ''}</p>` +
+      (c.square && c.fallback ? `<p class="ws-card-warn">${esc(FALLBACK_HELP)}</p>` : '') +
       `<div class="ws-swatches">${WIRE_COLOURS.map((col, i) => `<button type="button" data-colour="${col}" title="${i + 1}" style="background:${col}"${col.toLowerCase() === colour ? ' class="is-on"' : ''}></button>`).join('')}</div>` +
-      `<footer>${c.square && saved ? '<button type="button" data-wire="reroute" title="Forget this wire\'s hand shape">Re-route</button>' : ''}${c.square && shaped ? '<button type="button" data-wire="tidy" title="Forget every hand shape">Tidy all wires</button>' : ''}</footer>` +
-      `<p class="ws-card-hint">${c.square ? 'drag a handle to reshape · double-click to add or remove a bend · 1-9 colour' : 'switch Wires to square to reshape · 1-9 colour'}</p>`;
+      `<footer>${c.square && (saved || c.fallback) ? '<button type="button" data-wire="reroute" title="Forget this wire\'s hand shape and route it again">Re-route</button>' : ''}${c.square && shaped ? '<button type="button" data-wire="tidy" title="Forget every hand shape">Tidy all wires</button>' : ''}</footer>` +
+      `<p class="ws-card-hint">${c.square && !c.fallback ? 'drag a handle to reshape · double-click to add or remove a bend · 1-9 colour' : 'switch Wires to square to reshape · 1-9 colour'}</p>`;
     placed = '';
   };
 
@@ -170,7 +200,7 @@ export function attachWireEdit(ws: Workspace): WireEdit {
       return;
     }
     board.setWireSelected(c.index);
-    const list = c.square && c.route && !drag ? handlesOf(c.route.plan) : [];
+    const list = c.square && c.route && !c.fallback && !drag ? handlesOf(c.route.plan) : [];
     const key = `${JSON.stringify(list)}|${bend}`;
     if (key !== handlesFor) {
       handlesFor = key;
@@ -180,10 +210,14 @@ export function attachWireEdit(ws: Workspace): WireEdit {
   };
 
   const select = (key: string | null) => {
+    const was = current();
     selected = key;
     bend = null;
+    const q = store.get().project;
     // A wire and a part are never selected together.
-    if (key && store.get().project?.selectedRef) store.setProject({ selectedRef: null });
+    if (key && q?.selectedRef) store.setProject({ selectedRef: null });
+    // Dropping the wire lets go of the soft follow its click put on its net, so nothing still looks selected.
+    else if (!key && was && q?.highlight?.soft && q.highlight.net === was.wire.net) store.setProject({ highlight: null });
     paint();
   };
 
@@ -244,7 +278,7 @@ export function attachWireEdit(ws: Workspace): WireEdit {
 
   const straighten = (k: number) => {
     const c = current();
-    if (!c?.route) return;
+    if (!c?.route || c.fallback) return;
     const out = removeBend(c.route.plan, k);
     if (!out) return void toast("That bend holds the wire's end on its column");
     bend = null;
@@ -265,7 +299,7 @@ export function attachWireEdit(ws: Workspace): WireEdit {
     if (e.button !== 0 || board.flying || drag) return;
     press = { x: e.clientX, y: e.clientY, t: performance.now() };
     const c = current();
-    if (!c?.square || !c.route) return;
+    if (!c?.square || !c.route || c.fallback) return;
     const h = board.pickHandle(e);
     const handle = h && handlesOf(c.route.plan).find((k) => k.kind === h.kind && k.index === h.index);
     if (!handle) return;
@@ -342,6 +376,11 @@ export function attachWireEdit(ws: Workspace): WireEdit {
   const onDbl = (e: MouseEvent) => {
     const c = current();
     if (!c?.square || !c.route || board.flying) return;
+    if (c.fallback) {
+      const hit = board.pick(e);
+      if (hit?.kind === 'wire' && hit.index === c.index) toast(FALLBACK_HELP);
+      return;
+    }
     const h = board.pickHandle(e);
     if (h?.kind === 'bend') {
       // Ours, not a focus glide onto a part the handle happens to sit over.
@@ -375,7 +414,12 @@ export function attachWireEdit(ws: Workspace): WireEdit {
     const c = current();
     if (!what || !c) return;
     if (what === 'close') select(null);
-    if (what === 'reroute') void history.execute(wirePathCommand(selected!, c.p.sidecar.wirePaths[selected!] ?? null, null, `re-route the ${c.wire.net} jumper`));
+    if (what === 'reroute') {
+      const before = c.p.sidecar.wirePaths[selected!] ?? null;
+      // Nothing to forget: just lay the board out again (nothing to undo either).
+      if (!before) void commitWirePath(selected!, null);
+      else void history.execute(wirePathCommand(selected!, before, null, `re-route the ${c.wire.net} jumper`));
+    }
     if (what === 'tidy') void history.execute(tidyCommand({ ...c.p.sidecar.wirePaths }));
   });
 

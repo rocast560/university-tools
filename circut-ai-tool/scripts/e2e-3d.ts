@@ -9,6 +9,9 @@
 import { copyFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import type { Hole, WirePath } from '../src/layout/types.ts';
+import type { LayoutDoc } from '../src/pipeline.ts';
+import { planToPath, wireKey } from '../src/render/route3d.ts';
 
 const CHROME = process.env.CHROME ?? 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 const PORT = 8799;
@@ -193,6 +196,20 @@ async function post(url: string, body: unknown) {
   const res = await fetch(`${base}${url}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   if (!res.ok) throw new Error(`POST ${url} failed with ${res.status}: ${(await res.text().catch(() => '')).slice(0, 300)}`);
   return res;
+}
+
+/** POST JSON to the test server; whether it accepted it. */
+async function tryPost(url: string, body: unknown) {
+  const res = await fetch(`${base}${url}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  await res.text().catch(() => '');
+  return res.ok;
+}
+
+/** GET JSON from the test server; throws when it refuses. */
+async function get<T>(url: string): Promise<T> {
+  const res = await fetch(`${base}${url}`);
+  if (!res.ok) throw new Error(`GET ${url} failed with ${res.status}`);
+  return (await res.json()) as T;
 }
 
 /** Square wires and no hand shapes, set on the server and picked up by a fresh page. */
@@ -510,8 +527,10 @@ const SCENARIOS: Record<string, (page: CDP, id: string) => Promise<void>> = {
       await page.until(`__e3d.selectedWire() === ${JSON.stringify(hit.key)}`, `the jumper ${hit.key} to be selected`);
       await page.until(`document.querySelector('.ws-wirecard:not([hidden])')?.dataset.wire === ${JSON.stringify(hit.key)}`, 'the wire card');
       await page.until(`__e3d.handles().length > 0`, 'the handles');
+      await page.until(`document.querySelector('.ws-legend .is-on')?.dataset.legend === ${JSON.stringify(hit.net)}`, 'the click to follow the net softly');
       await page.key('Escape', 'Escape');
       await page.until(`__e3d.selectedWire() === null && document.querySelector('.ws-wirecard').hidden`, 'Esc to drop the wire');
+      await page.until(`!document.querySelector('.ws-legend .is-on')`, 'dropping the wire to release its net');
       if (!(await page.eval<boolean>(`!!document.querySelector('.ws')`))) throw new Error('Esc with a wire selected closed the editor');
     } finally {
       await arcWires(id);
@@ -595,6 +614,71 @@ const SCENARIOS: Record<string, (page: CDP, id: string) => Promise<void>> = {
       await page.until(`__e3d.netColor(${JSON.stringify(hit.net)})?.toLowerCase() === '#2e9e4f'`, 'the net to turn green');
     } finally {
       if (net) await post(`/api/projects/${id}/layout/colors`, { net, color: null });
+      await arcWires(id);
+    }
+  },
+  async 'Tidy all wires, then undo restores every shape'(page, id) {
+    await squareWires(page, id);
+    let moved: { ref: string; holes: Record<string, Hole> } | null = null;
+    try {
+      // Each cleanly routed jumper keeps its own route as a hand shape (a real shape the server accepts).
+      const first = await get<LayoutDoc>(`/api/projects/${id}/layout`);
+      const shaped: string[] = [];
+      for (const [i, w] of first.wires.entries()) {
+        const r = first.routes?.[i];
+        const path = r && !r.warning ? planToPath(w, r.plan) : null;
+        if (!path?.points.length) continue;
+        await post(`/api/projects/${id}/layout/wire`, { key: wireKey(w), path });
+        shaped.push(wireKey(w));
+      }
+      if (shaped.length < 2) throw new Error(`only ${shaped.length} jumper(s) could be shaped`);
+      // Then move a part until one of those shapes is left behind by its jumper (stale).
+      let stale: string | null = null;
+      const lead2 = first.parts.filter((x) => x.kind === 'lead2').map((x) => x.id);
+      outer: for (const ref of lead2) {
+        const holes = first.pinHoles[ref];
+        if (!holes) continue;
+        for (const d of [1, -1, 2, -2]) {
+          const next = Object.fromEntries(Object.entries(holes).map(([pin, h]) => [pin, { ...h, col: h.col + d }]));
+          if (!(await tryPost(`/api/projects/${id}/layout/move`, { ref, holes: next }))) continue;
+          const now = await get<LayoutDoc>(`/api/projects/${id}/layout`);
+          const live = new Set(now.wires.map(wireKey));
+          stale = shaped.find((k) => !live.has(k)) ?? null;
+          if (stale) {
+            moved = { ref, holes };
+            break outer;
+          }
+          await post(`/api/projects/${id}/layout/move`, { ref, holes });
+        }
+      }
+      if (!stale) console.log('     (no part move left a shape stale; the stale-shape path was not exercised)');
+      // What undo must bring back: every shape whose jumper is still there and laid out from it.
+      const doc = await get<LayoutDoc>(`/api/projects/${id}/layout`);
+      const side = await get<{ wirePaths: Record<string, WirePath> }>(`/api/projects/${id}/sidecar`);
+      const want: Record<string, WirePath> = {};
+      doc.wires.forEach((w, i) => {
+        const k = wireKey(w);
+        if (side.wirePaths[k] && doc.routes?.[i]?.locked) want[k] = side.wirePaths[k];
+      });
+      const keys = Object.keys(want);
+      if (keys.length < 2) throw new Error(`only ${keys.length} live hand shape(s) to tidy`);
+      if (stale && !side.wirePaths[stale]) throw new Error('the stale shape was not kept in the sidecar');
+      await page.reload();
+      await page.until(`document.querySelector('[data-action=view3d]')`, 'the project page');
+      await open3d(page);
+      await page.eval(`__e3d.selectWire(${JSON.stringify(keys[0])})`);
+      await page.until(`document.querySelector('.ws-wirecard:not([hidden]) [data-wire=tidy]')`, 'the Tidy all wires button');
+      await page.eval(`document.querySelector('.ws-wirecard [data-wire=tidy]').click()`);
+      await page.until(`${JSON.stringify([...keys, ...(stale ? [stale] : [])])}.every((k) => __e3d.wirePath(k) === null)`, 'Tidy to clear every shape', 20000);
+      await page.until(`!document.querySelector('[data-ws=undo]').disabled`, 'Undo to enable');
+      await page.key('z', 'KeyZ', 2 /* ctrl */);
+      await page.until(`Object.entries(${JSON.stringify(want)}).every(([k, p]) => JSON.stringify(__e3d.wirePath(k)) === JSON.stringify(p))`, 'undo to restore every live shape', 30000);
+      // Counted as done: it went over to the redo side rather than being dropped.
+      await page.until(`!document.querySelector('[data-ws=redo]').disabled`, 'the undone Tidy to be redoable');
+      if (stale && (await page.eval<boolean>(`__e3d.wirePath(${JSON.stringify(stale)}) !== null`))) throw new Error('undo put back a stale shape');
+      if (await page.eval<boolean>(`(document.getElementById('toast')?.textContent ?? '').includes('could not be put back')`)) throw new Error('undo reported a failure restoring live shapes');
+    } finally {
+      if (moved) await tryPost(`/api/projects/${id}/layout/move`, moved);
       await arcWires(id);
     }
   },
