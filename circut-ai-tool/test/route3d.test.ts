@@ -236,9 +236,9 @@ describe('hand-shaped wires', () => {
     expect(checkPlan([[ox, oy - 2 * LANE], [ox, oy + 2 * LANE]], doc.packages, doc.board, taken)).toBe(`the path runs over another jumper's end at ${holeKey(other.a)}`);
   });
 
-  test('a saved shape for a wire that is gone is dropped with a warning naming its net', () => {
+  test('a saved shape for a wire that is gone is set aside with a warning naming its net', () => {
     const again = routeWires(doc, { '/NOPE|a1|a9': { points: [{ col: 1, gap: 'a|b', lane: 0 }, { col: 9, gap: 'a|b', lane: 0 }] } });
-    expect(again.warnings).toEqual(['hand-shaped jumper for /NOPE (a1-a9) no longer matches a wire; dropped']);
+    expect(again.warnings).toEqual(["hand-shaped jumper for /NOPE (a1-a9) no longer matches a wire; kept in case the part moves back. 'Tidy all wires' forgets it"]);
     expect(again.routes).toEqual(routed.PL1_1.routes);
   });
 

@@ -96,7 +96,7 @@ If the router cannot find a clean path in time, it draws that wire the simple wa
 
 ### How shapes are kept
 
-A shape is saved in the layout sidecar (`NAME.breadboard.json`, under `wirePaths`, at most 1024 of them), never in the schematic. It is keyed by the wire's net and its two holes, and it records only the bends, in board units (columns, the gap between two rows, and a lane within that gap), so it survives the board changing size. If a part moves so that the wire's holes change, the old shape no longer matches any wire: it is dropped, and the checks list a warning naming the net. The server checks a shape with the same test the router uses and refuses one that is not square, leaves the board, crosses a chip or lies over a leg or another jumper's end.
+A shape is saved in the layout sidecar (`NAME.breadboard.json`, under `wirePaths`, at most 1024 of them), never in the schematic. It is keyed by the wire's net and its two holes, and it records only the bends, in board units (columns, the gap between two rows, and a lane within that gap), so it survives the board changing size. If a part moves so that the wire's holes change, the old shape no longer matches any wire. The wire is routed automatically, and the checks list a warning naming the net. The shape itself is kept in the sidecar, so moving the part back brings it back; **Tidy all wires** forgets it. If a shape still matches its wire but no longer fits (a part now stands where it runs), it is routed automatically too, and the checks say why. The server checks a shape with the same test the router uses and refuses one that is not square, leaves the board, crosses a chip or lies over a leg or another jumper's end.
 
 ## Undo
 
@@ -149,7 +149,7 @@ Ctrl, Cmd and Alt chords other than the undo and redo ones are left to the brows
 - **3D is blank.** WebGL is off or unavailable. Enable hardware acceleration in the browser, or try another browser.
 - **A part will not move.** Read the hint line while dragging; it gives the reason. Select the part first: an unselected part orbits instead of moving.
 - **A wire is red in 3D, or dashed on the flat board.** The router could not find a clean path for it in time and drew it the simple way, which may pass over a chip. The checks name it. Moving a part to open up room usually fixes it; such a wire cannot be shaped until it has a clean route.
-- **A wire's shape went back to the automatic one.** One of its holes changed (a part moved), so the saved shape no longer matched the wire. The checks list which one.
+- **A wire's shape went back to the automatic one.** One of its holes changed (a part moved), so the saved shape no longer matched the wire, or a part now stands where the shape ran. The checks list which one and why.
 - **The 3D view closed with a "graphics context" message.** The browser took WebGL away (a GPU reset, or too many 3D pages open). Press 3D to open it again.
 - **The board reloaded by itself.** Any schematic change reloads the board: a value edit or delete from the card, an agent's edit over MCP or the REST API, or a save in KiCad. The selection, switches, running simulation, walk-through step and followed net carry over where they still exist in the new design; the undo history does not. Only a change made outside the tool (KiCad, another program) shows the "Schematic changed on disk" notice.
 

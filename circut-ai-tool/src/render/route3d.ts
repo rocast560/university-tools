@@ -6,7 +6,7 @@
 // Stuckey 2009):
 //   1. Hand-shaped wires first. A saved path whose end holes still match a
 //      wire is used as it is and holds its lines; one that matches no wire is
-//      dropped with a warning naming its net.
+//      set aside (kept in the sidecar) with a warning naming its net.
 //   2. Every other wire, shortest first, is found by A* over a lattice with a
 //      node every half pitch, the heading in the state so that a bend can
 //      cost something. Without a bend penalty the cheapest paths staircase.
@@ -824,7 +824,8 @@ export function routeWires(input: RouteInput, saved: Record<string, WirePath> = 
   for (const [key, path] of Object.entries(saved)) {
     const i = keys.indexOf(key);
     if (i < 0) {
-      warnings.push(`hand-shaped jumper for ${keyNet(key)} (${keyHoles(key)}) no longer matches a wire; dropped`);
+      // Left in the sidecar, not deleted: a part moved away and back again gets its shape back.
+      warnings.push(`hand-shaped jumper for ${keyNet(key)} (${keyHoles(key)}) no longer matches a wire; kept in case the part moves back. 'Tidy all wires' forgets it`);
       continue;
     }
     const { plan, why } = shapePlan(input.wires[i], path, input.packages, input.board, taken);
