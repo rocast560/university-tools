@@ -45,14 +45,13 @@ export function buildWireMeshes(kit: Kit, plan: Point[], lifts: Lift[], base: nu
 /**
  * Give an existing jumper a new shape in place, for the live preview while a
  * handle is dragged: only this wire's buffers are rebuilt, and the old ones
- * are freed at once. The kit keeps the new ones, so a rebuild frees them too.
+ * are freed at once and leave the kit, which keeps the new ones in their
+ * place (so a rebuild frees those, and a long drag holds only one set).
  */
 export function reshapeWire(kit: Kit, m: WireMeshes, plan: Point[], lifts: Lift[], base: number): void {
   const s = shapeOf(plan, lifts, base);
-  m.jacket.geometry.dispose();
-  m.tin.geometry.dispose();
-  m.jacket.geometry = kit.keep(tubeGeometry(s.jacket));
-  m.tin.geometry = kit.keep(tubeGeometry(s.tin));
+  m.jacket.geometry = kit.swap(m.jacket.geometry, tubeGeometry(s.jacket));
+  m.tin.geometry = kit.swap(m.tin.geometry, tubeGeometry(s.tin));
   m.line = s.line;
   m.length = s.length;
 }

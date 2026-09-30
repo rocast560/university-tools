@@ -188,13 +188,38 @@ async function settles(page: CDP, expression: string, ms: number) {
   return page.until(expression, '', ms).then(() => true, () => false);
 }
 
+/** POST JSON to the test server; throws with the server's answer when it refuses. */
+async function post(url: string, body: unknown) {
+  const res = await fetch(`${base}${url}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  if (!res.ok) throw new Error(`POST ${url} failed with ${res.status}: ${(await res.text().catch(() => '')).slice(0, 300)}`);
+  return res;
+}
+
 /** Square wires and no hand shapes, set on the server and picked up by a fresh page. */
 async function squareWires(page: CDP, id: string) {
-  const post = (url: string, body: unknown) => fetch(`${base}${url}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   await post(`/api/projects/${id}/layout/options`, { wireStyle: 'orthogonal' });
   await post(`/api/projects/${id}/layout/wire`, { key: '*', path: null });
   await page.reload();
   await page.until(`document.querySelector('[data-action=view3d]')`, 'the project page');
+}
+
+/** Back to curved wires with no hand shapes, so a square-wire scenario leaves nothing behind for the next. */
+async function arcWires(id: string) {
+  await post(`/api/projects/${id}/layout/wire`, { key: '*', path: null });
+  await post(`/api/projects/${id}/layout/options`, { wireStyle: 'arc' });
+}
+
+/**
+ * A jumper whose middle picks as itself (a part can stand in front of it).
+ * With `run`, only one with a run across the board longer than two pitches,
+ * which has a segment handle to drag up and down the screen; `seg` is that run.
+ */
+async function pickableWire(page: CDP, run = false) {
+  const hit = await page.eval<{ key: string; index: number; net: string; x: number; y: number; seg: number } | null>(
+    `(() => { const plans = __e3d.routes(); const keys = __e3d.wires(); for (let i = 0; i < keys.length; i++) { const p = plans?.[i]; const seg = p ? p.findIndex((q, k) => k + 1 < p.length && q[1] === p[k + 1][1] && Math.abs(q[0] - p[k + 1][0]) > 36) : -1; if (${run} && seg < 0) continue; const at = __e3d.wireScreen(i); const hit = at && __e3d.pickAt(at.x, at.y); if (hit && hit.kind === 'wire' && hit.index === i) return { key: keys[i], index: i, net: hit.net, x: at.x, y: at.y, seg }; } return null; })()`,
+  );
+  if (!hit) throw new Error('no jumper could be picked at its middle');
+  return hit;
 }
 
 const SCENARIOS: Record<string, (page: CDP, id: string) => Promise<void>> = {
@@ -452,16 +477,20 @@ const SCENARIOS: Record<string, (page: CDP, id: string) => Promise<void>> = {
   },
   async 'square wires lie flat on the board and match the flat board'(page, id) {
     await squareWires(page, id);
-    await open3d(page);
-    await page.until(`__e3d.routes() && __e3d.routes().length === __e3d.wires().length`, 'routed square wires');
-    // Flat: the centre line sits one radius up, a hump adds one diameter, the jacket one more radius.
-    const top = await page.eval<number>(`__e3d.wireTop()`);
-    if (!(top > 0 && top <= 4 + 8 + 4 + 0.5)) throw new Error(`the highest jacket reaches y = ${top}; flat wires stay under 16.5`);
-    // The page's flat board draws the very same paths.
-    const same = await page.eval<boolean>(
-      `(() => { const d = [...document.querySelectorAll('#board .wire')].map((g) => g.querySelectorAll('path')[1]?.getAttribute('d')); const want = __e3d.routes().map((p) => p.map(([x, y], k) => (k ? 'L ' : 'M ') + x + ' ' + y).join(' ')); return d.length === want.length && d.every((v, i) => v === want[i]); })()`,
-    );
-    if (!same) throw new Error('the flat board and the 3D board draw different wire paths');
+    try {
+      await open3d(page);
+      await page.until(`__e3d.routes() && __e3d.routes().length === __e3d.wires().length`, 'routed square wires');
+      // Flat: the centre line sits one radius up, a hump adds one diameter, the jacket one more radius.
+      const top = await page.eval<number>(`__e3d.wireTop()`);
+      if (!(top > 0 && top <= 4 + 8 + 4 + 0.5)) throw new Error(`the highest jacket reaches y = ${top}; flat wires stay under 16.5`);
+      // The page's flat board draws the very same paths.
+      const same = await page.eval<boolean>(
+        `(() => { const d = [...document.querySelectorAll('#board .wire')].map((g) => g.querySelectorAll('path')[1]?.getAttribute('d')); const want = __e3d.routes().map((p) => p.map(([x, y], k) => (k ? 'L ' : 'M ') + x + ' ' + y).join(' ')); return d.length === want.length && d.every((v, i) => v === want[i]); })()`,
+      );
+      if (!same) throw new Error('the flat board and the 3D board draw different wire paths');
+    } finally {
+      await arcWires(id);
+    }
   },
   async 'losing the WebGL context closes the editor with a toast, and 3D opens again'(page) {
     await open3d(page);
@@ -470,6 +499,104 @@ const SCENARIOS: Record<string, (page: CDP, id: string) => Promise<void>> = {
     await page.until(`(document.getElementById('toast')?.textContent ?? '').includes('graphics context')`, 'the context-loss toast');
     await page.until(`document.querySelector('[data-action=view3d]').textContent.trim() === '3D'`, 'the toolbar button to read 3D');
     await open3d(page);
+  },
+  async 'clicking a jumper selects it and opens the wire card'(page, id) {
+    await squareWires(page, id);
+    try {
+      await open3d(page);
+      const hit = await pickableWire(page);
+      await page.mouse('mousePressed', hit.x, hit.y);
+      await page.mouse('mouseReleased', hit.x, hit.y);
+      await page.until(`__e3d.selectedWire() === ${JSON.stringify(hit.key)}`, `the jumper ${hit.key} to be selected`);
+      await page.until(`document.querySelector('.ws-wirecard:not([hidden])')?.dataset.wire === ${JSON.stringify(hit.key)}`, 'the wire card');
+      await page.until(`__e3d.handles().length > 0`, 'the handles');
+      await page.key('Escape', 'Escape');
+      await page.until(`__e3d.selectedWire() === null && document.querySelector('.ws-wirecard').hidden`, 'Esc to drop the wire');
+      if (!(await page.eval<boolean>(`!!document.querySelector('.ws')`))) throw new Error('Esc with a wire selected closed the editor');
+    } finally {
+      await arcWires(id);
+    }
+  },
+  async 'dragging a segment handle reshapes a wire, undo puts it back, and the shape survives a reload'(page, id) {
+    await squareWires(page, id);
+    try {
+      await open3d(page);
+      const hit = await pickableWire(page, true);
+      await page.eval(`__e3d.selectWire(${JSON.stringify(hit.key)})`);
+      await page.until(`__e3d.handles().some((h) => h.kind === 'segment' && h.index === ${hit.seg})`, 'the segment handle');
+      const before = await page.eval<string>(`JSON.stringify(__e3d.routes()[${hit.index}])`);
+      let shaped = false;
+      // Up or down the screen moves a run that lies across the board; some lanes may be refused.
+      for (const dy of [70, -70, 110, -110]) {
+        const h = await page.eval<{ x: number; y: number }>(`__e3d.handles().find((h) => h.kind === 'segment' && h.index === ${hit.seg})`);
+        await page.mouse('mousePressed', h.x, h.y);
+        for (let k = 1; k <= 6; k++) await page.mouse('mouseMoved', h.x, h.y + (dy * k) / 6);
+        await page.mouse('mouseReleased', h.x, h.y + dy);
+        if (await settles(page, `__e3d.wirePath(${JSON.stringify(hit.key)}) !== null`, 3000)) {
+          shaped = true;
+          break;
+        }
+      }
+      if (!shaped) throw new Error('no drag of the segment handle kept a shape');
+      const after = await page.eval<string>(`JSON.stringify(__e3d.routes()[${hit.index}])`);
+      if (after === before) throw new Error('the shape was saved but the wire did not change');
+      await page.until(`!document.querySelector('[data-ws=undo]').disabled`, 'Undo to enable');
+      await page.key('z', 'KeyZ', 2 /* ctrl */);
+      await page.until(`__e3d.wirePath(${JSON.stringify(hit.key)}) === null && JSON.stringify(__e3d.routes()[${hit.index}]) === ${JSON.stringify(before)}`, 'undo to restore the routed shape');
+      await page.key('Z', 'KeyZ', 2 | 8 /* ctrl+shift */);
+      await page.until(`JSON.stringify(__e3d.routes()[${hit.index}]) === ${JSON.stringify(after)}`, 'redo to shape it again');
+      await page.reload();
+      await page.until(`document.querySelector('[data-action=view3d]')`, 'the project page after reload');
+      await open3d(page);
+      await page.until(`JSON.stringify(__e3d.routes()?.[${hit.index}]) === ${JSON.stringify(after)}`, 'the hand shape to survive a reload');
+    } finally {
+      await arcWires(id);
+    }
+  },
+  async 'double-click adds a bend pair and Delete on a picked bend takes it out'(page, id) {
+    await squareWires(page, id);
+    try {
+      await open3d(page);
+      const hit = await pickableWire(page, true);
+      await page.eval(`__e3d.selectWire(${JSON.stringify(hit.key)})`);
+      await page.until(`__e3d.handles().length > 0`, 'the handles');
+      const start = await page.eval<number>(`__e3d.routes()[${hit.index}].length - 2`);
+      // Double-click the wire itself, halfway along it.
+      const at = await page.eval<{ x: number; y: number }>(`__e3d.wireScreen(${hit.index})`);
+      await page.mouse('mousePressed', at.x, at.y);
+      await page.mouse('mouseReleased', at.x, at.y);
+      await page.mouse('mousePressed', at.x, at.y, 2);
+      await page.mouse('mouseReleased', at.x, at.y, 2);
+      await page.until(`__e3d.routes()[${hit.index}].length - 2 === ${start + 2}`, 'a bend pair to be added', 6000);
+      // Pick one of the new corners (not one under the wire card, which floats over the canvas) and press Delete.
+      const corner = await page.eval<{ x: number; y: number } | null>(
+        `(() => { const plan = __e3d.routes()[${hit.index}]; const hs = __e3d.handles().filter((h) => h.kind === 'bend'); return hs.find((h) => h.index > 1 && h.index < plan.length - 2 && document.elementFromPoint(h.x, h.y)?.tagName === 'CANVAS') ?? null; })()`,
+      );
+      if (!corner) throw new Error('no inner bend handle to pick');
+      await page.mouse('mousePressed', corner.x, corner.y);
+      await page.mouse('mouseReleased', corner.x, corner.y);
+      await sleep(300);
+      await page.key('Delete', 'Delete');
+      await page.until(`__e3d.routes()[${hit.index}].length - 2 === ${start}`, 'Delete to take the pair out', 6000);
+    } finally {
+      await arcWires(id);
+    }
+  },
+  async "digit keys recolour the selected wire's net"(page, id) {
+    await squareWires(page, id);
+    let net: string | null = null;
+    try {
+      await open3d(page);
+      const hit = await pickableWire(page);
+      net = hit.net;
+      await page.eval(`__e3d.selectWire(${JSON.stringify(hit.key)})`);
+      await page.until(`__e3d.selectedWire() === ${JSON.stringify(hit.key)}`, 'the wire to be selected');
+      await page.key('4', 'Digit4');
+      await page.until(`__e3d.netColor(${JSON.stringify(hit.net)})?.toLowerCase() === '#2e9e4f'`, 'the net to turn green');
+    } finally {
+      if (net) await post(`/api/projects/${id}/layout/colors`, { net, color: null });
+      await arcWires(id);
+    }
   },
 };
 

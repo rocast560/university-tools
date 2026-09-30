@@ -18,6 +18,7 @@ import { store } from '../state.ts';
 import { history as editHistory } from './history.ts';
 import { attachCard } from './card.ts';
 import { attachManipulation, commitMove } from './manipulate.ts';
+import { attachWireEdit } from './wireEdit.ts';
 import { wireKey } from '../../src/render/route3d.ts';
 
 export interface Workspace {
@@ -32,7 +33,7 @@ export type KeyHandler = (e: KeyboardEvent, ws: Workspace) => boolean;
 const keyHandlers = new Set<KeyHandler>();
 export const addKeyHandler = (fn: KeyHandler) => (keyHandlers.add(fn), () => keyHandlers.delete(fn));
 
-const ORBIT_HINT = 'drag to orbit · right-drag to pan · scroll to zoom · click a part to select it · F focus · R rotate · Shift+R flip chip · Del delete · Ctrl+Z undo · Esc close';
+const ORBIT_HINT = 'drag to orbit · right-drag to pan · scroll to zoom · click a part or a wire to select it · F focus · R rotate · Shift+R flip chip · 1-9 wire colour · Del delete · Ctrl+Z undo · Esc close';
 const FLY_HINT = 'WASD to move · mouse to look · space and C for up and down · shift to sprint · F or Esc to orbit again';
 
 const typing = (t: EventTarget | null) => {
@@ -99,12 +100,16 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
   let detachCard = () => {};
   let offDel = () => {};
   let offHistory = () => {};
+  let detachWires = () => {};
+  // Read by onContextLost, which the board can call before setup has finished.
+  let closed = false;
   const release = () => {
     offStore();
     offSim();
     offKey();
     offHistory();
     offDel();
+    detachWires();
     detachCard();
     detachManip();
     disposeBoard();
@@ -128,7 +133,8 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
       onSelectNet(net) {
         const q = store.get().project;
         if (!q) return;
-        if (net) store.setProject({ highlight: { net }, activeStep: null, selectedRef: null });
+        // Softly: the rest of the board stays as glass, so the wire reads in place.
+        if (net) store.setProject({ highlight: { net, soft: true }, activeStep: null, selectedRef: null });
         else if (q.highlight || q.selectedRef) store.setProject({ highlight: null, selectedRef: null });
       },
       onMode(mode) {
@@ -145,7 +151,6 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
     hintEl.textContent = ORBIT_HINT;
     disposeBoard = () => board.dispose();
 
-    let closed = false;
     const ws: Workspace = {
       board,
       root,
@@ -160,11 +165,15 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
       },
     };
 
+    // Wires first: their canvas listeners must run before the part
+    // manipulation's, so a press on a wire handle never reaches it.
+    const wires = attachWireEdit(ws);
+    detachWires = () => wires.detach();
     detachManip = attachManipulation(ws);
     detachCard = attachCard(ws);
     offDel = addKeyHandler((e) => {
       if (e.key !== 'Delete' && e.key !== 'Backspace') return false;
-      const card = root.querySelector<HTMLElement>('.ws-card:not([hidden])');
+      const card = root.querySelector<HTMLElement>('.ws-card:not(.ws-wirecard):not([hidden])');
       const confirm = card?.querySelector<HTMLElement>('.ws-card-confirm');
       // A card whose part is off-screen is invisible: don't act on it unseen.
       if (!card || !confirm || card.style.visibility === 'hidden') return false;
@@ -330,6 +339,11 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
           const r = canvasHost.getBoundingClientRect();
           return a ? { x: r.left + a.x, y: r.top + a.y } : null;
         },
+        selectedWire: () => wires.selected(),
+        selectWire: (key: string | null) => wires.select(key),
+        handles: () => (board as unknown as { _handles(): { kind: string; index: number; x: number; y: number }[] })._handles(),
+        wirePath: (key: string) => store.get().project?.sidecar.wirePaths[key] ?? null,
+        netColor: (net: string) => store.get().project?.doc.nets[net]?.color ?? null,
         wireTop: () => (board as unknown as { _wireTop(): number })._wireTop(),
         loseContext: () => (board as unknown as { _loseContext(): void })._loseContext(),
       };

@@ -1955,3 +1955,8 @@ body.ws-open { overflow: hidden; }
 .ws-card footer button, .ws-card-confirm button { padding: 3px 9px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, .16); background: rgba(40, 44, 52, .8); color: inherit; cursor: pointer; font: inherit; }
 .ws-card .danger { border-color: rgba(239, 68, 68, .6); }
 .ws-card-confirm { margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, .1); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.ws-wirecard .ws-card-note { margin: 0 0 8px; opacity: .75; }
+.ws-swatches { display: flex; gap: 5px; margin-bottom: 8px; }
+.ws-swatches button { width: 18px; height: 18px; padding: 0; border-radius: 50%; border: 2px solid rgba(255, 255, 255, .25); cursor: pointer; }
+.ws-swatches button.is-on { border-color: #4da3ff; box-shadow: 0 0 0 2px rgba(77, 163, 255, .35); }
+.ws-card-hint { margin: 8px 0 0; font-size: 11px; opacity: .6; }

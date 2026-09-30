@@ -41,7 +41,8 @@ const v3 = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
  * lot is released in a single pass when the view closes.
  */
 export class Kit {
-  private readonly bin: { dispose(): void }[] = [];
+  // A set, so a buffer swapped out while the board is open can leave it again.
+  private readonly bin = new Set<{ dispose(): void }>();
   readonly M: Materials;
 
   constructor() {
@@ -49,8 +50,15 @@ export class Kit {
   }
 
   keep<T extends { dispose(): void }>(x: T): T {
-    this.bin.push(x);
+    this.bin.add(x);
     return x;
+  }
+
+  /** Free `old` now and keep `next` in its place (a drag preview's buffers), so the kit never piles up the ones it replaced. */
+  swap<T extends { dispose(): void }>(old: { dispose(): void }, next: T): T {
+    old.dispose();
+    this.bin.delete(old);
+    return this.keep(next);
   }
 
   std(o: THREE.MeshStandardMaterialParameters): THREE.MeshStandardMaterial {
@@ -71,7 +79,7 @@ export class Kit {
 
   dispose(): void {
     for (const x of this.bin) x.dispose();
-    this.bin.length = 0;
+    this.bin.clear();
   }
 }
 
