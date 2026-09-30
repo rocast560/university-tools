@@ -119,6 +119,9 @@ export function normalizeSidecar(x: unknown): Sidecar {
   }
   if (o.wirePaths && typeof o.wirePaths === 'object') {
     for (const [key, path] of Object.entries(o.wirePaths).slice(0, 1024)) {
+      // JSON.parse makes "__proto__" an own key; assigned here it would set
+      // the object's prototype instead. No wire key can be one of these.
+      if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
       const clean = normalizeWirePath(path);
       if (clean) s.wirePaths[key] = clean;
     }

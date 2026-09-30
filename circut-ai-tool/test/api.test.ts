@@ -75,6 +75,22 @@ describe('REST API', () => {
     expect((await json(`/api/projects/zzz/layout`)).status).toBe(404);
   });
 
+  test('a body that is not a JSON object is a 400 on every layout and edit route, not a 500', async () => {
+    const { app, json, sch } = await setup();
+    const { id } = await (await json('/api/projects/open', { path: sch })).json();
+    const routes = ['layout/options', 'layout/move', 'layout/colors', 'layout/ledcolor', 'layout/wire', 'edit/add', 'edit/connect', 'edit/disconnect', 'edit/remove', 'edit/value'];
+    for (const route of routes) {
+      for (const body of ['null', '[]', '7', '"x"', '{nope']) {
+        const res = await app.request(`/api/projects/${id}/${route}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body });
+        expect(`${route} ${body} ${res.status}`).toBe(`${route} ${body} 400`);
+        expect((await res.json()).error).toMatch(/JSON object/);
+      }
+    }
+    // The routes that always took a missing body as empty still do, null included.
+    expect((await json('/api/projects/open', null)).status).toBe(400);
+    expect((await json(`/api/projects/${id}/sim`, null)).status).toBe(200);
+  });
+
   test('import copies a schematic into the library, opens it, and never overwrites', async () => {
     const { app, work } = await setup();
     const bytes = readFileSync(path.join(FIXTURES, 'PL1_1.kicad_sch'));

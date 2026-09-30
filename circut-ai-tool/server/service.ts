@@ -348,7 +348,9 @@ export class Service {
     if (missing.length) throw new ServiceError(`move_part needs a hole for every pin of ${ref}; missing pin ${missing.join(', pin ')}`);
     const before = { ...p.sidecar.pinned };
     p.sidecar.pinned[ref] = Object.fromEntries(expected.map((pin) => [pin, { col: holes[pin].col, row: holes[pin].row }]));
-    const doc = buildLayoutDoc(p.design, p.sidecar);
+    // Only the engine's verdict is wanted here, so the arc style skips routing
+    // (the rebuild below routes once, as manipulate.ts's drag verdict does).
+    const doc = buildLayoutDoc(p.design, { ...p.sidecar, options: { ...p.sidecar.options, wireStyle: 'arc' } });
     const dropped = doc.warnings.find((w) => w.startsWith(`pinned placement for ${ref} dropped`));
     if (dropped) {
       p.sidecar.pinned = before;
@@ -373,7 +375,7 @@ export class Service {
       return this.rebuild(p);
     }
     const wire = p.doc.wires.find((w) => wireKey(w) === key);
-    if (!wire && path === null && key in p.sidecar.wirePaths) {
+    if (!wire && path === null && Object.hasOwn(p.sidecar.wirePaths, key)) {
       // A shape for a jumper that is gone: let it be forgotten.
       delete p.sidecar.wirePaths[key];
       return this.rebuild(p);

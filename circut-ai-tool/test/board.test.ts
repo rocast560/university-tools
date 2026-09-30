@@ -66,4 +66,14 @@ describe('sidecar', () => {
     expect(normalizeWirePath({ points: [] })).toEqual({ points: [] });
     expect(normalizeWirePath({ points: [{ col: 3, gap: 'c|d', lane: 9 }] })).toBeNull();
   });
+
+  test('wire shapes: a "__proto__", "constructor" or "prototype" key in the file is skipped, never set as the prototype', () => {
+    const good = { points: [{ col: 12.5, gap: 'c|d', lane: 0 }] };
+    // As it arrives from disk: JSON.parse makes "__proto__" an ordinary own key.
+    const raw = JSON.parse(`{"wirePaths": {"__proto__": ${JSON.stringify(good)}, "constructor": ${JSON.stringify(good)}, "prototype": ${JSON.stringify(good)}, "/A|a12|e20": ${JSON.stringify(good)}}}`);
+    const s = normalizeSidecar(raw);
+    expect(Object.getPrototypeOf(s.wirePaths)).toBe(Object.prototype);
+    expect(Object.keys(s.wirePaths)).toEqual(['/A|a12|e20']);
+    expect((s.wirePaths as Record<string, unknown>).points).toBeUndefined();
+  });
 });

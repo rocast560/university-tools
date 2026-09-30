@@ -9,6 +9,7 @@ import { LANE, planToPath, routeWires, wireKey } from '../src/render/route3d.ts'
 import { Events } from '../server/watch.ts';
 import { fakeKicad } from './fake-kicad.ts';
 import { FIXTURES, readFixture } from './smoke.test.ts';
+import { router } from '../src/pipeline.ts';
 
 export async function makeService(opts: { watch?: boolean; watchPollMs?: number; pathMap?: PathMapping[] } = {}) {
   const work = mkdtempSync(path.join(tmpdir(), 'svc-'));
@@ -85,6 +86,23 @@ describe('Service', () => {
     await expect(service.movePart(p.info.id, 'D2', { '1': { col: 5, row: 'T+' }, '2': { col: 6, row: 'T+' } })).rejects.toThrow(/dropped|taken/);
     const reset = await service.resetLayout(p.info.id);
     expect(reset.sidecar.pinned).toEqual({});
+  });
+
+  test('movePart with square wires routes once, for the kept doc, not for its verdict too', async () => {
+    const { service, sch } = await makeService();
+    const p = await service.open(sch);
+    await service.setOptions(p.info.id, { wireStyle: 'orthogonal' });
+    const d2 = p.doc.pinHoles.D2;
+    const was = router.route;
+    let calls = 0;
+    router.route = (...args) => (calls++, was(...args));
+    try {
+      const moved = await service.movePart(p.info.id, 'D2', { '1': { col: d2['1'].col + 3, row: d2['1'].row }, '2': { col: d2['2'].col + 3, row: d2['2'].row } });
+      expect(calls).toBe(1);
+      expect(moved.doc.routes?.length).toBe(moved.doc.wires.length);
+    } finally {
+      router.route = was;
+    }
   });
 
   test('options, colours and simulation', async () => {
