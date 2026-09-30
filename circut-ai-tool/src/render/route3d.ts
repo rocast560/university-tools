@@ -14,7 +14,8 @@
 //      lanes with the left-edge algorithm, ordered so a bundle does not cross
 //      itself where its wires peel off. Wires still sharing a line after that
 //      are ripped up and searched again with sharing made dear, a few rounds.
-//   4. Where two wires still cross, the one laid later humps over.
+//   4. Where two wires still cross, the one laid later humps over, clear of
+//      any hump the lower one is making there.
 //
 // Pure: a function of the wires, the packages, the legs and the saved paths,
 // so the flat board and the 3D board draw the same wires. The old corridor
@@ -58,6 +59,61 @@ export interface RouteInput {
 /** The jacket's radius: 0.56 mm, so 1.1 mm across, like 22 AWG solid-core wire. */
 export const WIRE_R = 4;
 export const WIRE_D = 2 * WIRE_R;
+/** Half the length of a hump one wire diameter high: about two pitches in all. */
+export const HUMP = P;
+/** Half the level top of a hump. */
+const TOP_HALF = HUMP / 3;
+/**
+ * Ramp gradient, the same for every hump: one diameter over the outer two
+ * thirds of HUMP, about 34 degrees. A taller hump (over a wire that is itself
+ * humping) is longer rather than steeper, so its ramps stay under the tube's
+ * 45 degree fillet threshold and cost no extra rings.
+ */
+const SLOPE = WIRE_D / (HUMP - TOP_HALF);
+
+/**
+ * How far a wire is raised off the board `s` along its plan: the highest of
+ * its humps there. A hump is a trapezoid, level for TOP_HALF either side of
+ * its lift and ramping down at SLOPE. Here rather than in the tube code so the
+ * router can stack a hump on the one beneath it with the very shape the tube
+ * is drawn with.
+ */
+export function rise(lifts: Lift[], s: number): number {
+  return lifts.reduce((h, l) => Math.max(h, Math.min(l.height, SLOPE * (TOP_HALF + l.height / SLOPE - Math.abs(s - l.at)))), 0);
+}
+
+/**
+ * Every distance along the plan where rise() changes slope: each hump's four
+ * corners, and where one hump's ramp meets another's ramp or top. Sampled at
+ * all of these, a line drawn straight between samples is rise() exactly; with
+ * the corners alone it would cut above the valley between two overlapping
+ * humps, and a wire humping over that valley would sink into it.
+ */
+export function riseBreaks(lifts: Lift[]): number[] {
+  // Each hump as three pieces, f(s) = m * s + c on [lo, hi].
+  const pieces = lifts.map((l) => {
+    const foot = TOP_HALF + l.height / SLOPE;
+    return [
+      { lo: l.at - foot, hi: l.at - TOP_HALF, m: SLOPE, c: -SLOPE * (l.at - foot) },
+      { lo: l.at - TOP_HALF, hi: l.at + TOP_HALF, m: 0, c: l.height },
+      { lo: l.at + TOP_HALF, hi: l.at + foot, m: -SLOPE, c: SLOPE * (l.at + foot) },
+    ];
+  });
+  const out: number[] = [];
+  for (const [up, top, down] of pieces) out.push(up.lo, top.lo, top.hi, down.hi);
+  for (let i = 0; i < pieces.length; i++) {
+    for (let j = i + 1; j < pieces.length; j++) {
+      for (const p of pieces[i]) {
+        for (const q of pieces[j]) {
+          if (p.m === q.m) continue;
+          const s = (q.c - p.c) / (p.m - q.m);
+          if (s > Math.max(p.lo, q.lo) && s < Math.min(p.hi, q.hi)) out.push(s);
+        }
+      }
+    }
+  }
+  return out;
+}
 /** Lane pitch: one wire diameter and a hair of air, which is half a hole pitch, so every lane sits on one grid. */
 export const LANE = P / 2;
 /**
@@ -823,18 +879,25 @@ export function routeWires(input: RouteInput, saved: Record<string, WirePath> = 
   }
   for (const i of auto) routes[i].plan = final[i];
 
-  // 4. Humps: of each crossing pair, the wire laid later goes over.
+  // 4. Humps: of each crossing pair, the wire laid later goes over, one
+  // diameter above wherever the lower wire is there. The lower one may itself
+  // be humping over a third wire; its lifts are all in by now, because every
+  // wire beneath it in the layer order was paired with it on an earlier pass.
   const layer = [...fixed, ...auto];
   for (let li = 0; li < layer.length; li++) {
+    const under = routes[layer[li]];
+    const along: number[] = [0];
+    for (let t = 1; t < under.plan.length; t++) along.push(along[t - 1] + Math.abs(under.plan[t][0] - under.plan[t - 1][0]) + Math.abs(under.plan[t][1] - under.plan[t - 1][1]));
     for (let lj = li + 1; lj < layer.length; lj++) {
-      const under = routes[layer[li]].plan;
       const over = routes[layer[lj]];
       let before = 0;
       for (let s = 0; s + 1 < over.plan.length; s++) {
         const [a, b] = [over.plan[s], over.plan[s + 1]];
-        for (let t = 0; t + 1 < under.length; t++) {
-          const hit = crossing(a, b, under[t], under[t + 1]);
-          if (hit) over.lifts.push({ at: before + Math.abs(hit[0] - a[0]) + Math.abs(hit[1] - a[1]), height: WIRE_D });
+        for (let t = 0; t + 1 < under.plan.length; t++) {
+          const hit = crossing(a, b, under.plan[t], under.plan[t + 1]);
+          if (!hit) continue;
+          const below = rise(under.lifts, along[t] + Math.abs(hit[0] - under.plan[t][0]) + Math.abs(hit[1] - under.plan[t][1]));
+          over.lifts.push({ at: before + Math.abs(hit[0] - a[0]) + Math.abs(hit[1] - a[1]), height: WIRE_D + below });
         }
         before += Math.abs(b[0] - a[0]) + Math.abs(b[1] - a[1]);
       }

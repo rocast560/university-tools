@@ -497,9 +497,12 @@ const SCENARIOS: Record<string, (page: CDP, id: string) => Promise<void>> = {
     try {
       await open3d(page);
       await page.until(`__e3d.routes() && __e3d.routes().length === __e3d.wires().length`, 'routed square wires');
-      // Flat: the centre line sits one radius up, a hump adds one diameter, the jacket one more radius.
+      // Flat: the centre line sits one radius up and the jacket reaches one more radius. A hump is one
+      // diameter over whatever it crosses, and the wire it crosses may itself be humping over a third,
+      // so humps stack. No crossing on this board is more than two deep (its highest lift is 14), so
+      // the bound allows two diameters: 4 + 2 * 8 + 4, plus a hair.
       const top = await page.eval<number>(`__e3d.wireTop()`);
-      if (!(top > 0 && top <= 4 + 8 + 4 + 0.5)) throw new Error(`the highest jacket reaches y = ${top}; flat wires stay under 16.5`);
+      if (!(top > 0 && top <= 4 + 2 * 8 + 4 + 0.5)) throw new Error(`the highest jacket reaches y = ${top}; flat wires stay under 24.5`);
       // The page's flat board draws the very same paths.
       const same = await page.eval<boolean>(
         `(() => { const d = [...document.querySelectorAll('#board .wire')].map((g) => g.querySelectorAll('path')[1]?.getAttribute('d')); const want = __e3d.routes().map((p) => p.map(([x, y], k) => (k ? 'L ' : 'M ') + x + ' ' + y).join(' ')); return d.length === want.length && d.every((v, i) => v === want[i]); })()`,

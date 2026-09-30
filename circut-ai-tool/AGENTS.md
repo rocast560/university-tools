@@ -14,7 +14,7 @@ Guidance for AI coding agents working in this directory. People should start wit
 - `src/edit/placement.ts`: pure placement rules (validity, shorts, rotate, flip). Shared by the 3D editor and future tools.
 - `server/`: Hono API (`server/api.ts`), `Service` (`server/service.ts`), MCP server (`server/mcp.ts`).
 - `client/`: vanilla TS SPA. `board.ts` is the flat board; `board3d.ts` and `board3d-parts.ts` are the three.js scene.
-- `src/render/route3d.ts`: pure router for square wires: A* over a half-pitch lattice, lane packing, rip-up rounds, humps at crossings, saved shapes (`pathToPlan`, `planToPath`, `shapePlan`, `simplify`). `ortho.ts` is only its fallback.
+- `src/render/route3d.ts`: pure router for square wires: A* over a half-pitch lattice, lane packing, rip-up rounds, humps at crossings (each one diameter over the lower wire's own height there; `rise` and `riseBreaks` are the hump shape, shared with the tube), saved shapes (`pathToPlan`, `planToPath`, `shapePlan`, `simplify`). `ortho.ts` is only its fallback.
 - `src/edit/wireshape.ts`: pure hand edits to a wire plan (handles, snap, move a run or a bend, add or remove a bend pair).
 - `client/wiretube-math.ts` (pure) and `client/wiretube.ts` (three.js): the flat jumper tube. Frames are computed on the full line, bends are filleted in 15 degree steps (ramp corners under 45 degrees are left sharp), jacket 10 sides, tin 8.
 - `client/editor3d/`: the 3D editor.

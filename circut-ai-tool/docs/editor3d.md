@@ -70,7 +70,7 @@ The Delete key only works when the card is visible on screen and you are not typ
 
 The **Wires** button switches between curved arcs and square wires. Square wires are the ones you can shape.
 
-Square wires lie flat on the board, the way a carefully hand-wired board looks: straight up out of each hole, down onto the plastic, along the gaps between the rows with tight square bends, and back down into the other hole. They never cross a chip. Wires that share a gap run side by side in lanes, ordered so that a bundle does not cross itself where its wires peel off. Where two wires still cross, the one laid later hops over the other. The flat board's square view draws exactly the same paths.
+Square wires lie flat on the board, the way a carefully hand-wired board looks: straight up out of each hole, down onto the plastic, along the gaps between the rows with tight square bends, and back down into the other hole. They never cross a chip. Wires that share a gap run side by side in lanes, ordered so that a bundle does not cross itself where its wires peel off. Where two wires still cross, the one laid later hops over the other, clear of any hop the lower one is making there. The flat board's square view draws exactly the same paths.
 
 Click a wire to select it. Its net is followed softly, an accent line runs along it, and the wire card opens beside it:
 

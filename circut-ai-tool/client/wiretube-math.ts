@@ -9,8 +9,7 @@
 //
 // Pure (no three, no DOM), so it is unit tested.
 
-import type { Lift, Point } from '../src/render/route3d.ts';
-import { P } from '../src/render/geometry.ts';
+import { rise, riseBreaks, type Lift, type Point } from '../src/render/route3d.ts';
 
 export type V3 = [number, number, number];
 
@@ -22,8 +21,6 @@ export const STUB_R = 3;
 export const ARC_STEP = Math.PI / 12;
 /** Bare wire showing above the board at each end, as a stripped jumper has. */
 export const STRIP = 7;
-/** Half the length of a hump over another wire: about two pitches in all. */
-export const HUMP = P;
 /** Turns below this are not filleted. */
 const SHALLOW = Math.PI / 4;
 
@@ -61,14 +58,13 @@ export function centreLine(plan: Point[], lifts: Lift[], base: number, endY: num
     const k = at[i] > at[i - 1] ? (s - at[i - 1]) / (at[i] - at[i - 1]) : 0;
     return [plan[i - 1][0] + (plan[i][0] - plan[i - 1][0]) * k, plan[i - 1][1] + (plan[i][1] - plan[i - 1][1]) * k];
   };
-  // A hump is a trapezoid: up over the outer third, level over the middle.
-  const rise = (s: number) => lifts.reduce((h, l) => Math.max(h, l.height * Math.min(1, Math.max(0, (HUMP - Math.abs(s - l.at)) / (HUMP * (2 / 3))))), 0);
   const keys = new Set<number>(at);
-  for (const l of lifts) for (const d of [-HUMP, -HUMP / 3, HUMP / 3, HUMP]) keys.add(Math.min(total, Math.max(0, l.at + d)));
+  // Every corner of the hump profile, so the straight lines between samples are rise() exactly.
+  for (const s of riseBreaks(lifts)) keys.add(Math.min(total, Math.max(0, s)));
   const out: V3[] = [[plan[0][0], endY, plan[0][1]]];
   for (const s of [...keys].sort((p, q) => p - q)) {
     const [x, z] = where(s);
-    out.push([x, base + rise(s), z]);
+    out.push([x, base + rise(lifts, s), z]);
   }
   out.push([plan[plan.length - 1][0], endY, plan[plan.length - 1][1]]);
   return dropCollinear(out);

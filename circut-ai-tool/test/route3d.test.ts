@@ -6,6 +6,7 @@ import { wirePolylines } from '../src/render/ortho.ts';
 import { handles, moveSegment } from '../src/edit/wireshape.ts';
 import { checkPlan, GAPS, LANE, nodeKey, pathToPlan, planToPath, routeWires, shapePlan, takenNodes, wireKey, WIRE_D, type Point, type WireRoute } from '../src/render/route3d.ts';
 import type { LayoutDoc } from '../src/pipeline.ts';
+import { centreLine, type V3 } from '../client/wiretube-math.ts';
 import { docs, FIXTURES } from './route-fixtures.ts';
 
 const routed = Object.fromEntries(Object.entries(docs).map(([name, doc]) => [name, routeWires(doc)]));
@@ -86,7 +87,7 @@ describe('routeWires on the fixtures', () => {
       }
     });
 
-    test(`${name}: every crossing has exactly one hump, one wire diameter high`, () => {
+    test(`${name}: every crossing has exactly one hump, at least one wire diameter high`, () => {
       const plans = routes.map((r) => r.plan);
       let crossings = 0;
       for (let i = 0; i < plans.length; i++) {
@@ -104,7 +105,45 @@ describe('routeWires on the fixtures', () => {
       }
       const lifts = routes.flatMap((r) => r.lifts);
       expect(lifts.length).toBe(crossings);
-      expect(lifts.every((l) => l.height === WIRE_D)).toBe(true);
+      expect(lifts.every((l) => l.height >= WIRE_D)).toBe(true);
+    });
+
+    test(`${name}: at every crossing the drawn wires are at least a diameter apart, centre to centre`, () => {
+      // The tube's own centre lines, so a hump drawn over the valley between
+      // two humps is measured as drawn, not as the router meant it.
+      const lines = routes.map((r) => centreLine(r.plan, r.lifts, 0, -4));
+      const heightAt = (line: V3[], [x, z]: Point) => {
+        for (let k = 0; k + 1 < line.length; k++) {
+          const [a, b] = [line[k], line[k + 1]];
+          const onX = Math.abs(a[0] - b[0]) < 0.01 && Math.abs(x - a[0]) < 0.01 && z >= Math.min(a[2], b[2]) - 0.01 && z <= Math.max(a[2], b[2]) + 0.01;
+          const onZ = Math.abs(a[2] - b[2]) < 0.01 && Math.abs(z - a[2]) < 0.01 && x >= Math.min(a[0], b[0]) - 0.01 && x <= Math.max(a[0], b[0]) + 0.01;
+          if (!onX && !onZ) continue;
+          const span = Math.abs(b[0] - a[0]) + Math.abs(b[2] - a[2]);
+          return span < 1e-9 ? a[1] : a[1] + ((b[1] - a[1]) * (Math.abs(x - a[0]) + Math.abs(z - a[2]))) / span;
+        }
+        throw new Error(`no point of the line lies over ${x}, ${z}`);
+      };
+      const tight: string[] = [];
+      let crossings = 0;
+      for (let i = 0; i < routes.length; i++) {
+        for (let j = i + 1; j < routes.length; j++) {
+          const [p, q] = [routes[i].plan, routes[j].plan];
+          for (let s = 0; s + 1 < p.length; s++) {
+            for (let t = 0; t + 1 < q.length; t++) {
+              const [a, b, c, d] = [p[s], p[s + 1], q[t], q[t + 1]];
+              const ah = a[1] === b[1];
+              if (ah === (c[1] === d[1])) continue;
+              const [h1, h2, v1, v2] = ah ? [a, b, c, d] : [c, d, a, b];
+              if (!(v1[0] > Math.min(h1[0], h2[0]) + 0.5 && v1[0] < Math.max(h1[0], h2[0]) - 0.5 && h1[1] > Math.min(v1[1], v2[1]) + 0.5 && h1[1] < Math.max(v1[1], v2[1]) - 0.5)) continue;
+              crossings++;
+              const gap = Math.abs(heightAt(lines[i], [v1[0], h1[1]]) - heightAt(lines[j], [v1[0], h1[1]]));
+              if (gap < WIRE_D - 1e-9) tight.push(`${wireKey(doc.wires[i])} x ${wireKey(doc.wires[j])}: ${gap}`);
+            }
+          }
+        }
+      }
+      expect(crossings).toBe(routes.flatMap((r) => r.lifts).length);
+      expect(tight).toEqual([]);
     });
 
     test(`${name}: routing twice gives the same paths`, () => {

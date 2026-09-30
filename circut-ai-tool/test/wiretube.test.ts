@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { ARC_STEP, BEND_R, centreLine, dist, dropCollinear, fillet, mergeTubes, pathLength, STRIP, trim, tubeData, wireShape, type TubeData, type V3 } from '../client/wiretube-math.ts';
-import { WIRE_D, WIRE_R, type Point } from '../src/render/route3d.ts';
+import { HUMP, rise, WIRE_D, WIRE_R, type Point } from '../src/render/route3d.ts';
 
 const OPTS = { base: WIRE_R, endY: -4, top: 0, radius: WIRE_R, core: 2.1, sides: 10, coreSides: 8 };
 /** A typical jumper: up out of a hole, along a corridor, down into another. */
@@ -22,6 +22,21 @@ describe('centreLine', () => {
     const high = line.filter((p) => p[1] === top).map((p) => p[0]);
     expect(Math.min(...high)).toBeCloseTo(220 - 6, 5);
     expect(Math.max(...high)).toBeCloseTo(220 + 6, 5);
+  });
+
+  test('a taller hump is longer, not steeper, and two that overlap are drawn with their valley, not a chord across it', () => {
+    const plan: Point[] = [[40, 84], [40, 93], [400, 93], [400, 84]];
+    const lifts = [{ at: 180, height: WIRE_D }, { at: 208, height: 2 * WIRE_D }];
+    const line = centreLine(plan, lifts, 0, -4).filter((p) => p[2] === 93);
+    // Every point of the flat part is rise() exactly, and so is every point between them.
+    for (const p of line) expect(p[1]).toBeCloseTo(rise(lifts, p[0] - 31), 9);
+    for (let i = 0; i + 1 < line.length; i++) {
+      const mid = (line[i][0] + line[i + 1][0]) / 2;
+      expect((line[i][1] + line[i + 1][1]) / 2).toBeCloseTo(rise(lifts, mid - 31), 9);
+    }
+    // Same gradient on both humps: the taller one's foot is twice as far out.
+    expect(rise([{ at: 0, height: 2 * WIRE_D }], HUMP / 3 + 2 * (HUMP * (2 / 3)))).toBe(0);
+    expect(rise([{ at: 0, height: 2 * WIRE_D }], HUMP / 3 + (HUMP * (2 / 3)))).toBeCloseTo(WIRE_D, 9);
   });
 });
 
