@@ -17,7 +17,7 @@ Closing while the 3D library is still loading is safe. Undo history is discarded
 
 - Drag on empty board, or on any part that is not selected, to orbit.
 - Right-drag pans. Scroll zooms.
-- **F** with a part selected flies the camera to frame it. Double-clicking a part selects it and does the same.
+- **F** with a part or a wire selected flies the camera to frame it. Double-clicking a part selects it and does the same.
 - **F** with nothing selected, or the **Fly through** button, enters fly mode: W, A, S, D move, the mouse looks, Space and C go up and down, Shift sprints. **F** or **Esc** returns to orbit.
 - **F** is ignored while a drag is in progress.
 - The **Wires** button in the bar switches jumpers between curved arcs and square-cornered runs, the same setting as the page toolbar's. The board rebuilds in place and the camera stays put.

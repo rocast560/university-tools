@@ -292,7 +292,11 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
       const q = store.get().project;
       if (e.key === 'f' || e.key === 'F') {
         e.preventDefault();
+        // F frames the selection, part or wire (spec section 2); only with nothing selected does it fly.
+        const wire = wires.selected();
+        const index = wire && q ? q.doc.wires.findIndex((w) => wireKey(w) === wire) : -1;
         if (q?.selectedRef) board.focus(q.selectedRef);
+        else if (index >= 0) board.focusWire(index);
         else board.setFly(true);
       } else if (e.key === 'Escape') {
         e.preventDefault();

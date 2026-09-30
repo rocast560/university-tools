@@ -174,6 +174,10 @@ export function attachWireEdit(ws: Workspace): WireEdit {
   let lastDoc = store.get().project?.doc;
   let handlesFor = '';
   let placed = '';
+  /** The wire and doc the accent line was last drawn for: every store change repaints, but the line need not be rebuilt. */
+  let lineFor: { index: number; doc: LayoutDoc } | null = null;
+  /** A kept shape on its way to the server: a new drag now would start from the shape being replaced. */
+  let saving = false;
 
   const renderCard = (c: NonNullable<ReturnType<typeof current>>) => {
     const key = `${selected}|${docSeq}|${c.square}`;
@@ -200,14 +204,18 @@ export function attachWireEdit(ws: Workspace): WireEdit {
     if (!c) {
       selected = null;
       bend = null;
-      board.setWireSelected(null);
+      if (lineFor) board.setWireSelected(null);
+      lineFor = null;
       if (handlesFor) board.setHandles([]);
       handlesFor = '';
       card.hidden = true;
       delete card.dataset.wire;
       return;
     }
-    board.setWireSelected(c.index);
+    if (lineFor?.index !== c.index || lineFor.doc !== c.p.doc) {
+      lineFor = { index: c.index, doc: c.p.doc };
+      board.setWireSelected(c.index);
+    }
     const list = c.square && c.route && !c.fallback && !drag ? handlesOf(c.route.plan) : [];
     const key = `${JSON.stringify(list)}|${bend}`;
     if (key !== handlesFor) {
@@ -262,7 +270,13 @@ export function attachWireEdit(ws: Workspace): WireEdit {
       return paint();
     }
     const before = p.sidecar.wirePaths[key] ?? null;
-    const ok = await history.execute(wirePathCommand(key, before, v.path, `${label} the ${wire.net} jumper`));
+    saving = true;
+    let ok = false;
+    try {
+      ok = await history.execute(wirePathCommand(key, before, v.path, `${label} the ${wire.net} jumper`));
+    } finally {
+      saving = false;
+    }
     // A kept shape rebuilds the board from the new doc; a refusal needs the routed shape back.
     if (!ok && store.get().project?.doc === p.doc) {
       board.setWirePreview(index, null);
@@ -307,7 +321,8 @@ export function attachWireEdit(ws: Workspace): WireEdit {
     if (e.button !== 0 || board.flying || drag) return;
     press = { x: e.clientX, y: e.clientY, t: performance.now() };
     const c = current();
-    if (!c?.square || !c.route || c.fallback) return;
+    // Mid-save the handles still sit on the shape being replaced; the press orbits instead.
+    if (!c?.square || !c.route || c.fallback || saving) return;
     const h = board.pickHandle(e);
     const handle = h && handlesOf(c.route.plan).find((k) => k.kind === h.kind && k.index === h.index);
     if (!handle) return;

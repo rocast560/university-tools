@@ -531,6 +531,12 @@ const SCENARIOS: Record<string, (page: CDP, id: string) => Promise<void>> = {
       await page.until(`document.querySelector('.ws-wirecard:not([hidden])')?.dataset.wire === ${JSON.stringify(hit.key)}`, 'the wire card');
       await page.until(`__e3d.handles().length > 0`, 'the handles');
       await page.until(`document.querySelector('.ws-legend .is-on')?.dataset.legend === ${JSON.stringify(hit.net)}`, 'the click to follow the net softly');
+      // F frames the selected wire: the camera glides (the wire moves on screen) and fly mode stays off.
+      const before = await page.eval<{ x: number; y: number }>(`__e3d.wireScreen(${hit.index})`);
+      await page.key('f', 'KeyF');
+      if (await page.eval<boolean>(`document.querySelector('.ws-hint').textContent.startsWith('WASD')`)) throw new Error('F with a wire selected entered fly mode');
+      await page.until(`(() => { const a = __e3d.wireScreen(${hit.index}); return a && Math.hypot(a.x - ${before.x}, a.y - ${before.y}) > 2; })()`, 'F to glide the camera to the wire');
+      if ((await page.eval<string | null>(`__e3d.selectedWire()`)) !== hit.key) throw new Error('F dropped the wire selection');
       await page.key('Escape', 'Escape');
       await page.until(`__e3d.selectedWire() === null && document.querySelector('.ws-wirecard').hidden`, 'Esc to drop the wire');
       await page.until(`!document.querySelector('.ws-legend .is-on')`, 'dropping the wire to release its net');

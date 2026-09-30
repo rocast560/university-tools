@@ -192,6 +192,8 @@ export interface Board3D {
   anchor(ref: string): { x: number; y: number; visible: boolean } | null;
   /** Glide the camera to frame one part. */
   focus(ref: string): void;
+  /** Glide the camera to frame one jumper, by its index in `doc.wires`. */
+  focusWire(index: number): void;
   /** Called once per rendered frame. Returns an unsubscribe. */
   onFrame(fn: () => void): () => void;
   /** The canvas, so the workspace can listen on it before OrbitControls does. */
@@ -939,15 +941,28 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
 
   // ---------- focus ----------
   let glide: { from: THREE.Vector3; to: THREE.Vector3; fromT: THREE.Vector3; toT: THREE.Vector3; t0: number } | null = null;
-  const focus = (ref: string) => {
-    const obj = c.partObj.get(ref);
-    if (!obj || fly.active) return;
-    box.setFromObject(obj);
+  /** Glide to frame whatever `box` holds. */
+  const glideToBox = () => {
     const f = frameBox({ min: box.min.toArray(), max: box.max.toArray() }, camera.fov, camera.aspect, 1.6);
     const toT = new THREE.Vector3(...f.target);
     // Keep the current viewing direction, only closer.
     const dir = camera.position.clone().sub(controls.target).normalize();
     glide = { from: camera.position.clone(), to: toT.clone().addScaledVector(dir, f.distance), fromT: controls.target.clone(), toT, t0: performance.now() };
+  };
+  const focus = (ref: string) => {
+    const obj = c.partObj.get(ref);
+    if (!obj || fly.active) return;
+    box.setFromObject(obj);
+    glideToBox();
+  };
+  // A jumper's box is its centre line's, grown by the jacket's radius.
+  const focusWire = (index: number) => {
+    const line = c.lines[index];
+    if (!line?.length || fly.active) return;
+    box.makeEmpty();
+    for (const [x, y, z] of line) box.expandByPoint(new THREE.Vector3(x, y, z));
+    box.expandByScalar(WIRE_R);
+    glideToBox();
   };
   // Any orbit input takes the camera back from a glide in progress.
   const stopGlide = () => (glide = null);
@@ -1147,6 +1162,7 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
     setStripTint,
     anchor,
     focus,
+    focusWire,
     onFrame: (fn) => (frameFns.add(fn), () => frameFns.delete(fn)),
     dom,
     setOrbit,
