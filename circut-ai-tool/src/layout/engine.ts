@@ -117,7 +117,7 @@ class Engine {
   constructor(
     private d: Design,
     private sidecar: Sidecar,
-    private forceBoard: 'half' | 'full' | null,
+    private forceBoard: 'half' | 'full' | 'double' | 'stacked' | null,
   ) {
     this.opt = sidecar.options;
     for (const [ref, comp] of d.components) {
@@ -215,11 +215,12 @@ class Engine {
     let maxPinned = 0;
     for (const holes of Object.values(this.sidecar.pinned)) for (const h of Object.values(holes)) maxPinned = Math.max(maxPinned, h.col);
     need = Math.max(need, maxPinned + 3);
-    const kind = this.forceBoard ?? (this.opt.board !== 'auto' ? this.opt.board : need <= 30 ? 'half' : 'full');
-    const cols = kind === 'half' ? 30 : 63;
-    if (need > cols) throw new LayoutError(`the packages need about ${need} columns; a ${kind}-size board has ${cols}. Switch the board option to full or unpin parts.`);
-    const split = this.opt.railSplit ?? kind === 'full';
-    this.board = new Board(cols, kind, split ? 30 : null, 6);
+    const kind = this.forceBoard ?? (this.opt.board !== 'auto' ? this.opt.board : need <= 30 ? 'half' : need <= 63 ? 'full' : 'double');
+    const cols = kind === 'half' ? 30 : kind === 'full' ? 63 : 126;
+    const tiers = kind === 'stacked' ? 2 : 1;
+    if (need > cols) throw new LayoutError(`the packages need about ${need} columns; a ${kind}-size board has ${cols}. Switch the board option to ${kind === 'half' ? 'full' : 'double or stacked'} or unpin parts.`);
+    const split = this.opt.railSplit ?? kind !== 'half';
+    this.board = new Board(cols, kind, split ? (cols === 126 ? 63 : 30) : null, 6, tiers);
   }
 
   private get b(): Board {
@@ -343,7 +344,7 @@ class Engine {
   // ---------- packages ----------
 
   private spanFree(col: number, width: number): boolean {
-    if (col < 1 || col + width - 1 > this.b.cols) return false;
+    if (col < 1 || col + width - 1 > this.b.cols || !this.b.sameTier(col, col + width - 1)) return false;
     for (let c = col - 2; c <= col + width + 1; c++) if (this.pkgCols.has(c)) return false;
     for (let c = col; c < col + width; c++) if (!this.occ.isFree(hole(c, 'e')) || !this.occ.isFree(hole(c, 'f'))) return false;
     return true;
@@ -375,7 +376,7 @@ class Engine {
    */
   private findModuleColumn(pins: number, owner: string): number {
     for (let col = this.b.cols - 2 - pins + 1; col >= 3; col--) {
-      let ok = true;
+      let ok = this.b.sameTier(col - L3_BOARD.endMargin, col + pins - 1 + L3_BOARD.endMargin);
       for (let c = col - 2; c <= col + pins + 1 && ok; c++) if (this.pkgCols.has(c)) ok = false;
       for (let c = col; c < col + pins && ok; c++) if (!this.occ.isFree(hole(c, 'a'))) ok = false;
       for (const h of this.moduleBodyHoles(col, 'a')) if (!this.occ.isFree(h)) ok = false;
@@ -479,7 +480,7 @@ class Engine {
 
   private freeBlock(half: Half, near: number, width: number, owner: string, extra: (c: number) => boolean = () => true): number {
     const rows = half === 'T' ? TOP_ROWS : BOT_ROWS;
-    const ok = (c: number) => c >= 1 && c + width - 1 <= this.b.cols && extra(c) && Array.from({ length: width }, (_, i) => c + i).every((cc) => !this.pkgCols.has(cc) && rows.every((r) => this.occ.isFree(hole(cc, r))));
+    const ok = (c: number) => c >= 1 && c + width - 1 <= this.b.cols && this.b.sameTier(c, c + width - 1) && extra(c) && Array.from({ length: width }, (_, i) => c + i).every((cc) => !this.pkgCols.has(cc) && rows.every((r) => this.occ.isFree(hole(cc, r))));
     const dists = [2, 3, 1, ...Array.from({ length: this.b.cols }, (_, i) => i + 4)];
     for (const dist of dists) for (const c of [near + dist, near - dist - width + 1]) if (ok(c)) return c;
     if (ok(near)) return near;
@@ -610,20 +611,20 @@ class Engine {
     const base = this.spanClear(row, col, col) ? 0 : 50;
     if (toRail) return { x, y, strip, row, hb: { kind: 'rail' }, cost: base };
     const near = (this.homes.get(y.net) ?? [])
-      .filter((s) => stripHalf(s) === half && stripCol(s) !== col && Math.abs(stripCol(s) - col) <= 2)
+      .filter((s) => stripHalf(s) === half && stripCol(s) !== col && Math.abs(stripCol(s) - col) <= 2 && this.b.sameTier(stripCol(s), col))
       .sort((a, b) => Math.abs(stripCol(a) - col) - Math.abs(stripCol(b) - col));
     if (near.length && this.freeRows(near[0], MID_ROWS).length) return { x, y, strip, row, hb: { kind: 'near', strip: near[0] }, cost: base + Math.abs(stripCol(near[0]) - col) };
     // The body lies along the row from the start hole to the new column, so
     // that run must not cross another body in the row, and it should be no
     // longer than a part's leads comfortably reach.
     try {
-      const c = this.freeBlock(half, col, 1, ref, (cc) => this.spanClear(row, col, cc) && Math.abs(cc - col) <= MAX_LEAD_SPAN);
+      const c = this.freeBlock(half, col, 1, ref, (cc) => this.spanClear(row, col, cc) && Math.abs(cc - col) <= MAX_LEAD_SPAN && this.b.sameTier(col, cc));
       return { x, y, strip, row, hb: { kind: 'col', col: c }, cost: base + Math.abs(c - col) };
     } catch (e) {
       if (!(e instanceof LayoutError)) throw e;
     }
     try {
-      const c = this.freeBlock(half, col, 1, ref);
+      const c = this.freeBlock(half, col, 1, ref, (cc) => this.b.sameTier(col, cc));
       return { x, y, strip, row, hb: { kind: 'col', col: c }, cost: 100 + base + Math.abs(c - col) };
     } catch (e) {
       if (!(e instanceof LayoutError)) throw e;

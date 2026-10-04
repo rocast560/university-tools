@@ -9,7 +9,8 @@ export interface PartAlias {
 
 export const PART_ALIASES: PartAlias[] = [
   { alias: 'L3 Auxiliary', libId: 'ECE2300L:L3_Auxiliary', description: 'Instructor Lab 3 board: WXYZ inverses and active-low a-d; 15-position labeled header, position 7 reserved', defaultValue: 'L3_Auxiliary' },
-  { alias: 'common anode 7-segment display', libId: 'Display_Character:SA39-11EWA', description: 'Common-anode display for Lab 3; verify the pinout of your actual display', defaultValue: 'SA39-11EWA' },
+  { alias: 'common anode 7-segment display', libId: 'Display_Character:SA39-11EWA', description: 'Kingbright 0.39 inch common-anode display (a=10 b=9 c=7 d=5 e=4 f=2 g=1 DP=6 CA=3,8); the lab kit display is a 5161BS, use that alias instead', defaultValue: 'SA39-11EWA' },
+  { alias: '5161BS', libId: 'Display_Character:KCSA02-105', description: '0.56 inch common-anode display from the lab kit, 5161BS pinout (a=7 b=6 c=4 d=2 e=1 f=9 g=10 DP=5 CA=3,8); pin 1 is bottom left with the decimal point at bottom right', defaultValue: '5161BS' },
   { alias: 'resistor', libId: 'Device:R', description: 'resistor, 2 leads', defaultValue: '1k' },
   { alias: 'capacitor', libId: 'Device:C', description: 'ceramic or film capacitor, 2 leads', defaultValue: '100n' },
   { alias: 'electrolytic capacitor', libId: 'Device:C_Polarized', description: 'polarised capacitor, + lead on pin 1', defaultValue: '10u' },

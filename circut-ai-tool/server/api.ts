@@ -120,6 +120,10 @@ export function createApi(service: Service, events: Events<ProjectEvent>, tunnel
     if (!body.net) throw new ServiceError('body must be {"net": "/A", "color": "#rrggbb" | null}');
     return c.json((await service.setColor(c.req.param('id'), body.net, body.color ?? null)).doc);
   });
+  api.post('/projects/:id/layout/tests', async (c) => {
+    const body = (await c.req.json()) as { tests?: unknown };
+    return c.json((await service.setTests(c.req.param('id'), body.tests)).sidecar.tests);
+  });
   api.post('/projects/:id/layout/ledcolor', async (c) => {
     const body = (await c.req.json()) as { ref?: string; color?: string | null };
     if (!body.ref) throw new ServiceError('body must be {"ref": "D1", "color": "blue" | null}');

@@ -1,6 +1,7 @@
 // Types shared by the engine, checks, simulator, guide, renderer and client.
 
 import { LED_COLOURS, type LedColour } from '../parts/led.ts';
+import { normalizeTests, type SimTest } from '../sim/test-spec.ts';
 
 export type Row = 'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g' | 'h' | 'i' | 'j' | 'T+' | 'T-' | 'B+' | 'B-';
 
@@ -10,7 +11,7 @@ export interface Hole {
 }
 
 export interface Options {
-  board: 'auto' | 'half' | 'full';
+  board: 'auto' | 'half' | 'full' | 'double' | 'stacked';
   railSplit: boolean | null;
   dipSwitchPositions: number;
   packageOrder: string[];
@@ -34,11 +35,13 @@ export interface Sidecar {
    * raises that LED's forward voltage and drops its current.
    */
   ledColors: Record<string, LedColour>;
+  /** Saved test cases for the Simulate panel: switch settings and what the board should then show. */
+  tests: SimTest[];
 }
 
 export const defaultOptions = (): Options => ({ board: 'auto', railSplit: null, dipSwitchPositions: 0, packageOrder: [], substitutions: {}, wireStyle: 'arc' });
 
-export const emptySidecar = (): Sidecar => ({ version: 1, options: defaultOptions(), pinned: {}, colors: {}, placed: {}, ledColors: {} });
+export const emptySidecar = (): Sidecar => ({ version: 1, options: defaultOptions(), pinned: {}, colors: {}, placed: {}, ledColors: {}, tests: [] });
 
 const ROWS = new Set(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'T+', 'T-', 'B+', 'B-']);
 
@@ -52,7 +55,7 @@ export function normalizeSidecar(x: unknown): Sidecar {
   if (!x || typeof x !== 'object') return s;
   const o = x as Partial<Sidecar>;
   const opt = (o.options ?? {}) as Partial<Options>;
-  if (opt.board === 'half' || opt.board === 'full') s.options.board = opt.board;
+  if (opt.board === 'half' || opt.board === 'full' || opt.board === 'double' || opt.board === 'stacked') s.options.board = opt.board;
   if (typeof opt.railSplit === 'boolean') s.options.railSplit = opt.railSplit;
   if (Number.isInteger(opt.dipSwitchPositions) && (opt.dipSwitchPositions as number) >= 0) s.options.dipSwitchPositions = opt.dipSwitchPositions as number;
   if (Array.isArray(opt.packageOrder)) s.options.packageOrder = opt.packageOrder.filter((r) => typeof r === 'string');
@@ -78,14 +81,23 @@ export function normalizeSidecar(x: unknown): Sidecar {
   if (o.ledColors && typeof o.ledColors === 'object') {
     for (const [ref, c] of Object.entries(o.ledColors)) if (typeof c === 'string' && (LED_COLOURS as readonly string[]).includes(c)) s.ledColors[ref] = c as LedColour;
   }
+  s.tests = normalizeTests(o.tests);
   return s;
 }
 
 export interface BoardSpec {
   cols: number;
-  kind: 'half' | 'full';
+  /**
+   * double = two full boards end to end; stacked = the same two boards one
+   * above the other. Both number their columns 1-126 straight through, so a
+   * hole name never depends on how the boards are drawn, and split the rails
+   * between the boards.
+   */
+  kind: 'half' | 'full' | 'double' | 'stacked';
   splitCol: number | null;
   railGapEvery: number;
+  /** Boards drawn one above the other; columns wrap every cols / tiers. Absent means 1. */
+  tiers?: number;
 }
 
 export interface SupplyLead {

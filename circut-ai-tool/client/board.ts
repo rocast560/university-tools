@@ -125,7 +125,8 @@ export function mountBoard(container: HTMLElement): () => void {
     if (sw) {
       const k = sw.getAttribute('data-switch')!;
       const switches = { ...p.switches, [k]: !p.switches[k] };
-      store.setProject({ switches });
+      // A hand-flipped switch no longer matches whichever saved test was picked.
+      store.setProject({ switches, simTest: null });
       // The solver has to be told too, or a running simulation carries on
       // with the switch positions it was started with.
       analog.refresh({ ...p, switches });

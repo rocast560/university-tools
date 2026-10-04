@@ -1296,6 +1296,15 @@ th.mono {
 }
 .panel.sim ul.sources label { display: flex; gap: 6px; align-items: center; cursor: pointer; }
 .panel.sim ul.ledcolours select { font: inherit; padding: 2px 4px; }
+.panel.sim .testpick { display: flex; gap: 6px; align-items: center; }
+.panel.sim .testpick select { flex: 1; min-width: 0; font: inherit; padding: 3px 4px; }
+.panel.sim .testcase { margin-top: 6px; padding: 6px 8px; border-left: 3px solid var(--hairline, #eee7d8); font-size: 12px; }
+.panel.sim .testcase p { margin: 2px 0; }
+.panel.sim .testcase.pass { border-left-color: var(--done); }
+.panel.sim .testcase.fail { border-left-color: var(--err); }
+.panel.sim .testcase .verdict { font-weight: 600; }
+.panel.sim .testcase.pass .verdict { color: var(--done); }
+.panel.sim .testcase.fail .verdict { color: var(--err); }
 .panel.sim table.live { width: 100%; border-collapse: collapse; font-size: 12px; }
 .panel.sim table.live th { text-align: left; font-weight: 600; color: var(--ink-muted, #5b6270); font-size: 11px; }
 .panel.sim table.live td, .panel.sim table.live th { padding: 2px 4px; border-bottom: 1px solid var(--hairline, #eee7d8); }

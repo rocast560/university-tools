@@ -5,6 +5,7 @@
 import { displayName } from '../src/netlist.ts';
 import { ledSpec, type LedColour } from '../src/parts/led.ts';
 import type { AnalogState } from '../src/sim/analog/simulator.ts';
+import { runTest, switchesForTest, type SimTest } from '../src/sim/tests.ts';
 import { analog } from './analog.ts';
 import { close3d, is3dOpen, open3d } from './view3d.ts';
 import { api } from './api.ts';
@@ -37,6 +38,7 @@ function sim(p: ProjectState): string {
     <h2>Simulate</h2>
     <p class="muted">A real solve of the board as wired: every net gets a voltage, every part a current. Press Run in the toolbar.</p>
     <div class="simstat"><span class="mono" data-live-clock>0.000 s</span><span class="mono" data-live-status>idle</span></div>
+    ${testsSection(p)}
     <h3>Inputs</h3>${controls}
     ${colours}
     <h3>Faults</h3><div data-live-faults><p class="muted">None.</p></div>
@@ -47,6 +49,61 @@ function sim(p: ProjectState): string {
     <table class="live"><tr><th>Net</th><th>Voltage</th></tr>
     ${nets.map((netName) => `<tr data-net="${esc(netName)}"><td class="mono">${esc(displayName(netName))}</td><td class="mono" data-live-net="${esc(displayName(netName))}">—</td></tr>`).join('')}</table>
   </div>`;
+}
+
+/** What a test expects, in words: the LEDs by their value (SIGN rather than D1) and the digit on each display. */
+function expectText(p: ProjectState, t: SimTest): string {
+  const name = (ref: string) => p.doc.parts.find((x) => x.id === ref)?.value ?? ref;
+  const leds = Object.entries(t.expect?.leds ?? {}).map(([ref, on]) => `${name(ref)} ${on ? 'on' : 'off'}`);
+  const shows = Object.entries(t.expect?.displays ?? {}).map(([ref, d]) => `${ref} shows ${d}`);
+  return [...shows, ...leds].join(', ');
+}
+
+/**
+ * Saved tests: pick one and the switches are set for it, the board shows the
+ * result, and the panel says whether it matches what the test expects. The
+ * pass marks come from the logic simulator, so they are there before Run.
+ */
+function testsSection(p: ProjectState): string {
+  const tests = p.sidecar.tests;
+  if (!tests.length) return '';
+  const model = p.doc.sim.model;
+  const outcomes = tests.map((t) => runTest(model, t));
+  const passing = outcomes.filter((o) => o.pass).length;
+  const cur = p.simTest ?? null;
+  const groups: [string, number[]][] = [];
+  tests.forEach((t, i) => {
+    const g = t.group ?? 'Tests';
+    const last = groups[groups.length - 1];
+    if (last && last[0] === g) last[1].push(i);
+    else groups.push([g, [i]]);
+  });
+  const option = (i: number) => `<option value="${i}" ${cur === i ? 'selected' : ''}>${outcomes[i].pass ? '✓' : '✗'} ${esc(tests[i].name)}</option>`;
+  const select = `<select data-test><option value="" ${cur === null ? 'selected' : ''}>Choose a test to set the switches</option>${groups.map(([g, idx]) => `<optgroup label="${esc(g)}">${idx.map(option).join('')}</optgroup>`).join('')}</select>`;
+  let detail = '';
+  if (cur !== null && tests[cur]) {
+    const t = tests[cur];
+    const o = outcomes[cur];
+    const shown = Object.entries(o.shown).map(([ref, d]) => `${ref} shows ${d}`);
+    const leds = Object.keys(t.expect?.leds ?? {}).map((ref) => `${p.doc.parts.find((x) => x.id === ref)?.value ?? ref} ${o.result.leds[ref] ? 'on' : 'off'}`);
+    detail = `<div class="testcase ${o.pass ? 'pass' : 'fail'}">
+      ${t.note ? `<p class="mono">${esc(t.note)}</p>` : ''}
+      <p><b>Expected:</b> ${esc(expectText(p, t)) || 'nothing recorded'}</p>
+      <p><b>Board:</b> ${esc([...shown, ...leds].join(', '))}</p>
+      <p class="verdict">${o.pass ? 'Pass' : `Fail: ${esc(o.failures.join('; '))}`}</p>
+    </div>`;
+  }
+  return `<h3>Tests</h3>
+    <div class="tests"><div class="testpick">${select}<button type="button" class="btn ghost" data-action="test-prev" ${cur === null || cur === 0 ? 'disabled' : ''}>Prev</button><button type="button" class="btn ghost" data-action="test-next" ${cur === tests.length - 1 ? 'disabled' : ''}>Next</button></div>
+    <p class="muted">${passing} of ${tests.length} pass in the logic simulator.</p>${detail}</div>`;
+}
+
+/** Set the switches for saved test `i` (every other input left open) and tell the solver. */
+function applyTest(p: ProjectState, i: number | null) {
+  if (i === null || !p.sidecar.tests[i]) return store.setProject({ simTest: null });
+  const switches = switchesForTest(p.doc.sim.model, p.sidecar.tests[i]);
+  store.setProject({ simTest: i, switches });
+  analog.refresh({ ...p, switches });
 }
 
 /** The colour override for an LED, falling back to whatever its value says. */
@@ -137,7 +194,7 @@ function options(p: ProjectState): string {
   const o = p.sidecar.options;
   const chips = p.doc.packages.filter((x) => x.kind === 'dip').map((x) => x.id);
   return `<div class="panel options"><h2>Options</h2>
-    <label>Board <select data-opt="board"><option value="auto" ${o.board === 'auto' ? 'selected' : ''}>auto</option><option value="half" ${o.board === 'half' ? 'selected' : ''}>half (30 columns)</option><option value="full" ${o.board === 'full' ? 'selected' : ''}>full (63 columns)</option></select></label>
+    <label>Board <select data-opt="board"><option value="auto" ${o.board === 'auto' ? 'selected' : ''}>auto</option><option value="half" ${o.board === 'half' ? 'selected' : ''}>half (30 columns)</option><option value="full" ${o.board === 'full' ? 'selected' : ''}>full (63 columns)</option><option value="double" ${o.board === 'double' ? 'selected' : ''}>double (2 full boards side by side)</option><option value="stacked" ${o.board === 'stacked' ? 'selected' : ''}>stacked (2 full boards, one above the other)</option></select></label>
     <label>Rail split <select data-opt="railSplit"><option value="null" ${o.railSplit === null ? 'selected' : ''}>auto</option><option value="true" ${o.railSplit === true ? 'selected' : ''}>split</option><option value="false" ${o.railSplit === false ? 'selected' : ''}>continuous</option></select></label>
     <label>DIP switch positions (0 = separate switches) <input type="number" min="0" max="16" data-opt="dipSwitchPositions" value="${o.dipSwitchPositions}"></label>
     <label>Chip order <input data-opt="packageOrder" value="${esc(o.packageOrder.join(' '))}" placeholder="${esc(chips.join(' '))}"></label>
@@ -261,10 +318,15 @@ export function renderPanels(panels: HTMLElement, toolbar: HTMLElement, legend: 
     const sw = t.closest<HTMLInputElement>('input[data-sw]');
     if (sw) {
       const key = sw.dataset.sw!;
-      store.setProject({ switches: { ...p.switches, [key]: sw.checked } });
+      store.setProject({ switches: { ...p.switches, [key]: sw.checked }, simTest: null });
       return void analog.refresh({ ...p, switches: { ...p.switches, [key]: sw.checked } });
     }
     const action = t.closest<HTMLElement>('[data-action]')?.dataset.action;
+    if (action === 'test-prev' || action === 'test-next') {
+      const n = p.sidecar.tests.length;
+      const cur = p.simTest ?? -1;
+      return applyTest(p, Math.min(n - 1, Math.max(0, action === 'test-next' ? cur + 1 : cur - 1)));
+    }
     if (action === 'reset') {
       try {
         const doc = await api.reset(p.id);
@@ -276,6 +338,7 @@ export function renderPanels(panels: HTMLElement, toolbar: HTMLElement, legend: 
   };
   panels.onchange = async (e) => {
     const t = e.target as HTMLInputElement | HTMLSelectElement;
+    if (t.dataset.test !== undefined) return applyTest(p, t.value === '' ? null : Number(t.value));
     const led = t.dataset.ledcolour;
     if (led) {
       try {

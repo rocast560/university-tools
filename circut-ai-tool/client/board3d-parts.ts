@@ -20,7 +20,8 @@ import { ledSpec, ledSpecFor, type LedSpec } from '../src/parts/led.ts';
 import { colourBands } from '../src/parts/resistor.ts';
 import { L3_BOARD, L3_SILK } from '../src/parts/lab3.ts';
 import { archY, MAX_ARCH, WIRE_END_Y } from '../src/render/altitude.ts';
-import { P, ROWY, X0 } from '../src/render/geometry.ts';
+import { P, placeAt, ROWY, tierShift } from '../src/render/geometry.ts';
+import type { BoardSpec } from '../src/layout/types.ts';
 import { positionKey } from '../src/render/index.ts';
 
 /** 1 mm in board units: one 0.1 inch pitch is 18 units. */
@@ -29,8 +30,18 @@ export const MM = P / 2.54;
 export const TOP = 0;
 export const BOARD_THICK = 9 * MM;
 
-export const holeX = (h: Hole) => X0 + (h.col - 1) * P;
-export const holeZ = (h: Hole) => ROWY[h.row];
+/**
+ * The board being built. Holes on a stacked layout land on their own board,
+ * one TIER_PITCH further back per board; mount3d sets it before building.
+ */
+let board: BoardSpec = { cols: 63, kind: 'full', splitCol: null, railGapEvery: 6 };
+export function setHoleBoard(b: BoardSpec): void {
+  board = b;
+}
+export const holeX = (h: Hole) => placeAt(board, h)[0];
+export const holeZ = (h: Hole) => placeAt(board, h)[1];
+/** The z of the middle channel under a package whose pin 1 is in `col`. */
+const channelZ = (col: number) => (ROWY.e + ROWY.f) / 2 + tierShift(board, col)[1];
 export const at = (h: Hole, y = TOP) => new THREE.Vector3(holeX(h), y, holeZ(h));
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -354,7 +365,7 @@ export function buildPackage(kit: Kit, pkg: Package, doc: LayoutDoc): BuiltPacka
   const halfZ = dip ? DIP_SWITCH_HALF_Z : BODY_HALF_Z;
   const length = x1 - x0 + (dip ? 32 : 15);
   const cx = (x0 + x1) / 2;
-  const cz = (ROWY.e + ROWY.f) / 2;
+  const cz = channelZ(pkg.col0);
   const yBottom = TOP + BODY_LIFT;
   const yTop = yBottom + BODY_H;
 
@@ -531,7 +542,7 @@ function buildSevenSeg(kit: Kit, pkg: Package, doc: LayoutDoc): BuiltPackage {
   if (!holes.length) return { object: group, ways: [], top: TOP };
   const xs = holes.map(holeX);
   const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
-  const cz = (ROWY.e + ROWY.f) / 2;
+  const cz = channelZ(pkg.col0);
   const width = SEG_BODY.width * MM;
   const depth = SEG_BODY.depth * MM;
   const height = SEG_BODY.height * MM;

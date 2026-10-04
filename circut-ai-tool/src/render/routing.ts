@@ -9,8 +9,8 @@
 // Pure, and a function of the wire list alone: the same board always draws the
 // same arcs, which is what the flat SVG's byte-for-byte contract needs.
 
-import { pt, ROWY } from './geometry.ts';
-import type { Wire } from '../layout/types.ts';
+import { pt, ROWY, TIER_PITCH } from './geometry.ts';
+import type { Hole, Wire } from '../layout/types.ts';
 
 /** The control point of a wire's quadratic, in SVG units. */
 export type Control = [number, number];
@@ -50,9 +50,9 @@ interface Geometry {
   along: number;
 }
 
-function geometry(w: Wire): Geometry {
-  const [ax, ay] = pt(w.a);
-  const [bx, by] = pt(w.b);
+function geometry(w: Wire, at: (h: Hole) => [number, number]): Geometry {
+  const [ax, ay] = at(w.a);
+  const [bx, by] = at(w.b);
   const dx = bx - ax;
   const dy = by - ay;
   const len = Math.hypot(dx, dy) || 1;
@@ -68,7 +68,9 @@ function geometry(w: Wire): Geometry {
   // the chips. A vertical wire's normal is horizontal and keeps the canonical
   // side.
   const my = (ay + by) / 2;
-  if (Math.abs(ny) > OUTWARD_MIN && (my - CHANNEL_Y) * ny < 0) {
+  // The channel of the board the wire's middle sits over (stacked boards repeat it).
+  const channel = CHANNEL_Y + Math.round((my - CHANNEL_Y) / TIER_PITCH) * TIER_PITCH;
+  if (Math.abs(ny) > OUTWARD_MIN && (my - channel) * ny < 0) {
     nx = -nx;
     ny = -ny;
   }
@@ -85,9 +87,9 @@ function geometry(w: Wire): Geometry {
   };
 }
 
-/** Where each wire's quadratic control point goes, in the order given. */
-export function wireControls(wires: Wire[]): Control[] {
-  const geo = wires.map(geometry);
+/** Where each wire's quadratic control point goes, in the order given. `at` places a hole (pt on a single board). */
+export function wireControls(wires: Wire[], at: (h: Hole) => [number, number] = pt): Control[] {
+  const geo = wires.map((w) => geometry(w, at));
   const bows = geo.map((g) => g.base);
   const corridors = new Map<string, number[]>();
   geo.forEach((g, i) => corridors.set(g.corridor, [...(corridors.get(g.corridor) ?? []), i]));
