@@ -1,6 +1,9 @@
 // Entry: routing, data loading, and the page shells. The board and the
 // panels are rendered by board.ts and panels.ts (Tasks 19 and 20).
 
+// Bundled, so the type never depends on a CDN (the app runs offline in Docker).
+import '@fontsource-variable/geist';
+import '@fontsource-variable/geist-mono';
 import { normalizeSidecar } from '../src/layout/types.ts';
 import { parseNetlist } from '../src/netlist.ts';
 import { buildLayoutDoc } from '../src/pipeline.ts';
@@ -50,7 +53,7 @@ async function renderHome() {
   // The header is rebuilt below; the lights follow it once it exists.
   queueMicrotask(placeLights);
   setTimeout(placeLights, 300);
-  app.replaceChildren(h(`<main class="home"><header><h1>Circuit AI Tool</h1><p class="sub">Open a KiCad schematic and get a breadboard wiring diagram, a build guide, checks and a logic simulator.</p></header>
+  app.replaceChildren(h(`<main class="home"><header><h1><span>Bench<span class="brand-mate">Mate</span></span></h1><p class="sub">Open a KiCad schematic and get a breadboard wiring diagram, a build guide, checks and a logic simulator.</p></header>
     <section class="open"><div id="drop" class="dropzone"><b>Drop a .kicad_sch here</b><span class="muted">or</span><button class="primary" type="button" id="pick">Import…</button><input type="file" id="file" accept=".kicad_sch" hidden></div>
       <form id="open-form"><label>Or open one in place <input name="path" placeholder="absolute path to a .kicad_sch" required></label><button type="submit">Open</button></form></section>
     <section><h2>Lab 3 · BCD to 7-segment</h2><p>L3 Auxiliary supplies inverted inputs and segments a–d. This example completes e–g with gates and a common-anode display. W is the 8-bit weight; Z is the 1-bit weight. A low output lights a segment.</p><button type="button" id="lab3-example">Create Lab 3 prelab example</button><p class="muted">Header numbers follow the instructor’s board labels, not its internal IC. Inputs 10–15 are don’t-care cases. The electrical model is approximate.</p></section>

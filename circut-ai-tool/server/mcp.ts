@@ -44,7 +44,7 @@ export function createMcpServer(service: Service): McpServer {
     { name: APP_NAME, version: APP_VERSION },
     {
       instructions:
-        'Circuit AI Tool turns a KiCad schematic into a breadboard wiring diagram with a build guide, wiring checks and a logic simulator, and can edit the schematic. ' +
+        'BenchMate (Circuit AI Tool) turns a KiCad schematic into a breadboard wiring diagram with a build guide, wiring checks and a logic simulator, and can edit the schematic. ' +
         'Start with open_schematic (absolute path) or list_projects. Layout tools (move_part, set_layout_options, set_net_color, reset_layout) change only where parts sit on the board, never the circuit. ' +
         'Schematic tools (add_component, connect, disconnect, remove_component, set_value) change the .kicad_sch itself after making a backup. ' +
         reminder(),

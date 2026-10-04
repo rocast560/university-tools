@@ -67,7 +67,7 @@ export function createApp(deps: { service: Service; events: Events<ProjectEvent>
       // Uint8Array<ArrayBufferLike> vs <ArrayBuffer> split needs a nudge here.
       return new Response(hit.body as Uint8Array<ArrayBuffer>, { headers: { 'content-type': hit.type, 'cache-control': immutable ? 'public, max-age=31536000, immutable' : 'no-cache' } });
     } catch {
-      if (rel === '/index.html') return c.html('<!doctype html><meta charset="utf-8"><title>Circuit AI Tool</title><body style="font-family:system-ui;padding:2rem"><h1>Circuit AI Tool</h1><p>The web client is not built yet. Run <code>bun run build</code> in the project folder and reload.</p><p>The API is up: <a href="/api/projects">/api/projects</a>, <a href="/openapi.json">/openapi.json</a>, MCP at <code>/mcp</code>.</p></body>', 503);
+      if (rel === '/index.html') return c.html('<!doctype html><meta charset="utf-8"><title>BenchMate</title><body style="font-family:system-ui;padding:2rem"><h1>BenchMate</h1><p>The web client is not built yet. Run <code>bun run build</code> in the project folder and reload.</p><p>The API is up: <a href="/api/projects">/api/projects</a>, <a href="/openapi.json">/openapi.json</a>, MCP at <code>/mcp</code>.</p></body>', 503);
       return c.text('Not found', 404);
     }
   });
