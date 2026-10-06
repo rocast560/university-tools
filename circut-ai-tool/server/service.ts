@@ -6,7 +6,10 @@
 import { copyFile, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { addComponent, connectPin, disconnectPin, removeComponent, setValue, type OpResult } from '../src/kicad/ops.ts';
-import { parseSchematic, type Schematic } from '../src/kicad/schematic.ts';
+import { parseLibSymbol, parseSchematic, type Schematic } from '../src/kicad/schematic.ts';
+import { componentFromSymbol } from '../src/edit/newpart.ts';
+import { resolveAlias } from '../src/parts/aliases.ts';
+import { isList, parse } from '../src/sexpr.ts';
 import type { Hole, Options, Sidecar, WirePath } from '../src/layout/types.ts';
 import { emptySidecar, normalizeWirePath } from '../src/layout/types.ts';
 import { parseNetlist, type Design } from '../src/netlist.ts';
@@ -89,6 +92,20 @@ export class Service {
   private stops = new Map<string, () => void>();
 
   constructor(private deps: ServiceDeps) {}
+
+  /** What a tray part would be on the board: its footprint and leg order, before it exists. */
+  async partFootprint(part: string) {
+    const alias = resolveAlias(part);
+    if (!alias) throw new ServiceError(`no part called "${part}"`, 404);
+    const node = parse(await this.deps.libs.symbolText(alias.libId)).items[0];
+    if (!isList(node)) throw new ServiceError(`the symbol for ${alias.libId} could not be read`, 500);
+    const lib = parseLibSymbol(node);
+    const value = alias.defaultValue ?? lib.name;
+    const comp = componentFromSymbol(lib, value);
+    const footprint = classify(comp);
+    const pins = footprint.kind === 'power' || footprint.kind === 'supply' || footprint.kind === 'unsupported' ? [] : footprintPins(footprint, comp);
+    return { alias: alias.alias, libId: alias.libId, value, pins, footprint };
+  }
 
   has(id: string): boolean {
     return this.open_.has(id);

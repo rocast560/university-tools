@@ -213,6 +213,7 @@ export function createApi(service: Service, events: Events<ProjectEvent>, tunnel
     return c.json(clients.touch({ id: `stdio:${name}`, transport: 'stdio', method: typeof body.method === 'string' ? body.method : 'request', clientName: name }));
   });
   api.get('/parts', (c) => c.json(PART_ALIASES));
+  api.get('/parts/footprint', async (c) => c.json(await service.partFootprint(c.req.query('part') ?? '')));
 
   // Public access for ChatGPT and other internet-only MCP clients.
   api.get('/tunnel', (c) => c.json(tunnel.status()));

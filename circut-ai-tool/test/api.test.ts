@@ -6,6 +6,10 @@ import { pngAvailable } from '../server/png.ts';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { makeService } from './service.test.ts';
 import { FIXTURES } from './smoke.test.ts';
+import { KICAD_SYMBOL_DIR } from '../server/config.ts';
+import { Events } from '../server/watch.ts';
+import type { ProjectEvent } from '../server/service.ts';
+import { createLibraryLookup } from '../server/libraries.ts';
 
 async function setup() {
   const { service, sch, events, work } = await makeService();
@@ -186,5 +190,22 @@ describe('REST API', () => {
       const res = await app.request(path, { method: 'OPTIONS', headers: { origin, 'access-control-request-method': 'POST' } });
       expect(res.headers.get('access-control-allow-origin')).toBe('*');
     }
+  });
+});
+
+// Needs a real KiCad symbol library, like the edit tests.
+describe.skipIf(!existsSync(path.join(KICAD_SYMBOL_DIR, 'Device.kicad_sym')))('part footprints', () => {
+  test('GET /api/parts/footprint describes a part from its symbol', async () => {
+    const { service } = await makeService();
+    // makeService stubs the libraries; swap in the real ones.
+    (service as unknown as { deps: { libs: unknown } }).deps.libs = createLibraryLookup({ symbolDir: KICAD_SYMBOL_DIR });
+    const app = createApp({ service, events: new Events<ProjectEvent>(), mcp: () => new McpServer({ name: 'stub', version: '0' }) });
+    const res = await app.request('/api/parts/footprint?part=resistor');
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toMatchObject({ libId: 'Device:R', pins: ['1', '2'], footprint: { kind: 'lead2', style: 'R' } });
+    const bad = await app.request('/api/parts/footprint?part=nope');
+    expect(bad.status).toBe(404);
+    expect(await bad.json()).toHaveProperty('error');
   });
 });
