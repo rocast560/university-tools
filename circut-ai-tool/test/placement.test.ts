@@ -2,9 +2,9 @@ import { describe, expect, test } from 'bun:test';
 import { stripOf } from '../src/layout/board.ts';
 import type { Hole, Row } from '../src/layout/types.ts';
 import { emptySidecar } from '../src/layout/types.ts';
-import { parseNetlist } from '../src/netlist.ts';
+import { parseNetlist, type Design } from '../src/netlist.ts';
 import { buildLayoutDoc } from '../src/pipeline.ts';
-import { inBoard, rotateLead2, stripNets, takenHoles, validatePlacement } from '../src/edit/placement.ts';
+import { inBoard, jumperOutcome, legsToConnections, rotateLead2, stripNets, takenHoles, validatePlacement } from '../src/edit/placement.ts';
 import { readFixture } from './smoke.test.ts';
 
 const design = parseNetlist(readFixture('PL1_1.net'));
@@ -180,5 +180,58 @@ describe('rotateLead2', () => {
 
   test('a turn that leaves the rows gives null', () => {
     expect(rotateLead2({ '1': { col: 10, row: 'j' }, '2': { col: 14, row: 'j' } }, ['1', '2'])).toBeNull();
+  });
+});
+
+/** A hand-built board: R1 pin 1 a5 and pin 3 f5 on /A, pin 2 a10 on /B; R2 pin 1 loose at c20. */
+function jumperFixture() {
+  const pin = (net: string) => ({ num: '', name: '', type: '', net });
+  const comp = (ref: string, pins: Record<string, string>) => ({ ref, value: '', lib: '', part: '', pins: new Map(Object.entries(pins).map(([k, n]) => [k, pin(n)])) });
+  const d: Design = {
+    components: new Map([
+      ['R1', comp('R1', { '1': '/A', '2': '/B', '3': '/A' })],
+      ['R2', comp('R2', { '1': 'unconnected-(R2-Pad1)' })],
+    ]),
+    nets: new Map(),
+  };
+  const dc = { ...doc, supply: undefined, pinHoles: { R1: { '1': { col: 5, row: 'a' }, '2': { col: 10, row: 'a' }, '3': { col: 5, row: 'f' } }, R2: { '1': { col: 20, row: 'c' } } } } as unknown as typeof doc;
+  return { doc: dc, design: d };
+}
+
+describe('legsToConnections', () => {
+  test('a leg in a strip with a net joins it; a leg in an empty strip stays unconnected', () => {
+    const { doc: d, design: g } = jumperFixture();
+    expect(legsToConnections(d, g, { '1': { col: 5, row: 'c' }, '2': { col: 30, row: 'c' } })).toEqual({ '1': '/A' });
+  });
+});
+
+describe('jumperOutcome', () => {
+  const h = (col: number, row: Row): Hole => ({ col, row });
+  test('two different nets are refused', () => {
+    const { doc: d, design: g } = jumperFixture();
+    expect(jumperOutcome(d, g, h(5, 'e'), h(10, 'e'))).toEqual({ kind: 'refuse', reason: 'would join A and B. Merge nets in the schematic' });
+  });
+  test('an unconnected leg joins the net at the other end, in either order', () => {
+    const { doc: d, design: g } = jumperFixture();
+    const want = { kind: 'connect' as const, net: '/A', pins: [{ ref: 'R2', pin: '1' }] };
+    expect(jumperOutcome(d, g, h(20, 'e'), h(5, 'e'))).toEqual(want);
+    expect(jumperOutcome(d, g, h(5, 'e'), h(20, 'e'))).toEqual(want);
+  });
+  test('the same net twice changes nothing in the schematic', () => {
+    const { doc: d, design: g } = jumperFixture();
+    expect(jumperOutcome(d, g, h(5, 'b'), h(5, 'j'))).toMatchObject({ kind: 'same', net: '/A' });
+  });
+  test('two empty strips: nothing to connect', () => {
+    const { doc: d, design: g } = jumperFixture();
+    expect(jumperOutcome(d, g, h(40, 'b'), h(45, 'b'))).toEqual({ kind: 'refuse', reason: 'nothing to connect yet. Place a part first' });
+  });
+  test('both ends in one strip is refused', () => {
+    const { doc: d, design: g } = jumperFixture();
+    expect(jumperOutcome(d, g, h(5, 'a'), h(5, 'e'))).toEqual({ kind: 'refuse', reason: 'both ends are in the same strip' });
+  });
+  test('a strip carrying two nets is refused', () => {
+    const { doc: d, design: g } = jumperFixture();
+    d.pinHoles.R1['2'] = h(5, 'b');
+    expect(jumperOutcome(d, g, h(5, 'e'), h(40, 'b'))).toEqual({ kind: 'refuse', reason: 'that strip already joins two nets' });
   });
 });

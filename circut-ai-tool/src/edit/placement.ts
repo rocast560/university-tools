@@ -6,7 +6,7 @@
 
 import { isRail, stripOf } from '../layout/board.ts';
 import type { BoardSpec, Hole, Row } from '../layout/types.ts';
-import type { Design } from '../netlist.ts';
+import { displayName, type Design } from '../netlist.ts';
 import type { LayoutDoc } from '../pipeline.ts';
 
 export type Tone = 'ok' | 'join' | 'bad';
@@ -160,4 +160,41 @@ export function flipDip(holes: Record<string, Hole>): Record<string, Hole> {
   const hi = Math.max(...cols);
   const other = (row: Row): Row => (row === 'e' ? 'f' : row === 'f' ? 'e' : row);
   return Object.fromEntries(Object.entries(holes).map(([pin, h]) => [pin, { col: lo + hi - h.col, row: other(h.row) }]));
+}
+
+const unconnected = (net: string) => !net || net.startsWith('unconnected-');
+
+/** Pin -> net for each leg of a new part whose strip already carries exactly one net. */
+export function legsToConnections(doc: LayoutDoc, design: Design, holes: Record<string, Hole>): Record<string, string> {
+  const nets = stripNets(doc, design, null);
+  const out: Record<string, string> = {};
+  for (const [pin, h] of Object.entries(holes)) {
+    const s = [...(nets.get(stripOf(h)) ?? [])].filter((n) => !unconnected(n));
+    if (s.length === 1) out[pin] = s[0];
+  }
+  return out;
+}
+
+export type JumperOutcome = { kind: 'connect'; net: string; pins: { ref: string; pin: string }[] } | { kind: 'same'; net: string } | { kind: 'refuse'; reason: string };
+
+/** What a jumper from `a` to `b` would do to the schematic (spec 6.3). */
+export function jumperOutcome(doc: LayoutDoc, design: Design, a: Hole, b: Hole): JumperOutcome {
+  const sa = stripOf(a);
+  const sb = stripOf(b);
+  if (sa === sb) return { kind: 'refuse', reason: 'both ends are in the same strip' };
+  const all = stripNets(doc, design, null);
+  const netsOf = (s: string) => [...(all.get(s) ?? [])].filter((n) => !unconnected(n));
+  const loose = (s: string) => {
+    const out: { ref: string; pin: string }[] = [];
+    for (const [ref, pins] of Object.entries(doc.pinHoles)) for (const [pin, h] of Object.entries(pins)) if (stripOf(h) === s && unconnected(design.components.get(ref)?.pins.get(pin)?.net ?? '')) out.push({ ref, pin });
+    return out;
+  };
+  const [na, nb] = [netsOf(sa), netsOf(sb)];
+  if (na.length > 1 || nb.length > 1) return { kind: 'refuse', reason: 'that strip already joins two nets' };
+  if (na.length && nb.length) return na[0] === nb[0] ? { kind: 'same', net: na[0] } : { kind: 'refuse', reason: `would join ${displayName(na[0])} and ${displayName(nb[0])}. Merge nets in the schematic` };
+  const nothing: JumperOutcome = { kind: 'refuse', reason: 'nothing to connect yet. Place a part first' };
+  const net = na[0] ?? nb[0];
+  if (!net) return nothing;
+  const pins = loose(na.length ? sb : sa);
+  return pins.length ? { kind: 'connect', net, pins } : nothing;
 }
