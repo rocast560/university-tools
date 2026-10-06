@@ -4,7 +4,7 @@ use tauri::{AppHandle, Manager};
 pub const PORT: u16 = 8765;
 pub const HOST: &str = "127.0.0.1";
 pub const HEALTH_PATH: &str = "/api/health";
-pub const TITLE: &str = "Circuit AI Tool";
+pub const TITLE: &str = "BenchMate";
 pub const SIDECAR: &str = "circuit-server";
 pub const WINDOW: (f64, f64) = (1500.0, 950.0);
 

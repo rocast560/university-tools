@@ -16,6 +16,8 @@ export interface ChipSpec {
   decoder: '7447' | '7448' | null;
   /** 3-to-8 line decoder with active-low outputs (74138). */
   demux?: boolean;
+  /** 4-bit binary full adder with carry (74283). */
+  adder?: boolean;
   vcc: number;
   gnd: number;
   iccMax: number;
@@ -45,6 +47,7 @@ export const CHIPS: Record<string, ChipSpec> = {
   '86': chip('86', 'quad 2-input XOR', 'xor', QUAD2, 10e-3),
   '47': { code: '47', description: 'BCD to 7-segment decoder, active-low outputs (common-anode display)', kind: null, gates: [], decoder: '7447', vcc: 16, gnd: 8, iccMax: 64e-3, pins: 16 },
   '48': { code: '48', description: 'BCD to 7-segment decoder, active-high outputs (common-cathode display)', kind: null, gates: [], decoder: '7448', vcc: 16, gnd: 8, iccMax: 76e-3, pins: 16 },
+  '283': { code: '283', description: '4-bit binary full adder with fast carry', kind: null, gates: [], decoder: null, adder: true, vcc: 16, gnd: 8, iccMax: 39e-3, pins: 16 },
   '138': { code: '138', description: '3-to-8 line decoder, active-low outputs', kind: null, gates: [], decoder: null, demux: true, vcc: 16, gnd: 8, iccMax: 10e-3, pins: 16 },
 };
 
@@ -61,6 +64,22 @@ export function demuxOutputs(select: number[], enableLow: number[], enableHigh: 
   const on = enableLow.every((v) => v === 0) && enableHigh === 1;
   const line = select[0] + 2 * select[1] + 4 * select[2];
   return DEMUX_PINS.outputs.map((_, i) => (on && i === line ? 0 : 1));
+}
+
+/** 74283 pinout, bit 0 first: A1-A4, B1-B4, sums S1-S4, carry in C0 and carry out C4. */
+export const ADDER_PINS = {
+  a: [5, 3, 14, 12],
+  b: [6, 2, 15, 11],
+  sum: [4, 1, 13, 10],
+  carryIn: 7,
+  carryOut: 9,
+};
+
+/** Sum bits (bit 0 first) and carry out of a 74283. */
+export function adderOutputs(a: number[], b: number[], carryIn: number): { sum: (0 | 1)[]; carryOut: 0 | 1 } {
+  const word = (bits: number[]) => bits.reduce((acc, v, i) => acc + (v << i), 0);
+  const total = word(a) + word(b) + carryIn;
+  return { sum: [0, 1, 2, 3].map((i) => ((total >> i) & 1) as 0 | 1), carryOut: ((total >> 4) & 1) as 0 | 1 };
 }
 
 /** 7447 / 7448 pinout (same for both). */

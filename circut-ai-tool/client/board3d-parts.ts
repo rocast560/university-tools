@@ -17,10 +17,11 @@ import type { Hole, Package, PlacedPart } from '../src/layout/types.ts';
 import type { LayoutDoc } from '../src/pipeline.ts';
 import { icInfo } from '../src/parts/gates.ts';
 import { ledSpec, ledSpecFor, type LedSpec } from '../src/parts/led.ts';
-import { colourBands } from '../src/parts/resistor.ts';
+import { resistorBands } from '../src/parts/resistor.ts';
 import { L3_BOARD, L3_SILK } from '../src/parts/lab3.ts';
 import { archY, MAX_ARCH, WIRE_END_Y } from '../src/render/altitude.ts';
-import { P, ROWY, X0 } from '../src/render/geometry.ts';
+import { P, placeAt, ROWY, tierShift } from '../src/render/geometry.ts';
+import type { BoardSpec } from '../src/layout/types.ts';
 import { positionKey } from '../src/render/index.ts';
 
 /** 1 mm in board units: one 0.1 inch pitch is 18 units. */
@@ -29,8 +30,18 @@ export const MM = P / 2.54;
 export const TOP = 0;
 export const BOARD_THICK = 9 * MM;
 
-export const holeX = (h: Hole) => X0 + (h.col - 1) * P;
-export const holeZ = (h: Hole) => ROWY[h.row];
+/**
+ * The board being built. Holes on a stacked layout land on their own board,
+ * one TIER_PITCH further back per board; mount3d sets it before building.
+ */
+let board: BoardSpec = { cols: 63, kind: 'full', splitCol: null, railGapEvery: 6 };
+export function setHoleBoard(b: BoardSpec): void {
+  board = b;
+}
+export const holeX = (h: Hole) => placeAt(board, h)[0];
+export const holeZ = (h: Hole) => placeAt(board, h)[1];
+/** The z of the middle channel under a package whose pin 1 is in `col`. */
+const channelZ = (col: number) => (ROWY.e + ROWY.f) / 2 + tierShift(board, col)[1];
 export const at = (h: Hole, y = TOP) => new THREE.Vector3(holeX(h), y, holeZ(h));
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -229,6 +240,8 @@ function palette(kit: Kit) {
     /** Moulded epoxy of a chip package, pebbled the way the mould leaves it. */
     epoxy: kit.std({ color: '#26282e', roughness: 0.48, metalness: 0.04, roughnessMap: fine, bumpMap: fine, bumpScale: 0.5 }),
     body: kit.std({ color: '#ffffff', map: ceramic(kit), roughness: 0.62, roughnessMap: fine, bumpMap: fine, bumpScale: 0.22 }),
+    /** The glossier blue lacquer of a metal-film resistor. */
+    bodyMetal: kit.std({ color: '#3f7fcf', roughness: 0.4, roughnessMap: fine, bumpMap: fine, bumpScale: 0.12 }),
     dark: kit.std({ color: '#2a2d33', roughness: 0.55, roughnessMap: fine }),
     glass: kit.std({ color: '#14141a', roughness: 0.18, metalness: 0.1 }),
     dipCase: kit.std({ color: '#b4232c', roughness: 0.44, roughnessMap: fine, bumpMap: fine, bumpScale: 0.35 }),
@@ -246,6 +259,7 @@ export type Materials = {
   leg: THREE.MeshStandardMaterial;
   epoxy: THREE.MeshStandardMaterial;
   body: THREE.MeshStandardMaterial;
+  bodyMetal: THREE.MeshStandardMaterial;
   dark: THREE.MeshStandardMaterial;
   glass: THREE.MeshStandardMaterial;
   dipCase: THREE.MeshStandardMaterial;
@@ -380,7 +394,7 @@ export function buildPackage(kit: Kit, pkg: Package, doc: LayoutDoc): BuiltPacka
   const halfZ = dip ? DIP_SWITCH_HALF_Z : BODY_HALF_Z;
   const length = x1 - x0 + (dip ? 32 : 15);
   const cx = (x0 + x1) / 2;
-  const cz = (ROWY.e + ROWY.f) / 2;
+  const cz = channelZ(pkg.col0);
   const yBottom = TOP + BODY_LIFT;
   const yTop = yBottom + BODY_H;
 
@@ -557,7 +571,7 @@ function buildSevenSeg(kit: Kit, pkg: Package, doc: LayoutDoc): BuiltPackage {
   if (!holes.length) return { object: group, ways: [], top: TOP };
   const xs = holes.map(holeX);
   const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
-  const cz = (ROWY.e + ROWY.f) / 2;
+  const cz = channelZ(pkg.col0);
   const width = SEG_BODY.width * MM;
   const depth = SEG_BODY.depth * MM;
   const height = SEG_BODY.height * MM;
@@ -827,7 +841,7 @@ export function buildPart(kit: Kit, part: PlacedPart, doc: LayoutDoc): BuiltPart
     led = built.lamp;
     reach = built.reach;
   } else if (part.style === 'R') {
-    reach = resistor(kit, group, part, holes[0], holes[1]);
+    reach = resistor(kit, group, part, holes[0], holes[1], doc.resistorKind === 'metal');
   } else {
     reach = axial(kit, group, part, holes[0], holes[1]);
   }
@@ -853,7 +867,7 @@ function axialLeads(kit: Kit, group: THREE.Group, a: THREE.Vector3, b: THREE.Vec
   return [ay, by];
 }
 
-function resistor(kit: Kit, group: THREE.Group, part: PlacedPart, a: THREE.Vector3, b: THREE.Vector3): Reach {
+function resistor(kit: Kit, group: THREE.Group, part: PlacedPart, a: THREE.Vector3, b: THREE.Vector3, metal: boolean): Reach {
   const [ay, by] = axialLeads(kit, group, a, b, AXIAL_LIFT);
   const axis = by.clone().sub(ay);
   const span = axis.length();
@@ -864,16 +878,16 @@ function resistor(kit: Kit, group: THREE.Group, part: PlacedPart, a: THREE.Vecto
   const dir = axis.clone().normalize();
   const centre = ay.clone().add(by).multiplyScalar(0.5);
   const q = new THREE.Quaternion().setFromUnitVectors(UP, dir);
-  const body = kit.mesh(new THREE.CapsuleGeometry(r, Math.max(0.5, bodyLen - r * 2), 6, 18), kit.M.body);
+  const body = kit.mesh(new THREE.CapsuleGeometry(r, Math.max(0.5, bodyLen - r * 2), 6, 18), metal ? kit.M.bodyMetal : kit.M.body);
   body.position.copy(centre);
   body.quaternion.copy(q);
   group.add(body);
 
   // The colour code, read off the value the same way the checks read it, so
   // the bands can never say something other than the printed value.
-  const bands = colourBands(part.value);
-  // Three bands grouped at one end, the tolerance band alone at the other.
-  const offsets = [-0.34, -0.2, -0.06, 0.32];
+  const bands = resistorBands(part.value, metal ? 'metal' : 'carbon');
+  // The digit and multiplier bands grouped at one end, the tolerance band alone at the other.
+  const offsets = bands?.length === 5 ? [-0.36, -0.24, -0.12, 0, 0.32] : [-0.34, -0.2, -0.06, 0.32];
   for (const [i, band] of (bands ?? []).entries()) {
     const ring = kit.mesh(new THREE.CylinderGeometry(r * 1.06, r * 1.06, bodyLen * 0.08, 18), kit.std({ color: band.hex, roughness: 0.55 }));
     ring.position.copy(centre).addScaledVector(dir, offsets[i] * bodyLen);

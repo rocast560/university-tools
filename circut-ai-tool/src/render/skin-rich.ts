@@ -15,7 +15,7 @@
 // 880 groups of shapes. The rows are uniformly one pitch apart, so a tile
 // lines up exactly.
 
-import { ROWY, X0, P } from './geometry.ts';
+import { ROWY, X0, P, placeAt } from './geometry.ts';
 import type { BoardGeom, Point, Skin, SkinContext, SkinLedState } from './skin.ts';
 import type { Theme } from './theme.ts';
 import { ledSpec, ledSpecFor, type LedColour } from '../parts/led.ts';
@@ -283,11 +283,11 @@ function ledPositions(ctx: SkinContext): { part: PlacedPart; x: number; y: numbe
   const out: { part: PlacedPart; x: number; y: number; state: SkinLedState }[] = [];
   for (const part of ctx.parts) {
     if (part.style !== 'LED' || part.holes.length < 2) continue;
-    const [a, b] = part.holes;
+    const [a, b] = part.holes.map((h) => placeAt(ctx.board, h));
     out.push({
       part,
-      x: (X0 + (a.col - 1) * P + X0 + (b.col - 1) * P) / 2,
-      y: (ROWY[a.row] + ROWY[b.row]) / 2,
+      x: (a[0] + b[0]) / 2,
+      y: (a[1] + b[1]) / 2,
       state: ctx.leds[part.id] ?? { brightness: 0, overdrive: 0 },
     });
   }

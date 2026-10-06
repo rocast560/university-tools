@@ -12,9 +12,11 @@ import { emptySidecar, normalizeWirePath } from '../src/layout/types.ts';
 import { parseNetlist, type Design } from '../src/netlist.ts';
 import { buildLayoutDoc, type LayoutDoc } from '../src/pipeline.ts';
 import { footprintPins } from '../src/layout/engine.ts';
+import { normalizeTests } from '../src/sim/test-spec.ts';
 import { classify } from '../src/parts/catalog.ts';
 import { LED_COLOURS, type LedColour } from '../src/parts/led.ts';
 import { shapePlan, takenNodes, wireKey } from '../src/render/route3d.ts';
+import { RESISTOR_KINDS } from '../src/parts/resistor.ts';
 import { simulate, type SimResult } from '../src/sim/index.ts';
 import type { KicadCli } from './kicad-cli.ts';
 import type { LibraryLookup } from './libraries.ts';
@@ -319,7 +321,7 @@ export class Service {
     const p = this.get(id);
     const o = p.sidecar.options;
     if (patch.board !== undefined) {
-      if (!['auto', 'half', 'full'].includes(patch.board)) throw new ServiceError('board must be auto, half or full');
+      if (!['auto', 'half', 'full', 'double', 'stacked'].includes(patch.board)) throw new ServiceError('board must be auto, half, full, double or stacked');
       o.board = patch.board;
     }
     if (patch.railSplit !== undefined) o.railSplit = patch.railSplit === null ? null : !!patch.railSplit;
@@ -331,6 +333,10 @@ export class Service {
     if (patch.wireStyle !== undefined) {
       if (patch.wireStyle !== 'arc' && patch.wireStyle !== 'orthogonal') throw new ServiceError('wireStyle must be arc or orthogonal');
       o.wireStyle = patch.wireStyle;
+    }
+    if (patch.resistorKind !== undefined) {
+      if (!(RESISTOR_KINDS as readonly string[]).includes(patch.resistorKind)) throw new ServiceError('resistorKind must be carbon or metal');
+      o.resistorKind = patch.resistorKind;
     }
     if (patch.substitutions !== undefined) o.substitutions = { ...o.substitutions, ...patch.substitutions };
     return this.rebuild(p);
@@ -416,10 +422,18 @@ export class Service {
     return this.rebuild(p);
   }
 
+  /** Replace the saved Simulate-panel tests. They live in the sidecar, so a reset of the layout keeps them. */
+  async setTests(id: string, tests: unknown): Promise<OpenProject> {
+    const p = this.get(id);
+    if (!Array.isArray(tests)) throw new ServiceError('tests must be a list of {name, levels, expect?}');
+    p.sidecar.tests = normalizeTests(tests);
+    return this.rebuild(p);
+  }
+
   async resetLayout(id: string): Promise<OpenProject> {
     const p = this.get(id);
     const keep = p.sidecar.placed;
-    p.sidecar = { ...emptySidecar(), placed: keep };
+    p.sidecar = { ...emptySidecar(), placed: keep, tests: p.sidecar.tests };
     return this.rebuild(p);
   }
 

@@ -36,10 +36,21 @@ export function holeName(h: Hole): string {
 export class Board {
   constructor(
     public cols: number,
-    public kind: 'half' | 'full',
+    public kind: 'half' | 'full' | 'double' | 'stacked',
     public splitCol: number | null,
     public railGapEvery: number,
+    public tiers = 1,
   ) {}
+
+  /** Which of the stacked boards a column is on, from 0. */
+  tierOf(col: number): number {
+    return Math.min(this.tiers - 1, Math.max(0, Math.floor((col - 1) / (this.cols / this.tiers))));
+  }
+
+  /** True when every column given is on the same stacked board, so a body can span them. */
+  sameTier(...cols: number[]): boolean {
+    return cols.every((c) => this.tierOf(c) === this.tierOf(cols[0]));
+  }
 
   railExists(col: number): boolean {
     return col >= 1 && col <= this.cols && col % this.railGapEvery !== 0;
@@ -56,7 +67,7 @@ export class Board {
   }
 
   spec(): BoardSpec {
-    return { cols: this.cols, kind: this.kind, splitCol: this.splitCol, railGapEvery: this.railGapEvery };
+    return { cols: this.cols, kind: this.kind, splitCol: this.splitCol, railGapEvery: this.railGapEvery, ...(this.tiers > 1 ? { tiers: this.tiers } : {}) };
   }
 }
 

@@ -25,7 +25,7 @@ if (process.argv.includes('--stdio')) {
   Bun.serve({ hostname: HOST, port: PORT, fetch: app.fetch, idleTimeout: 255 });
   // Bun is PID 1 in the container; tunnel.ts installs a SIGTERM listener that would otherwise keep it alive.
   for (const sig of ['SIGINT', 'SIGTERM'] as const) process.once(sig, () => process.exit(0));
-  console.log(`Circuit AI Tool: ${PUBLIC_URL}`);
+  console.log(`BenchMate: ${PUBLIC_URL}`);
   console.log(`  API      ${PUBLIC_URL}/api/projects`);
   console.log(`  OpenAPI  ${PUBLIC_URL}/openapi.json`);
   console.log(`  MCP      ${PUBLIC_URL}/mcp  (alias ${PUBLIC_URL}/mcp-server/mcp)`);

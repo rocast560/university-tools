@@ -1,7 +1,7 @@
 // design + sidecar -> LayoutDoc. Pure; the server and the client call this.
 
 import { hasErrors, runChecks, type Check } from './checks/index.ts';
-import { buildPartsList, buildPinouts, buildSteps, type Pinout, type Step } from './guide.ts';
+import { buildPartsList, buildPinouts, buildSteps, type PartsItem, type Pinout, type Step } from './guide.ts';
 import { layout, type EngineResult } from './layout/engine.ts';
 import type { Sidecar } from './layout/types.ts';
 import type { Design } from './netlist.ts';
@@ -12,7 +12,7 @@ import { buildSimModel, truthTable, type SimModel, type TruthTable } from './sim
 export interface LayoutDoc extends EngineResult {
   steps: Step[];
   pinouts: Pinout[];
-  partsList: string[];
+  partsList: PartsItem[];
   checks: Check[];
   sim: { model: SimModel; truthTable: TruthTable | null; note: string | null };
   /**

@@ -17,6 +17,36 @@ export function pt(h: Hole): [number, number] {
   return [X0 + (h.col - 1) * P, ROWY[h.row]];
 }
 
+/** Vertical distance from one stacked board to the next, in SVG units. */
+export const TIER_PITCH = HEIGHT + 50;
+
+export const tierCount = (board: BoardSpec): number => board.tiers ?? 1;
+export const tierCols = (board: BoardSpec): number => board.cols / tierCount(board);
+export const tierOf = (board: BoardSpec, col: number): number => Math.min(tierCount(board) - 1, Math.max(0, Math.floor((col - 1) / tierCols(board))));
+
+/**
+ * How far everything on a column's board moves from where pt() puts it: back
+ * to the left edge and down by one pitch per board. Zero on a single board, so
+ * pt() stays the coordinate system the layout and the fixtures are written in.
+ */
+export function tierShift(board: BoardSpec, col: number): [number, number] {
+  const t = tierOf(board, col);
+  return [-t * tierCols(board) * P, t * TIER_PITCH];
+}
+
+/** Where a hole is drawn, on whichever stacked board it belongs to. */
+export function placeAt(board: BoardSpec, h: Hole): [number, number] {
+  const [x, y] = pt(h);
+  const [dx, dy] = tierShift(board, h.col);
+  return [x + dx, y + dy];
+}
+
+/** The stacked board a drawn y lies on, and that y measured from the top of its board. */
+export function tierAtY(board: BoardSpec, y: number): { tier: number; y: number } {
+  const tier = Math.min(tierCount(board) - 1, Math.max(0, Math.floor((y + (TIER_PITCH - HEIGHT) / 2) / TIER_PITCH)));
+  return { tier, y: y - tier * TIER_PITCH };
+}
+
 /**
  * The L3 board's outline in SVG units, given its header row and pin 1 column.
  * The body runs outward from the header: up from row a, down from row j.
@@ -45,10 +75,10 @@ export function overhang(packages: Package[]): { top: number; bottom: number } {
 }
 
 export function svgSize(board: BoardSpec, packages: Package[] = []): { width: number; height: number; viewBox: string } {
-  const xr = X0 + (board.cols - 1) * P;
+  const xr = X0 + (tierCols(board) - 1) * P;
   const width = xr + 140;
   const over = overhang(packages);
-  const height = HEIGHT + over.top + over.bottom;
+  const height = HEIGHT + (tierCount(board) - 1) * TIER_PITCH + over.top + over.bottom;
   // The negative origin leaves room for the supply leads and their labels,
   // which are drawn in the margin outside the board itself, and for anything
   // that hangs off the top or bottom edge.

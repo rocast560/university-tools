@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Circuit AI Tool",
+  "productName": "BenchMate",
   "version": "0.1.0",
   "identifier": "dev.rober.circuit-ai-tool",
   "build": { "frontendDist": "./ui" },

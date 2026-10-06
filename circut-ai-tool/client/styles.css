@@ -1,4 +1,4 @@
-/* Circuit AI Tool — "liquid glass" UI.
+/* BenchMate: "Lab Bench" UI.
  *
  * Layering rule: translucent glass belongs to chrome that does not repaint on
  * every frame (app bar, tabs, panels, chips, toast). It must NOT go on
@@ -21,100 +21,125 @@
 :root {
   color-scheme: light;
 
-  /* Gotham in daylight: Blueprint's light grays, flat and dense, blue for anything active. */
-  --bg: #f6f7f9;
-  --tint-a: transparent;
-  --tint-b: transparent;
+  /* Lab Bench, daylight: cool neutral chrome, one violet accent. Violet is
+     the one hue no jumper wire on the board uses, so anything the app wants
+     your eye on can never be mistaken for a wire. Contrast (WCAG): ink on
+     card 17.8:1, ink-2 6.1:1, accent text 6.2:1, white on accent 6.2:1. */
+  --bg: #f5f6f8;
+  --tint-a: rgba(109, 63, 217, 0.07);
+  --tint-b: rgba(10, 99, 194, 0.04);
   --tint-c: transparent;
 
   /* content */
-  --ink: #1c2127;
-  --ink-2: #5f6b7c;
-  --line: rgba(17, 20, 24, 0.15);
+  --ink: #16181d;
+  --ink-2: #5b6270;
+  --line: #d9dde3;
+  --line-soft: #e6e9ee;
   --card: #ffffff;
-  --sunken: rgba(17, 20, 24, 0.05);
-  --accent: #2d72d2;
-  --accent-soft: rgba(45, 114, 210, 0.14);
+  --raised: #ffffff;
+  --sunken: #edeff3;
+  --accent: #6d3fd9;
+  --accent-hover: #5a2fc2;
+  --accent-soft: #f1ecfe;
   --accent-ink: #ffffff;
-  --btn: #f6f7f9;
-  --btn-hover: #edeff2;
-  --btn-line: rgba(17, 20, 24, 0.2);
+  --focus: #8b5cf6;
+  --btn: #ffffff;
+  --btn-hover: #f3f4f7;
+  --btn-line: #d9dde3;
 
-  /* panels are solid; there is no glass in this skin */
+  /* panels are solid; the names stay so older rules keep working */
   --glass: #ffffff;
-  --glass-strong: #f6f7f9;
-  --glass-border: rgba(17, 20, 24, 0.15);
-  --glass-highlight: rgba(255, 255, 255, 0.8);
+  --glass-strong: #f8f9fb;
+  --glass-border: #d9dde3;
+  --glass-highlight: rgba(255, 255, 255, 0);
   --blur: 0px;
   --sat: 100%;
 
-  /* elevation */
-  --shadow-1: 0 1px 1px rgba(17, 20, 24, 0.1);
-  --shadow-2: 0 1px 1px rgba(17, 20, 24, 0.1), 0 2px 6px rgba(17, 20, 24, 0.12);
-  --shadow-3: 0 2px 4px rgba(17, 20, 24, 0.12), 0 8px 24px rgba(17, 20, 24, 0.16);
+  /* elevation: light uses soft shadows */
+  --shadow-1: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.08);
+  --shadow-2: 0 2px 4px rgba(16, 24, 40, 0.06), 0 4px 12px rgba(16, 24, 40, 0.08);
+  --shadow-3: 0 8px 24px rgba(16, 24, 40, 0.12);
 
-  /* status */
-  --done: #1c6e42;
-  --warn: #935610;
-  --err: #ac2f33;
+  /* status: always paired with a word or icon, and kept off the board */
+  --done: #17784c;
+  --warn: #a34e00;
+  --err: #c21e36;
+  --info: #0a63c2;
+  --done-soft: #e7f4ec;
+  --warn-soft: #fdf0e3;
+  --err-soft: #fbe9ec;
+  --info-soft: #e6f0fb;
   --on-status: #ffffff;
 
-  /* shape + rhythm */
-  --r-sm: 2px;
-  --r-md: 3px;
-  --r-lg: 4px;
-  --r-xl: 6px;
+  /* shape + rhythm (4 pt grid) */
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-lg: 8px;
+  --r-xl: 12px;
   --pad: 16px;
+
+  /* motion */
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --t-fast: 120ms;
+  --t-med: 180ms;
 
   /* CONSTANT in both themes: the board's surface */
   --well: #14171f;
   --well-line: rgba(150, 165, 195, 0.22);
   --well-invalid: #c0362c;
 
-  --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
-  --font-mono: ui-monospace, "Cascadia Mono", Consolas, "JetBrains Mono", monospace;
+  /* Geist is bundled with the app (client/main.ts imports it), so nothing
+     loads from a CDN; the system stack only shows while it is decoding. */
+  --font-body: "Geist Variable", system-ui, "Segoe UI Variable Text", "Segoe UI", Roboto, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, "Cascadia Mono", Consolas, monospace;
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  /* Gotham: Blueprint's dark grays, flat and dense, blue for anything active. */
-  --bg: #1c2127;
-  --tint-a: transparent;
-  --tint-b: transparent;
+  /* Lab Bench, night: near-black but never pure black, elevation shown by
+     lighter surfaces rather than shadows, and a desaturated violet.
+     Contrast: ink on card 14.5:1, ink-2 6.9:1, accent 6.5:1. */
+  --bg: #0f1115;
+  --tint-a: rgba(169, 139, 255, 0.06);
+  --tint-b: rgba(94, 176, 255, 0.03);
   --tint-c: transparent;
 
-  --ink: #f6f7f9;
-  --ink-2: #abb3bf;
-  --line: rgba(255, 255, 255, 0.15);
-  --card: #252a31;
-  --sunken: rgba(17, 20, 24, 0.55);
-  --accent: #4c90f0;
-  --accent-soft: rgba(45, 114, 210, 0.24);
-  --accent-ink: #ffffff;
-  --btn: #383e47;
-  --btn-hover: #404854;
-  --btn-line: rgba(255, 255, 255, 0.12);
+  --ink: #e8eaee;
+  --ink-2: #9ba3b1;
+  --line: #2c313b;
+  --line-soft: #232831;
+  --card: #171a20;
+  --raised: #1e222a;
+  --sunken: #0b0d10;
+  --accent: #a98bff;
+  --accent-hover: #bca5ff;
+  --accent-soft: #2a2344;
+  --accent-ink: #130b2e;
+  --focus: #b69cff;
+  --btn: #1e222a;
+  --btn-hover: #252a33;
+  --btn-line: #2c313b;
 
-  --glass: #252a31;
-  --glass-strong: #2f343c;
-  --glass-border: rgba(255, 255, 255, 0.15);
-  --glass-highlight: rgba(255, 255, 255, 0.06);
+  --glass: #171a20;
+  --glass-strong: #1e222a;
+  --glass-border: #2c313b;
+  --glass-highlight: rgba(255, 255, 255, 0.04);
   --blur: 0px;
   --sat: 100%;
 
-  --shadow-1: 0 1px 1px rgba(17, 20, 24, 0.5);
-  --shadow-2: 0 1px 1px rgba(17, 20, 24, 0.5), 0 2px 6px rgba(17, 20, 24, 0.4);
-  --shadow-3: 0 2px 4px rgba(17, 20, 24, 0.5), 0 8px 24px rgba(17, 20, 24, 0.5);
+  --shadow-1: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --shadow-2: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 4px 12px rgba(0, 0, 0, 0.35);
+  --shadow-3: 0 8px 24px rgba(0, 0, 0, 0.5);
 
-  --r-sm: 2px;
-  --r-md: 3px;
-  --r-lg: 4px;
-  --r-xl: 6px;
-
-  --done: #32a467;
-  --warn: #ec9a3c;
-  --err: #e76a6e;
-  --on-status: #ffffff;
+  --done: #3fcf8e;
+  --warn: #f2a93b;
+  --err: #ff6b6b;
+  --info: #5eb0ff;
+  --done-soft: #12291f;
+  --warn-soft: #33250f;
+  --err-soft: #3a1a1e;
+  --info-soft: #10243a;
+  --on-status: #0f1115;
 }
 
 /* Correct shell before the JS module boots (the inline guard in index.html
@@ -122,44 +147,45 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    /* Gotham: Blueprint's dark grays, flat and dense, blue for anything active. */
-    --bg: #1c2127;
-    --tint-a: transparent;
-    --tint-b: transparent;
+    --bg: #0f1115;
+    --tint-a: rgba(169, 139, 255, 0.06);
+    --tint-b: rgba(94, 176, 255, 0.03);
     --tint-c: transparent;
 
-    --ink: #f6f7f9;
-    --ink-2: #abb3bf;
-    --line: rgba(255, 255, 255, 0.15);
-    --card: #252a31;
-    --sunken: rgba(17, 20, 24, 0.55);
-    --accent: #4c90f0;
-    --accent-soft: rgba(45, 114, 210, 0.24);
-    --accent-ink: #ffffff;
-    --btn: #383e47;
-    --btn-hover: #404854;
-    --btn-line: rgba(255, 255, 255, 0.12);
+    --ink: #e8eaee;
+    --ink-2: #9ba3b1;
+    --line: #2c313b;
+    --line-soft: #232831;
+    --card: #171a20;
+    --raised: #1e222a;
+    --sunken: #0b0d10;
+    --accent: #a98bff;
+    --accent-hover: #bca5ff;
+    --accent-soft: #2a2344;
+    --accent-ink: #130b2e;
+    --focus: #b69cff;
+    --btn: #1e222a;
+    --btn-hover: #252a33;
+    --btn-line: #2c313b;
 
-    --glass: #252a31;
-    --glass-strong: #2f343c;
-    --glass-border: rgba(255, 255, 255, 0.15);
-    --glass-highlight: rgba(255, 255, 255, 0.06);
-    --blur: 0px;
-    --sat: 100%;
+    --glass: #171a20;
+    --glass-strong: #1e222a;
+    --glass-border: #2c313b;
+    --glass-highlight: rgba(255, 255, 255, 0.04);
 
-    --shadow-1: 0 1px 1px rgba(17, 20, 24, 0.5);
-    --shadow-2: 0 1px 1px rgba(17, 20, 24, 0.5), 0 2px 6px rgba(17, 20, 24, 0.4);
-    --shadow-3: 0 2px 4px rgba(17, 20, 24, 0.5), 0 8px 24px rgba(17, 20, 24, 0.5);
+    --shadow-1: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    --shadow-2: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 4px 12px rgba(0, 0, 0, 0.35);
+    --shadow-3: 0 8px 24px rgba(0, 0, 0, 0.5);
 
-    --r-sm: 2px;
-    --r-md: 3px;
-    --r-lg: 4px;
-    --r-xl: 6px;
-
-    --done: #32a467;
-    --warn: #ec9a3c;
-    --err: #e76a6e;
-    --on-status: #ffffff;
+    --done: #3fcf8e;
+    --warn: #f2a93b;
+    --err: #ff6b6b;
+    --info: #5eb0ff;
+    --done-soft: #12291f;
+    --warn-soft: #33250f;
+    --err-soft: #3a1a1e;
+    --info-soft: #10243a;
+    --on-status: #0f1115;
   }
 }
 
@@ -1296,6 +1322,15 @@ th.mono {
 }
 .panel.sim ul.sources label { display: flex; gap: 6px; align-items: center; cursor: pointer; }
 .panel.sim ul.ledcolours select { font: inherit; padding: 2px 4px; }
+.panel.sim .testpick { display: flex; gap: 6px; align-items: center; }
+.panel.sim .testpick select { flex: 1; min-width: 0; font: inherit; padding: 3px 4px; }
+.panel.sim .testcase { margin-top: 6px; padding: 6px 8px; border-left: 3px solid var(--hairline, #eee7d8); font-size: 12px; }
+.panel.sim .testcase p { margin: 2px 0; }
+.panel.sim .testcase.pass { border-left-color: var(--done); }
+.panel.sim .testcase.fail { border-left-color: var(--err); }
+.panel.sim .testcase .verdict { font-weight: 600; }
+.panel.sim .testcase.pass .verdict { color: var(--done); }
+.panel.sim .testcase.fail .verdict { color: var(--err); }
 .panel.sim table.live { width: 100%; border-collapse: collapse; font-size: 12px; }
 .panel.sim table.live th { text-align: left; font-weight: 600; color: var(--ink-muted, #5b6270); font-size: 11px; }
 .panel.sim table.live td, .panel.sim table.live th { padding: 2px 4px; border-bottom: 1px solid var(--hairline, #eee7d8); }
@@ -1418,15 +1453,38 @@ th.mono {
 }
 @media print { .view3d { display: none !important; } }
 
-/* ---------- Gotham skin (both themes): flat, dense, squared, quiet ---------- */
-
-body::before {
-  display: none;
-}
+/* ---------- Lab Bench skin (both themes) ----------
+ *
+ * Neutral chrome so the board is the only colourful thing on screen; violet
+ * marks whatever is active or primary; status colours (green, amber, red)
+ * appear only in the panel, always with a word, as soft pills. 4 pt spacing,
+ * 6 / 8 / 12 px radii, 13-14 px UI text, 120-180 ms motion.
+ */
 
 body {
   font-size: 14px;
+  letter-spacing: -0.003em;
 }
+
+/* A faint violet wash in the corner of the page: enough to make the chrome
+   feel designed, far too faint to tint the board. */
+body::before {
+  display: block;
+  background:
+    radial-gradient(48vmax 36vmax at 8% -6%, var(--tint-a), transparent 64%),
+    radial-gradient(40vmax 30vmax at 100% 0%, var(--tint-b), transparent 60%);
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+/* ----- surfaces ----- */
 
 .glass,
 header.appbar,
@@ -1438,107 +1496,635 @@ header.appbar,
 .board-card {
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
-  box-shadow: var(--shadow-1);
+  background: var(--card);
   border: 1px solid var(--line);
-  border-radius: var(--r-lg);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-1);
 }
+
+/* ----- app bar ----- */
+
+header.appbar {
+  top: 12px;
+  padding: 8px 10px 8px 12px;
+  gap: 8px 12px;
+}
+
+header h1 {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* The brand mark: public/favicon.svg inlined (a face made of breadboard
+   parts: two holes for eyes, a jumper wire for a smile), so it needs no
+   extra request. */
+header.appbar h1::before,
+.home header h1::before {
+  content: "";
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' width='32' height='32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%238b5cf6'/%3E%3Cstop offset='1' stop-color='%235a2fc2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url%28%23g%29'/%3E%3Cg fill='%23fff' fill-opacity='.3'%3E%3Ccircle cx='6' cy='6' r='1.2'/%3E%3Ccircle cx='16' cy='6' r='1.2'/%3E%3Ccircle cx='26' cy='6' r='1.2'/%3E%3C/g%3E%3Ccircle cx='11' cy='12.5' r='2.4' fill='%23fff'/%3E%3Ccircle cx='21' cy='12.5' r='2.4' fill='%23fff'/%3E%3Cpath d='M8.5 19C10 25.5 22 25.5 23.5 19' fill='none' stroke='%23fff' stroke-width='2.6' stroke-linecap='round'/%3E%3Ccircle cx='8.5' cy='19' r='2.3' fill='%23fff'/%3E%3Ccircle cx='23.5' cy='19' r='2.3' fill='%23fff'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+  box-shadow: 0 1px 2px rgba(64, 24, 160, 0.3);
+}
+
+header .path {
+  font-size: 12px;
+  border-radius: var(--r-md);
+  padding: 3px 8px;
+  border: 1px solid var(--line-soft);
+}
+
+header .back {
+  font: 500 13px/1 var(--font-body);
+  border-radius: var(--r-md);
+  padding: 8px 10px;
+}
+
+/* ----- buttons ----- */
 
 button,
 .btn {
+  height: 32px;
   border-radius: var(--r-md);
   background: var(--btn);
-  border-color: var(--btn-line);
+  border: 1px solid var(--btn-line);
   box-shadow: var(--shadow-1);
-  font-weight: 500;
-  padding: 6px 12px;
+  color: var(--ink);
+  font: 500 13px/1 var(--font-body);
+  padding: 0 12px;
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
 }
 
 button:hover,
 .btn:hover {
   background: var(--btn-hover);
+  border-color: color-mix(in srgb, var(--ink) 22%, var(--btn-line));
+  box-shadow: var(--shadow-1);
   transform: none;
 }
 
-.btn.is-on,
-button.is-on,
+button:active,
+.btn:active {
+  transform: translateY(0.5px);
+}
+
+button:disabled,
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 button.primary,
-.btn.primary {
+.btn.primary,
+.btn.is-on,
+button.is-on {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--accent-ink);
 }
 
+button.primary:hover,
+.btn.primary:hover,
+.btn.is-on:hover,
+button.is-on:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  filter: none;
+}
+
+button.ghost,
+.btn.ghost {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--ink-2);
+}
+
+button.ghost:hover,
+.btn.ghost:hover {
+  background: var(--sunken);
+  border-color: transparent;
+  color: var(--ink);
+}
+
+/* ----- form controls ----- */
+
+input,
+select {
+  height: 32px;
+  font: 13px var(--font-mono);
+  padding: 0 10px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  background: var(--card);
+  transition: border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
+}
+
+select {
+  font-family: var(--font-body);
+  cursor: pointer;
+}
+
+input:hover,
+select:hover {
+  border-color: color-mix(in srgb, var(--ink) 25%, var(--line));
+}
+
+input:focus,
+select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+input[type="checkbox"] {
+  height: 18px;
+  border-radius: 5px;
+  border: 1.5px solid color-mix(in srgb, var(--ink) 30%, var(--line));
+}
+
+input[type="checkbox"]:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* ----- side panel and tabs ----- */
+
+.panels {
+  gap: 10px;
+}
+
+/* Underline tabs in one scrollable row: seven tabs read as a list of
+   places, not as seven equally loud buttons. */
 .tabs {
+  display: flex;
   gap: 0;
-  padding: 0;
-  /* A flex item in the panel column: never let it shrink under the panel. */
+  padding: 0 4px;
   flex: none;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .tabs button {
+  height: 42px;
+  flex: 1 0 auto;
+  padding: 0 6px;
+  border: 0;
   border-radius: 0;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  font-size: 11px;
-  font-weight: 600;
-  padding: 10px 6px;
-  border-bottom: 2px solid transparent;
+  background: transparent;
+  box-shadow: none;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-2);
+  position: relative;
+}
+
+.tabs button::after {
+  content: "";
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: transparent;
+  transition: background var(--t-med) var(--ease);
+}
+
+.tabs button:hover {
+  background: transparent;
+  border: 0;
+  color: var(--ink);
 }
 
 .tabs button.active {
   background: transparent;
   color: var(--ink);
-  border-bottom-color: var(--accent);
   box-shadow: none;
+  border: 0;
 }
 
-.panel h2,
-.legend-title,
-.steps li.phase,
-.home h2,
-.home .section {
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+.tabs button.active::after {
+  background: var(--accent);
+}
+
+.panel {
+  padding: 16px 18px;
+}
+
+.panel h2 {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-transform: none;
+  color: var(--ink);
+  margin: 0 0 6px;
+}
+
+.panel h3,
+.panel.sim h3 {
   font-size: 11px;
   font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  margin: 18px 0 6px;
+}
+
+.muted {
   color: var(--ink-2);
 }
 
-header h1 {
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-}
-
-.legend span,
-.statuschip,
-.progress,
-.progress i,
-.view3d-legend span[data-legend],
-.view3d-mode {
+.panel > ul li {
   border-radius: var(--r-md);
 }
 
-.panel > ul li:nth-child(odd),
-.steps li.active {
+.panel > ul li:nth-child(odd) {
+  background: transparent;
+}
+
+.panel > ul li + li {
+  border-top: 1px solid var(--line-soft);
+}
+
+/* ----- build guide ----- */
+
+.progress {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--sunken);
+}
+
+.progress i {
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 60%, var(--info)));
+}
+
+.steps {
+  gap: 1px;
+}
+
+.steps li {
+  padding: 8px 10px;
+  border-radius: var(--r-lg);
+  transition: background var(--t-fast) var(--ease);
+}
+
+.steps li:hover {
   background: var(--sunken);
 }
 
 .steps li.active {
-  box-shadow: inset 2px 0 0 var(--accent);
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
-.toolbar,
-.legend {
+.steps li.phase {
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  border-bottom-color: var(--line-soft);
+  margin: 18px 0 4px;
+}
+
+/* Hole and pin names are the thing students match against the real board:
+   mono, tabular, on a chip so they scan as tokens. */
+code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  background: var(--sunken);
+  border: 1px solid var(--line-soft);
+  padding: 0 5px;
+  border-radius: var(--r-sm);
+}
+
+/* ----- tables ----- */
+
+th {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  border-bottom-color: var(--line);
+}
+
+td {
+  border-bottom-color: var(--line-soft);
+}
+
+tr:hover td {
+  background: color-mix(in srgb, var(--sunken) 70%, transparent);
+}
+
+/* ----- checks: soft pills, never solid blocks of status colour ----- */
+
+.check {
+  border: 1px solid var(--line-soft);
+  border-left: 3px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--card);
+  padding: 9px 12px;
+}
+
+.check b {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.check.error {
+  border-left-color: var(--err);
+}
+
+.check.error b {
+  background: var(--err-soft);
+  color: var(--err);
+}
+
+.check.warning {
+  border-left-color: var(--warn);
+}
+
+.check.warning b {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.check.info {
+  border-left-color: var(--done);
+}
+
+.check.info b {
+  background: var(--done-soft);
+  color: var(--done);
+}
+
+/* ----- options ----- */
+
+.options label {
+  border-bottom-color: var(--line-soft);
+  font-size: 13px;
+}
+
+/* ----- board card, toolbar, legend ----- */
+
+#board {
+  border-radius: var(--r-lg);
+}
+
+.toolbar {
+  gap: 8px;
   font-size: 12px;
 }
 
-#board {
+.tgroup {
+  background: var(--sunken);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-lg);
+  padding: 2px;
+}
+
+.tgroup .btn,
+.tgroup button {
+  height: 28px;
+  border-radius: var(--r-md);
+  font-size: 12.5px;
+  padding: 0 10px;
+}
+
+.tgroup .btn:hover,
+.tgroup button:hover {
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: var(--shadow-1);
+}
+
+/* An "on" toggle in a toolbar group is a selected segment: accent text on a
+   soft accent fill, so solid violet stays for the one primary action. */
+.tgroup .btn.is-on,
+.tgroup button.is-on {
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--accent);
+  box-shadow: none;
+}
+
+.statuschip {
+  border-radius: var(--r-lg);
+  border: 1px solid var(--line-soft);
+  font-size: 12px;
+}
+
+.legend {
+  gap: 4px;
+  font-size: 12px;
+}
+
+.legend span {
   border-radius: var(--r-md);
 }
 
-::selection {
-  background: rgba(45, 114, 210, 0.45);
+.legend i {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+}
+
+/* ----- simulate panel: tests ----- */
+
+.panel.sim .testpick select {
+  height: 34px;
+  font-weight: 500;
+}
+
+.panel.sim .testcase {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-soft);
+  border-left-width: 3px;
+  border-radius: var(--r-lg);
+  background: var(--card);
+}
+
+.panel.sim .testcase.pass {
+  border-left-color: var(--done);
+}
+
+.panel.sim .testcase.fail {
+  border-left-color: var(--err);
+}
+
+.panel.sim .testcase .verdict {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.panel.sim .testcase.pass .verdict {
+  background: var(--done-soft);
+  color: var(--done);
+}
+
+.panel.sim .testcase.fail .verdict {
+  background: var(--err-soft);
+  color: var(--err);
+}
+
+.panel.sim .testcase.pass .verdict::before {
+  content: "\2713";
+}
+
+.panel.sim .testcase.fail .verdict::before {
+  content: "\2715";
+}
+
+.panel.sim ul.sources li,
+.panel.sim ul.ledcolours li,
+.panel.sim table.live td,
+.panel.sim table.live th {
+  border-bottom-color: var(--line-soft);
+}
+
+/* ----- home ----- */
+
+.home header {
+  margin-bottom: 28px;
+}
+
+.home h1 {
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.home header h1::before {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+}
+
+.home header .sub {
+  font-size: 15px;
+  max-width: 60ch;
+  margin-top: 8px;
+}
+
+.home h2,
+.home .section {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+.home .open {
+  padding: 18px;
+}
+
+.dropzone {
+  border-radius: var(--r-lg);
+  border: 1.5px dashed color-mix(in srgb, var(--accent) 35%, var(--line));
+  background: color-mix(in srgb, var(--accent-soft) 55%, var(--card));
+  padding: 32px 16px;
+}
+
+.dropzone.over {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.projects a {
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--card);
+  box-shadow: var(--shadow-1);
+  padding: 12px 14px;
+  font-weight: 500;
+  transition: border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
+}
+
+.projects a:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  box-shadow: var(--shadow-2);
+  transform: translateY(-1px);
+}
+
+.org-shelf {
+  border-radius: var(--r-xl);
+  background: var(--card);
+  border-color: var(--line);
+  box-shadow: var(--shadow-1);
+}
+
+.org-shelf.is-unfiled {
+  background: transparent;
+  box-shadow: none;
+}
+
+/* ----- connect, toast ----- */
+
+.tunnel-state.is-on {
+  background: var(--done-soft);
+  color: var(--done);
+}
+
+.tunnel-state.is-error {
+  background: var(--err-soft);
+  color: var(--err);
+}
+
+.warn-note {
+  border-radius: var(--r-md);
+  background: var(--warn-soft);
+}
+
+/* Inverse pill: the one thing that floats over everything should not look like a panel. */
+.toast {
+  background: var(--ink);
+  color: var(--bg);
+  border-color: transparent;
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-3);
+  font-size: 13px;
+}
+
+/* ----- scrollbars ----- */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--ink) 22%, transparent) transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
 }
 
 /* ---------- collapsible side panel ---------- */
@@ -1809,14 +2395,30 @@ header h1 {
 }
 
 .org-items {
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
 }
 
+/* One card per project: the grip, the name and path, and when it was last
+   opened all sit inside it, so a shelf reads as a tidy grid of tiles. */
 .org-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-items: start;
+  column-gap: 6px;
+  padding: 10px 12px 10px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--card);
+  box-shadow: var(--shadow-1);
   cursor: grab;
+  transition: border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
+}
+
+.org-item:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  box-shadow: var(--shadow-2);
+  transform: translateY(-1px);
 }
 
 .org-item.is-dragging {
@@ -1824,14 +2426,42 @@ header h1 {
 }
 
 .org-item .grip {
+  grid-row: 1 / 3;
+  align-self: center;
   color: var(--ink-2);
   font-size: 14px;
   user-select: none;
+  opacity: 0.35;
+  transition: opacity var(--t-fast) var(--ease);
 }
 
-.org-item a {
-  flex: 1;
+.org-item:hover .grip {
+  opacity: 1;
+}
+
+.projects .org-item a {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  transform: none;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.projects .org-item a:hover {
+  box-shadow: none;
+  transform: none;
+}
+
+.org-item a b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .org-item a span {
@@ -1841,16 +2471,29 @@ header h1 {
 }
 
 .org-item .badge {
-  font: 500 10px var(--font-mono);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--done);
+  grid-column: 2;
+  justify-self: start;
+  margin-top: 8px;
+  font: 500 11px var(--font-body);
+  color: var(--ink-2);
+  background: var(--sunken);
+  border: 1px solid var(--line-soft);
+  padding: 1px 8px;
+  border-radius: 999px;
   white-space: nowrap;
   font-style: normal;
 }
 
-.org-item .badge.muted {
-  color: var(--ink-2);
+/* Opened recently: the one tile property worth a dot of colour. */
+.org-item .badge:not(.muted)::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: 1px;
 }
 
 .org-empty {
@@ -1961,3 +2604,38 @@ body.ws-open { overflow: hidden; }
 .ws-swatches button.is-on { border-color: #4da3ff; box-shadow: 0 0 0 2px rgba(77, 163, 255, .35); }
 .ws-card-hint { margin: 8px 0 0; font-size: 11px; opacity: .6; }
 .ws-card-warn { margin: 0 0 8px; color: #fbbf24; }
+/* The wordmark: "Mate" in the accent, so the name reads as two words. */
+.home h1 .brand-mate {
+  color: var(--accent);
+}
+
+/* Parts list: a small picture of each part beside its line. */
+.partslist {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.partslist li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+.partslist li:last-child {
+  border-bottom: 0;
+}
+.partslist .part-icon {
+  flex: none;
+  background: var(--sunken);
+  border-radius: 6px;
+  padding: 2px;
+}
+.resistor-kind {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0 0 8px;
+}

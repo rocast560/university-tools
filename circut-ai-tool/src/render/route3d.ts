@@ -23,7 +23,7 @@
 
 import { holeKey } from '../layout/board.ts';
 import type { BoardSpec, Hole, Package, Row, Wire, WirePath, WirePoint } from '../layout/types.ts';
-import { HEIGHT, P, pt, ROWY, X0 } from './geometry.ts';
+import { HEIGHT, P, pt, ROWY, tierCount, X0 } from './geometry.ts';
 import { packageRects, wirePolylines } from './ortho.ts';
 
 export type Point = [number, number];
@@ -191,8 +191,8 @@ export interface Rect {
 }
 
 /** Package bodies with a little air round them: a wire must never cross one. */
-export function chipRects(packages: Package[]): Rect[] {
-  return packageRects(packages).map((r, i) => ({ x1: r.x1 - AIR, y1: r.y1 - AIR, x2: r.x2 + AIR, y2: r.y2 + AIR, id: packages[i].id }));
+export function chipRects(packages: Package[], board: BoardSpec): Rect[] {
+  return packageRects(packages, board).map((r, i) => ({ x1: r.x1 - AIR, y1: r.y1 - AIR, x2: r.x2 + AIR, y2: r.y2 + AIR, id: packages[i].id }));
 }
 
 const grow = (r: Rect, m: number): Rect => ({ x1: r.x1 - m, y1: r.y1 - m, x2: r.x2 + m, y2: r.y2 + m, id: r.id });
@@ -266,7 +266,7 @@ export function checkPlan(plan: Point[], packages: Package[], board: BoardSpec, 
   const width = 2 * X0 + (board.cols - 1) * P;
   if (plan.some(([x, y]) => x < WIRE_R || x > width - WIRE_R || y < WIRE_R || y > HEIGHT - WIRE_R)) return 'the path leaves the board';
   const ends = [plan[0], plan[n - 1]];
-  for (const r of chipRects(packages)) {
+  for (const r of chipRects(packages, board)) {
     if (ends.some((e) => inside(e, r))) continue;
     for (let i = 0; i + 1 < n; i++) if (crosses(plan[i], plan[i + 1], r)) return `the path runs through ${r.id}`;
   }
@@ -406,7 +406,7 @@ class Grid {
   constructor(input: RouteInput) {
     this.kMax = 2 * input.board.cols - 1;
     this.nk = this.kMax - this.kMin + 1;
-    this.hard = chipRects(input.packages);
+    this.hard = chipRects(input.packages, input.board);
     this.hug = this.hard.map((r) => grow(r, HUG));
     for (const pins of Object.values(input.pinHoles)) for (const h of Object.values(pins)) this.taken.add(this.at(pt(h)));
     for (const w of input.wires) {
@@ -810,6 +810,9 @@ function crossing(a: Point, b: Point, c: Point, d: Point): Point | null {
 
 /** Every wire's route, in the order of `input.wires`, and what went wrong on the way. Never throws. */
 export function routeWires(input: RouteInput, saved: Record<string, WirePath> = {}, opts: { maxExpand?: number } = {}): RouteResult {
+  // The lattice is one board's rows. A stacked or double board takes the
+  // corridor router's square wires, which know the tiers, until it learns them.
+  if (tierCount(input.board) > 1) return { routes: wirePolylines(input.wires, input.packages, input.board).map((plan) => ({ plan, lifts: [] })), warnings: [] };
   const grid = new Grid(input);
   const cap = opts.maxExpand ?? MAX_EXPAND;
   const warnings: string[] = [];

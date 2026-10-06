@@ -24,6 +24,8 @@ export interface ProjectState {
   panel: 'guide' | 'sim' | 'parts' | 'pinouts' | 'checks' | 'truth' | 'options';
   /** Whether the analog simulation loop is running. */
   running: boolean;
+  /** The saved test last picked in the Simulate panel, if any. */
+  simTest?: number | null;
   /**
    * The live AnalogState never lives here. Every store.set() re-renders the
    * panels, which at 60 Hz would be far worse than anything the solver costs,

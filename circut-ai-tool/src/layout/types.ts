@@ -1,6 +1,8 @@
 // Types shared by the engine, checks, simulator, guide, renderer and client.
 
 import { LED_COLOURS, type LedColour } from '../parts/led.ts';
+import { normalizeTests, type SimTest } from '../sim/test-spec.ts';
+import { RESISTOR_KINDS, type ResistorKind } from '../parts/resistor.ts';
 
 export type Row = 'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g' | 'h' | 'i' | 'j' | 'T+' | 'T-' | 'B+' | 'B-';
 
@@ -10,13 +12,15 @@ export interface Hole {
 }
 
 export interface Options {
-  board: 'auto' | 'half' | 'full';
+  board: 'auto' | 'half' | 'full' | 'double' | 'stacked';
   railSplit: boolean | null;
   dipSwitchPositions: number;
   packageOrder: string[];
   substitutions: Record<string, string>;
   /** How the flat board draws jumpers: bowed arcs, or square-cornered runs along the corridors between rows. */
   wireStyle: 'arc' | 'orthogonal';
+  /** Tan carbon-film resistors (four bands) or blue metal-film ones (five bands). */
+  resistorKind: ResistorKind;
 }
 
 export interface Sidecar {
@@ -40,6 +44,8 @@ export interface Sidecar {
    * src/render/route3d.ts. Absent from sidecars written before phase 2.
    */
   wirePaths: Record<string, WirePath>;
+  /** Saved test cases for the Simulate panel: switch settings and what the board should then show. */
+  tests: SimTest[];
 }
 
 /** One bend of a hand-shaped jumper, in grid units rather than SVG units. */
@@ -57,9 +63,9 @@ export interface WirePath {
   points: WirePoint[];
 }
 
-export const defaultOptions = (): Options => ({ board: 'auto', railSplit: null, dipSwitchPositions: 0, packageOrder: [], substitutions: {}, wireStyle: 'arc' });
+export const defaultOptions = (): Options => ({ board: 'auto', railSplit: null, dipSwitchPositions: 0, packageOrder: [], substitutions: {}, wireStyle: 'arc', resistorKind: 'carbon' });
 
-export const emptySidecar = (): Sidecar => ({ version: 1, options: defaultOptions(), pinned: {}, colors: {}, placed: {}, ledColors: {}, wirePaths: {} });
+export const emptySidecar = (): Sidecar => ({ version: 1, options: defaultOptions(), pinned: {}, colors: {}, placed: {}, ledColors: {}, wirePaths: {}, tests: [] });
 
 const ROWS = new Set(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'T+', 'T-', 'B+', 'B-']);
 
@@ -91,11 +97,12 @@ export function normalizeSidecar(x: unknown): Sidecar {
   if (!x || typeof x !== 'object') return s;
   const o = x as Partial<Sidecar>;
   const opt = (o.options ?? {}) as Partial<Options>;
-  if (opt.board === 'half' || opt.board === 'full') s.options.board = opt.board;
+  if (opt.board === 'half' || opt.board === 'full' || opt.board === 'double' || opt.board === 'stacked') s.options.board = opt.board;
   if (typeof opt.railSplit === 'boolean') s.options.railSplit = opt.railSplit;
   if (Number.isInteger(opt.dipSwitchPositions) && (opt.dipSwitchPositions as number) >= 0) s.options.dipSwitchPositions = opt.dipSwitchPositions as number;
   if (Array.isArray(opt.packageOrder)) s.options.packageOrder = opt.packageOrder.filter((r) => typeof r === 'string');
   if (opt.wireStyle === 'arc' || opt.wireStyle === 'orthogonal') s.options.wireStyle = opt.wireStyle;
+  if ((RESISTOR_KINDS as readonly unknown[]).includes(opt.resistorKind)) s.options.resistorKind = opt.resistorKind as ResistorKind;
   if (opt.substitutions && typeof opt.substitutions === 'object') for (const [k, v] of Object.entries(opt.substitutions)) if (typeof v === 'string') s.options.substitutions[k] = v;
   if (o.pinned && typeof o.pinned === 'object') {
     for (const [ref, pins] of Object.entries(o.pinned)) {
@@ -126,14 +133,23 @@ export function normalizeSidecar(x: unknown): Sidecar {
       if (clean) s.wirePaths[key] = clean;
     }
   }
+  s.tests = normalizeTests(o.tests);
   return s;
 }
 
 export interface BoardSpec {
   cols: number;
-  kind: 'half' | 'full';
+  /**
+   * double = two full boards end to end; stacked = the same two boards one
+   * above the other. Both number their columns 1-126 straight through, so a
+   * hole name never depends on how the boards are drawn, and split the rails
+   * between the boards.
+   */
+  kind: 'half' | 'full' | 'double' | 'stacked';
   splitCol: number | null;
   railGapEvery: number;
+  /** Boards drawn one above the other; columns wrap every cols / tiers. Absent means 1. */
+  tiers?: number;
 }
 
 export interface SupplyLead {

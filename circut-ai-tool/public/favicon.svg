@@ -1,17 +1,22 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="Circuit AI Tool">
-  <!-- Circuit AI Tool: a jumper wire arcing over breadboard holes. Tile and wire
-       take the dark theme's background and accent. Keep this comment free of
-       double hyphens (CSS variable names) - they are illegal inside an XML
-       comment and make the whole file unparseable, so the favicon silently
-       fails to render. -->
-  <rect width="32" height="32" rx="7" fill="#0e1014"/>
-  <rect x=".6" y=".6" width="30.8" height="30.8" rx="6.4" fill="none" stroke="#2a303a" stroke-width="1.2"/>
-  <g fill="#586070">
-    <circle cx="8" cy="8" r="1.5"/><circle cx="16" cy="8" r="1.5"/><circle cx="24" cy="8" r="1.5"/>
-    <circle cx="8" cy="16" r="1.5"/><circle cx="16" cy="16" r="1.5"/><circle cx="24" cy="16" r="1.5"/>
-    <circle cx="8" cy="24" r="1.5"/><circle cx="16" cy="24" r="1.5"/><circle cx="24" cy="24" r="1.5"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="BenchMate">
+  <!-- BenchMate: a friendly face made of breadboard parts on the violet
+       tile. Two holes are the eyes and a jumper wire, both ends seated in
+       holes, is the smile. The same mark is inlined in client/styles.css;
+       keep the two in step. No double hyphens in this comment: they are
+       illegal inside an XML comment. -->
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8b5cf6"/>
+      <stop offset="1" stop-color="#5a2fc2"/>
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="8" fill="url(#g)"/>
+  <g fill="#fff" fill-opacity=".3">
+    <circle cx="6" cy="6" r="1.2"/><circle cx="16" cy="6" r="1.2"/><circle cx="26" cy="6" r="1.2"/>
   </g>
-  <path d="M8 24C8 12 24 12 24 24" fill="none" stroke="#6aa8ff" stroke-width="2.8" stroke-linecap="round"/>
-  <circle cx="8" cy="24" r="2.9" fill="#6aa8ff"/>
-  <circle cx="24" cy="24" r="2.9" fill="#6aa8ff"/>
+  <circle cx="11" cy="12.5" r="2.4" fill="#fff"/>
+  <circle cx="21" cy="12.5" r="2.4" fill="#fff"/>
+  <path d="M8.5 19C10 25.5 22 25.5 23.5 19" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/>
+  <circle cx="8.5" cy="19" r="2.3" fill="#fff"/>
+  <circle cx="23.5" cy="19" r="2.3" fill="#fff"/>
 </svg>

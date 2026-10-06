@@ -7,7 +7,7 @@ import type { EngineResult } from '../layout/engine.ts';
 import type { Design } from '../netlist.ts';
 import { displayName, isAutoNamed, isUnconnected } from '../netlist.ts';
 import { powerKind } from '../parts/catalog.ts';
-import { DECODER_PINS, DEMUX_PINS, demuxOutputs, icInfo, type GateKind } from '../parts/gates.ts';
+import { ADDER_PINS, adderOutputs, DECODER_PINS, DEMUX_PINS, demuxOutputs, icInfo, type GateKind } from '../parts/gates.ts';
 
 export interface SimInput {
   name: string;
@@ -44,6 +44,16 @@ export interface SimDemux {
   outputs: string[];
 }
 
+export interface SimAdder {
+  ref: string;
+  /** Bit 0 first. */
+  a: string[];
+  b: string[];
+  carryIn: string;
+  sum: string[];
+  carryOut: string;
+}
+
 export interface SimLed {
   ref: string;
   cathode: string;
@@ -62,6 +72,8 @@ export interface SimModel {
   gates: SimGate[];
   decoders: SimDecoder[];
   demuxes: SimDemux[];
+  /** Optional so models saved before adders existed still load. */
+  adders?: SimAdder[];
   leds: SimLed[];
   displays: SimDisplay[];
   resistors: [string, string][];
@@ -108,7 +120,7 @@ export function evalGate(kind: GateKind, values: number[]): 0 | 1 {
 }
 
 export function buildSimModel(design: Design, res: EngineResult): SimModel {
-  const model: SimModel = { inputs: [], gates: [], decoders: [], demuxes: [], leds: [], displays: [], resistors: [], power: {}, notSimulated: [] };
+  const model: SimModel = { inputs: [], gates: [], decoders: [], demuxes: [], adders: [], leds: [], displays: [], resistors: [], power: {}, notSimulated: [] };
   for (const n of res.power.plus) model.power[n] = 1;
   for (const n of res.power.gnd) model.power[n] = 0;
   for (const n of res.power.minus) model.power[n] = 0;
@@ -171,6 +183,12 @@ export function buildSimModel(design: Design, res: EngineResult): SimModel {
           model.demuxes.push({ ref, select: p.select.map(at), enableLow: p.enableLow.map(at), enableHigh: at(p.enableHigh), outputs: p.outputs.map(at) });
           break;
         }
+        if (info.spec.adder) {
+          const p = ADDER_PINS;
+          const at = (pin: number) => net(String(pin));
+          model.adders!.push({ ref, a: p.a.map(at), b: p.b.map(at), carryIn: at(p.carryIn), sum: p.sum.map(at), carryOut: at(p.carryOut) });
+          break;
+        }
         info.spec.gates.forEach((g, i) => {
           const out = net(String(g.output));
           if (isUnconnected(out)) return;
@@ -229,6 +247,15 @@ export function simulate(model: SimModel, levels: Record<string, 0 | 1>): SimRes
         changed = true;
       });
     }
+    for (const ad of model.adders ?? []) {
+      const out = adderOutputs(ad.a.map(val), ad.b.map(val), val(ad.carryIn));
+      [...ad.sum, ad.carryOut].forEach((net, i) => {
+        const v = i < 4 ? out.sum[i] : out.carryOut;
+        if (isUnconnected(net) || L[net] === v) return;
+        L[net] = v;
+        changed = true;
+      });
+    }
     if (!changed) break;
   }
   // A net that is only reached through a resistor takes the level of the far side.
@@ -258,7 +285,7 @@ export function simulate(model: SimModel, levels: Record<string, 0 | 1>): SimRes
 export function truthTable(model: SimModel, maxInputs = 6): TruthTable | null {
   const inputs = model.inputs;
   if (!inputs.length || inputs.length > maxInputs) return null;
-  const outputNets = [...new Set([...model.gates.map((g) => g.output), ...model.decoders.flatMap((d) => Object.values(d.outputs)), ...model.demuxes.flatMap((d) => d.outputs)])]
+  const outputNets = [...new Set([...model.gates.map((g) => g.output), ...model.decoders.flatMap((d) => Object.values(d.outputs)), ...model.demuxes.flatMap((d) => d.outputs), ...(model.adders ?? []).flatMap((d) => [...d.sum, d.carryOut])])]
     .filter((n) => !isAutoNamed(n) && !isUnconnected(n))
     .sort((a, b) => displayName(a).localeCompare(displayName(b), undefined, { numeric: true }));
   const leds = model.leds.map((l) => l.ref);

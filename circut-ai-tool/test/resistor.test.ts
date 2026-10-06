@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { colourBands } from '../src/parts/resistor.ts';
+import { colourBands, resistorBands } from '../src/parts/resistor.ts';
 
 const names = (value: string) => colourBands(value)?.map((b) => b.name) ?? null;
 
@@ -29,5 +29,25 @@ describe('colourBands', () => {
 
   test('every band carries a colour a renderer can paint', () => {
     for (const b of colourBands('4k7')!) expect(b.hex).toMatch(/^#[0-9A-F]{6}$/i);
+  });
+});
+
+describe('resistorBands', () => {
+  const five = (value: string) => resistorBands(value, 'metal')?.map((b) => b.name) ?? null;
+
+  test('metal film reads the five-band 1% code: three digits, multiplier, brown tolerance', () => {
+    expect(five('1k')).toEqual(['brown', 'black', 'black', 'brown', 'brown']);
+    expect(five('330')).toEqual(['orange', 'orange', 'black', 'black', 'brown']);
+    expect(five('4k7')).toEqual(['yellow', 'violet', 'black', 'brown', 'brown']);
+    expect(five('10')).toEqual(['brown', 'black', 'black', 'gold', 'brown']);
+    expect(five('4.7')).toEqual(['yellow', 'violet', 'black', 'silver', 'brown']);
+  });
+
+  test('carbon film keeps the four-band code', () => {
+    expect(resistorBands('1k', 'carbon')).toEqual(colourBands('1k'));
+  });
+
+  test('gives nothing for a value that is not a resistance', () => {
+    expect(resistorBands('oops', 'metal')).toBeNull();
   });
 });

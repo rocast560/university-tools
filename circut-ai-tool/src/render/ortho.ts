@@ -14,7 +14,7 @@
 
 import { isRail } from '../layout/board.ts';
 import type { BoardSpec, Package, Wire } from '../layout/types.ts';
-import { moduleRect, P, pt, ROWY } from './geometry.ts';
+import { moduleRect, P, placeAt, ROWY, tierCount, TIER_PITCH, tierShift } from './geometry.ts';
 
 export type Point = [number, number];
 
@@ -33,16 +33,17 @@ const SUB_H = [0, -5, 5, -10, 10];
 const SUB_V = [0, -4, 4, -8, 8];
 
 /** Where the bodies are, so no run is drawn through a chip. */
-export function packageRects(packages: Package[]): Rect[] {
+export function packageRects(packages: Package[], board: BoardSpec): Rect[] {
   return packages.map((pkg) => {
+    const [dx, dy] = tierShift(board, pkg.col0);
     if (pkg.kind === 'module') {
       const r = moduleRect(pkg);
-      return { x1: r.x1, y1: r.y1, x2: r.x2, y2: r.y2 };
+      return { x1: r.x1 + dx, y1: r.y1 + dy, x2: r.x2 + dx, y2: r.y2 + dy };
     }
     const width = pkg.kind === 'dipswitch' ? (pkg.positions ?? 1) : pkg.pins / 2;
-    const x1 = pt({ col: pkg.col0, row: 'e' })[0] - P / 2 + 2;
-    const x2 = pt({ col: pkg.col0 + width - 1, row: 'e' })[0] + P / 2 - 2;
-    return pkg.kind === 'sevenseg' ? { x1, y1: ROWY.c - 8, x2, y2: ROWY.h + 8 } : { x1, y1: ROWY.e - 7, x2, y2: ROWY.f + 7 };
+    const x1 = placeAt(board, { col: pkg.col0, row: 'e' })[0] - P / 2 + 2;
+    const x2 = placeAt(board, { col: pkg.col0 + width - 1, row: 'e' })[0] + P / 2 - 2;
+    return pkg.kind === 'sevenseg' ? { x1, y1: ROWY.c - 8 + dy, x2, y2: ROWY.h + 8 + dy } : { x1, y1: ROWY.e - 7 + dy, x2, y2: ROWY.f + 7 + dy };
   });
 }
 
@@ -67,9 +68,18 @@ class Router {
   private usedV = new Map<number, [number, number][]>();
   private columns: number[];
 
+  private corridors: number[];
+
   constructor(packages: Package[], board: BoardSpec) {
-    this.rects = packageRects(packages);
-    this.columns = Array.from({ length: board.cols }, (_, i) => pt({ col: i + 1, row: 'a' })[0]);
+    this.rects = packageRects(packages, board);
+    this.columns = [...new Set(Array.from({ length: board.cols }, (_, i) => placeAt(board, { col: i + 1, row: 'a' })[0]))];
+    // Every stacked board has the same corridors, one pitch further down,
+    // and the open space between two boards is a corridor too.
+    this.corridors = [];
+    for (let k = 0; k < tierCount(board); k++) {
+      this.corridors.push(...CORRIDORS.map((y) => y + k * TIER_PITCH));
+      if (k > 0) this.corridors.push(k * TIER_PITCH + (ROWY['B+'] + ROWY['T+'] - TIER_PITCH) / 2);
+    }
   }
 
   private hitsH(y: number, xa: number, xb: number): boolean {
@@ -122,7 +132,7 @@ class Router {
   private lanes(ys: number[]): number[] {
     const mid = ys.reduce((s, y) => s + y, 0) / ys.length;
     const out: number[] = [];
-    for (const c of [...CORRIDORS].sort((a, b) => Math.abs(a - mid) - Math.abs(b - mid))) for (const sub of SUB_H) out.push(c + sub);
+    for (const c of [...this.corridors].sort((a, b) => Math.abs(a - mid) - Math.abs(b - mid))) for (const sub of SUB_H) out.push(c + sub);
     return out;
   }
 
@@ -198,6 +208,7 @@ export function wirePolylines(wires: Wire[], packages: Package[], board: BoardSp
   const out: Point[][] = new Array(wires.length);
   // Short runs first, so they keep the corridor nearest their holes and the
   // long ones fan out beyond them.
+  const pt = (h: Wire['a']) => placeAt(board, h);
   const order = wires.map((w, i) => i).sort((i, j) => {
     const li = Math.abs(pt(wires[i].a)[0] - pt(wires[i].b)[0]) + Math.abs(pt(wires[i].a)[1] - pt(wires[i].b)[1]);
     const lj = Math.abs(pt(wires[j].a)[0] - pt(wires[j].b)[0]) + Math.abs(pt(wires[j].a)[1] - pt(wires[j].b)[1]);

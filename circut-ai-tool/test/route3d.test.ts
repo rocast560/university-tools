@@ -265,3 +265,15 @@ describe('search cap', () => {
     }
   });
 });
+
+describe('stacked and double boards', () => {
+  // The lattice router works on one board's rows; until it learns tiers, a
+  // stacked or double board takes the corridor router's square wires as they are.
+  test('routes come from the stacked-aware corridor router, with no warnings', () => {
+    const board = { cols: 126, kind: 'stacked' as const, splitCol: 63, railGapEvery: 6, tiers: 2 };
+    const wires = [{ net: '/A', a: { col: 5, row: 'a' as const }, b: { col: 70, row: 'j' as const }, role: 'signal' as const }];
+    const r = routeWires({ wires, packages: [], board, pinHoles: {} });
+    expect(r.warnings).toEqual([]);
+    expect(r.routes.map((x) => x.plan)).toEqual(wirePolylines(wires, [], board));
+  });
+});

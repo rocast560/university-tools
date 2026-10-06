@@ -23,11 +23,11 @@ import type { Hole } from '../src/layout/types.ts';
 import type { LayoutDoc } from '../src/pipeline.ts';
 import { liftCrossings, type Span } from '../src/render/altitude.ts';
 import type { Highlight } from '../src/render/index.ts';
-import { P, ROWY, X0 } from '../src/render/geometry.ts';
+import { P, ROWY, tierCols, tierCount, TIER_PITCH, tierShift, X0 } from '../src/render/geometry.ts';
 import { wireControls } from '../src/render/routing.ts';
 import { routeWires, WIRE_R, type Point as PlanPoint, type WireRoute } from '../src/render/route3d.ts';
 import type { AnalogState } from '../src/sim/analog/simulator.ts';
-import { at, BOARD_THICK, buildPackage, buildPart, grainMap, holeX, holeZ, Kit, MM, routeWire, seededRandom, TOP, tube, WIRE_CLEARANCE, WIRE_END_Y, type LedLamp, type Obstacle, type SevenSegLamp, type Way } from './board3d-parts.ts';
+import { at, BOARD_THICK, buildPackage, buildPart, grainMap, holeX, holeZ, Kit, MM, routeWire, seededRandom, setHoleBoard, TOP, tube, WIRE_CLEARANCE, WIRE_END_Y, type LedLamp, type Obstacle, type SevenSegLamp, type Way } from './board3d-parts.ts';
 import { easeOutCubic, frameBox } from './editor3d/focus-math.ts';
 import { flyControls } from './fly.ts';
 import type { V3 } from './wiretube-math.ts';
@@ -40,7 +40,7 @@ import { buildWireMeshes, reshapeWire, type WireMeshes } from './wiretube.ts';
  * any of it, and it is what makes the board read as a manufactured object
  * rather than a slab.
  */
-function topTexture(doc: LayoutDoc, width: number, depth: number): THREE.CanvasTexture {
+function topTexture(doc: LayoutDoc, width: number, depth: number, offset = 0): THREE.CanvasTexture {
   const scale = 2;
   const cv = document.createElement('canvas');
   cv.width = Math.round(width * scale);
@@ -61,7 +61,9 @@ function topTexture(doc: LayoutDoc, width: number, depth: number): THREE.CanvasT
     g.fillRect(random() * width, random() * depth, 1.4, 1.4);
   }
 
-  const cols = doc.board.cols;
+  // One board's worth: a stacked layout paints each board separately, numbering
+  // its columns from where the one above it stopped.
+  const cols = tierCols(doc.board);
   for (const [row, colour] of [['T+', '#d7263d'], ['T-', '#2f6fbf'], ['B-', '#2f6fbf'], ['B+', '#d7263d']] as const) {
     g.strokeStyle = colour;
     g.globalAlpha = 0.5;
@@ -100,9 +102,9 @@ function topTexture(doc: LayoutDoc, width: number, depth: number): THREE.CanvasT
   }
   g.font = '10px ui-monospace, monospace';
   for (let c = 1; c <= cols; c++) {
-    if (c !== 1 && c % 5 !== 0) continue;
-    g.fillText(String(c), X0 + (c - 1) * P, ROWY.a - 12);
-    g.fillText(String(c), X0 + (c - 1) * P, ROWY.j + 18);
+    if (c !== 1 && (c + offset) % 5 !== 0) continue;
+    g.fillText(String(c + offset), X0 + (c - 1) * P, ROWY.a - 12);
+    g.fillText(String(c + offset), X0 + (c - 1) * P, ROWY.j + 18);
   }
 
   const tex = new THREE.CanvasTexture(cv);
@@ -138,7 +140,7 @@ function topBump(doc: LayoutDoc, width: number, depth: number): THREE.CanvasText
     g.fillStyle = '#2b2b2b';
     g.fillRect(x - 2.4, z - 2.4, 4.8, 4.8);
   };
-  const cols = doc.board.cols;
+  const cols = tierCols(doc.board);
   for (const row of ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'] as const) for (let c = 1; c <= cols; c++) socket(X0 + (c - 1) * P, ROWY[row]);
   for (const row of ['T+', 'T-', 'B-', 'B+'] as const) for (let c = 1; c <= cols; c++) if (c % doc.board.railGapEvery !== 0) socket(X0 + (c - 1) * P, ROWY[row]);
   const tex = new THREE.CanvasTexture(cv);
@@ -261,10 +263,13 @@ interface Content {
 }
 
 export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOptions = {}): Board3D & { /** internal, e2e only */ _tintCount(): number; _wireTop(): number; _loseContext(): void; _handles(): { kind: 'segment' | 'bend'; index: number; x: number; y: number }[] } {
-  const depth = 350;
+  /** One board's depth; stacked boards sit one TIER_PITCH apart. */
+  const boardDepth = 350;
+  const depthOf = (d: LayoutDoc) => boardDepth + (tierCount(d.board) - 1) * TIER_PITCH;
+  const depth = depthOf(doc);
   const cz = depth / 2;
   /** The middle of a doc's board along x; it widens when an edit adds columns. */
-  const centreOf = (d: LayoutDoc) => (X0 + (d.board.cols - 1) * P + X0) / 2;
+  const centreOf = (d: LayoutDoc) => (X0 + (tierCols(d.board) - 1) * P + X0) / 2;
   // The lights stay where the mounted board put them; only the content is rebuilt.
   const cx = centreOf(doc);
 
@@ -412,29 +417,35 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
   function build(doc: LayoutDoc): Content {
     const kit = new Kit();
     const M = kit.M;
-    const cols = doc.board.cols;
-    const width = X0 + (cols - 1) * P + X0;
+    // Holes on a stacked layout land on their own board; set before anything is built.
+    setHoleBoard(doc.board);
+    const tiers = tierCount(doc.board);
+    const width = X0 + (tierCols(doc.board) - 1) * P + X0;
     const cx = width / 2;
 
-    const top = kit.keep(topTexture(doc, width, depth));
-    const bump = kit.keep(topBump(doc, width, depth));
-    const topMat = kit.std({ map: top, bumpMap: bump, bumpScale: 1.6, roughness: 0.8, metalness: 0.02 });
+    const bump = kit.keep(topBump(doc, width, boardDepth));
+    const topMats = Array.from({ length: tiers }, (_, k) => kit.std({ map: kit.keep(topTexture(doc, width, boardDepth, k * tierCols(doc.board))), bumpMap: bump, bumpScale: 1.6, roughness: 0.8, metalness: 0.02 }));
 
     const root = new THREE.Group();
 
     // ---------- slab and channel ----------
     // BoxGeometry takes one material per face: +x -x +y -y +z -z.
-    const slab = new THREE.Mesh(kit.keep(new THREE.BoxGeometry(width, BOARD_THICK, depth)), [M.board, M.board, topMat, M.backing, M.board, M.board]);
-    slab.position.set(cx, TOP - BOARD_THICK / 2, cz);
-    slab.receiveShadow = true;
-    root.add(slab);
+    for (let k = 0; k < tiers; k++) {
+      const dz = k * TIER_PITCH;
+      const slab = new THREE.Mesh(kit.keep(new THREE.BoxGeometry(width, BOARD_THICK, boardDepth)), [M.board, M.board, topMats[k], M.backing, M.board, M.board]);
+      slab.position.set(cx, TOP - BOARD_THICK / 2, boardDepth / 2 + dz);
+      slab.receiveShadow = true;
+      root.add(slab);
 
-    const channel = new THREE.Mesh(kit.keep(new THREE.BoxGeometry(width - 40, BOARD_THICK * 0.42, 12)), M.channel);
-    channel.position.set(cx, TOP - BOARD_THICK * 0.21 + 0.2, (ROWY.e + ROWY.f) / 2);
-    channel.receiveShadow = true;
-    root.add(channel);
+      const channel = new THREE.Mesh(kit.keep(new THREE.BoxGeometry(width - 40, BOARD_THICK * 0.42, 12)), M.channel);
+      channel.position.set(cx, TOP - BOARD_THICK * 0.21 + 0.2, (ROWY.e + ROWY.f) / 2 + dz);
+      channel.receiveShadow = true;
+      root.add(channel);
+    }
 
     // ---------- sockets: every hole in one draw call ----------
+    // Every column of every board; at() puts each on its own board.
+    const cols = doc.board.cols;
     const holes: Hole[] = [];
     const rows = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'] as const;
     for (const row of rows) for (let c = 1; c <= cols; c++) holes.push({ col: c, row });
@@ -479,7 +490,7 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
       collectPickable(built.object);
       const xs = Object.values(doc.pinHoles[pkg.id] ?? {}).map(holeX);
       if (built.obstacle) obstacles.push(built.obstacle);
-      else if (xs.length) obstacles.push({ x0: Math.min(...xs) - 10, x1: Math.max(...xs) + 10, z0: ROWY.e - 10, z1: ROWY.f + 10, top: built.top });
+      else if (xs.length) obstacles.push({ x0: Math.min(...xs) - 10, x1: Math.max(...xs) + 10, z0: ROWY.e - 10 + tierShift(doc.board, pkg.col0)[1], z1: ROWY.f + 10 + tierShift(doc.board, pkg.col0)[1], top: built.top });
     }
 
     const leds = new Map<string, LedLamp>();
@@ -502,7 +513,7 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
     // daylight between them. Because that second pass only ever raises a wire,
     // a jumper moved out of a neighbour's way can never be dropped back into the
     // chip the first pass flew it over.
-    const plan = wireControls(doc.wires);
+    const plan = wireControls(doc.wires, (h) => [holeX(h), holeZ(h)]);
     const spans: Span[] = doc.wires.map((w, i) => {
       const a: [number, number] = [holeX(w.a), holeZ(w.a)];
       const b: [number, number] = [holeX(w.b), holeZ(w.b)];
@@ -1122,9 +1133,10 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
     setFly(false);
     glide = null;
     const x = centreOf(c.doc);
-    camera.position.set(x, 620, cz + 520);
-    camera.lookAt(x, TOP, cz);
-    controls.target.set(x, TOP - BOARD_THICK / 2, cz);
+    const z = depthOf(c.doc) / 2;
+    camera.position.set(x, 620, z + 520);
+    camera.lookAt(x, TOP, z);
+    controls.target.set(x, TOP - BOARD_THICK / 2, z);
     controls.update();
   };
 

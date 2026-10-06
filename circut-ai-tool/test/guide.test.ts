@@ -42,9 +42,16 @@ describe('buildPinouts and buildPartsList', () => {
   });
   test('parts list groups by value', () => {
     const list = buildPartsList(res);
-    expect(list.some((l) => /1 × 74LS00 quad 2-input NAND \(U3\)/.test(l))).toBe(true);
-    expect(list.some((l) => /2 × 1k resistor \(R1, R2\)/.test(l))).toBe(true);
-    expect(list[list.length - 1]).toMatch(/jumper wires/);
+    const text = list.map((l) => l.text);
+    expect(text.some((l) => /1 × 74LS00 quad 2-input NAND \(U3\)/.test(l))).toBe(true);
+    expect(text.some((l) => /2 × 1k resistor \(R1, R2\)/.test(l))).toBe(true);
+    expect(text[text.length - 1]).toMatch(/jumper wires/);
+  });
+  test('each parts-list row says what picture to draw', () => {
+    const list = buildPartsList(res);
+    expect(list.find((l) => l.text.includes('74LS00'))!.icon).toEqual({ kind: 'chip', pins: 14, label: '74LS00' });
+    expect(list.find((l) => l.text.includes('1k resistor'))!.icon).toEqual({ kind: 'resistor', value: '1k' });
+    expect(list[list.length - 1].icon).toEqual({ kind: 'wire' });
   });
 });
 

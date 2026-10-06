@@ -53,3 +53,39 @@ export function colourBands(value: string): [Band, Band, Band, Band] | null {
   if (!multiplier) return null;
   return [DIGITS[Math.floor(digits / 10)], DIGITS[digits % 10], multiplier, GOLD];
 }
+
+/**
+ * Carbon film is the tan 5% resistor in the lab kit; metal film is the blue
+ * 1% one sold in bulk kits online, which carries a five-band code.
+ */
+export type ResistorKind = 'carbon' | 'metal';
+export const RESISTOR_KINDS: readonly ResistorKind[] = ['carbon', 'metal'];
+
+/** Body colour and its outline for each kind, shared by every renderer. */
+export const RESISTOR_BODY: Record<ResistorKind, { fill: string; stroke: string }> = {
+  carbon: { fill: '#E8D5A3', stroke: '#5B4A1F' },
+  metal: { fill: '#4F8FD6', stroke: '#1E3F66' },
+};
+
+/**
+ * The five bands of a 1% resistor: three significant digits, the multiplier
+ * and the brown tolerance band. Null when the code cannot express the value.
+ */
+export function colourBands5(value: string): Band[] | null {
+  const ohms = parseOhms(value);
+  if (ohms === null || !Number.isFinite(ohms) || ohms <= 0) return null;
+  let exp = Math.floor(Math.log10(ohms)) - 2;
+  let digits = Math.round(ohms / 10 ** exp);
+  if (digits >= 1000) {
+    digits = Math.round(digits / 10);
+    exp += 1;
+  }
+  const multiplier = exp === -2 ? SILVER : exp === -1 ? GOLD : DIGITS[exp];
+  if (!multiplier) return null;
+  return [DIGITS[Math.floor(digits / 100)], DIGITS[Math.floor(digits / 10) % 10], DIGITS[digits % 10], multiplier, DIGITS[1]];
+}
+
+/** The bands painted on a resistor of this kind. */
+export function resistorBands(value: string, kind: ResistorKind): Band[] | null {
+  return kind === 'metal' ? colourBands5(value) : colourBands(value);
+}

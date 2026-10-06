@@ -10,6 +10,7 @@ import { displayName, isUnconnected } from '../src/netlist.ts';
 import { PART_ALIASES, resolveAlias } from '../src/parts/aliases.ts';
 import { summarize } from '../src/pipeline.ts';
 import { renderSvg } from '../src/render/index.ts';
+import { runTest } from '../src/sim/tests.ts';
 import { summaryOf } from './api.ts';
 import { APP_NAME, APP_VERSION, PUBLIC_URL } from './config.ts';
 import { pngAvailable, renderPng } from './png.ts';
@@ -43,7 +44,7 @@ export function createMcpServer(service: Service): McpServer {
     { name: APP_NAME, version: APP_VERSION },
     {
       instructions:
-        'Circuit AI Tool turns a KiCad schematic into a breadboard wiring diagram with a build guide, wiring checks and a logic simulator, and can edit the schematic. ' +
+        'BenchMate (Circuit AI Tool) turns a KiCad schematic into a breadboard wiring diagram with a build guide, wiring checks and a logic simulator, and can edit the schematic. ' +
         'Start with open_schematic (absolute path) or list_projects. Layout tools (move_part, set_layout_options, set_net_color, reset_layout) change only where parts sit on the board, never the circuit. ' +
         'Schematic tools (add_component, connect, disconnect, remove_component, set_value) change the .kicad_sch itself after making a backup. ' +
         reminder(),
@@ -149,6 +150,29 @@ export function createMcpServer(service: Service): McpServer {
     return { content: [text(`Net ${displayName(name)}${info ? ` (colour ${info.color}${info.power ? `, ${info.power === 'gnd' ? 'ground' : 'supply'}` : ''})` : ''}\nPins: ${pins.join('; ')}\n${wires.length ? wires.join('\n') : 'No jumper wires (all pins share a strip or a rail).'}`)], structuredContent: { net: name, pins, wires } };
   })());
 
+  const testSchema = z.object({
+    name: z.string(),
+    group: z.string().optional().describe('heading in the Simulate panel list, e.g. "Addition (M = 0)"'),
+    levels: z.record(z.string(), z.union([z.literal(0), z.literal(1)])).describe('input net -> 0 or 1; inputs not named stay at their idle level'),
+    expect: z.object({ leds: z.record(z.string(), z.boolean()).optional(), displays: z.record(z.string(), z.string()).optional().describe('display ref -> digit, or "blank"') }).optional(),
+    note: z.string().optional(),
+  });
+  server.registerTool('set_sim_tests', { title: 'Simulation tests', description: 'Save named test cases that the Simulate panel lists in a dropdown: picking one sets the switches to its input levels (keyed by net name, or by switch position such as "SW1:2" when the schematic has no net labels) and shows whether the LEDs and displays match what it expects. Replaces the saved list; an empty list removes them.', inputSchema: { project, tests: z.array(testSchema) } }, ({ project: id, tests }) => guard(async () => {
+    const p0 = await open(id);
+    const p = await service.setTests(p0.info.id, tests);
+    const outcomes = p.sidecar.tests.map((t) => ({ name: t.name, ...runTest(p.doc.sim.model, t) }));
+    const failed = outcomes.filter((o) => !o.pass);
+    const why = failed.map((o) => `\n${o.name}: ${o.failures.join('; ')}`).join('');
+    return { content: [text(`${p.sidecar.tests.length} tests saved; ${outcomes.length - failed.length} pass.${why}`)], structuredContent: { tests: outcomes.map(({ name, pass, failures, shown }) => ({ name, pass, failures, shown })) } };
+  })());
+
+  server.registerTool('run_sim_tests', { title: 'Run simulation tests', description: 'Run every saved Simulate-panel test against the board and report which pass.', inputSchema: { project }, annotations: { readOnlyHint: true } }, ({ project: id }) => guard(async () => {
+    const p = await open(id);
+    const outcomes = p.sidecar.tests.map((t) => ({ name: t.name, ...runTest(p.doc.sim.model, t) }));
+    const lines = outcomes.map((o) => `${o.pass ? 'PASS' : 'FAIL'} ${o.name}${o.pass ? '' : ': ' + o.failures.join('; ')}`);
+    return { content: [text(lines.join('\n') || 'No tests saved.')], structuredContent: { tests: outcomes.map(({ name, pass, failures, shown }) => ({ name, pass, failures, shown })) } };
+  })());
+
   server.registerTool('simulate', { title: 'Simulate', description: 'Logic levels of every net and the LED states for the given input levels (nets not given keep their idle level: switches open).', inputSchema: { project, levels: z.record(z.string(), z.union([z.literal(0), z.literal(1)])).describe('Net name -> 0 or 1, e.g. {"A": 1, "B": 0}') }, annotations: { readOnlyHint: true } }, ({ project: id, levels }) => guard(async () => {
     const p = await open(id);
     const mapped: Record<string, 0 | 1> = {};
@@ -161,7 +185,7 @@ export function createMcpServer(service: Service): McpServer {
 
   server.registerTool('list_supported_parts', { title: 'Supported parts', description: 'Part names and KiCad lib_ids that add_component accepts and the layout engine can place.', inputSchema: {}, annotations: { readOnlyHint: true } }, guard(async () => ({ content: [text(PART_ALIASES.map((a) => `${a.alias}  (${a.libId})  ${a.description}`).join('\n'))], structuredContent: { parts: PART_ALIASES } })));
 
-  server.registerTool('set_layout_options', { title: 'Layout options', description: 'Board size, rail split, folding separate switches into one DIP switch, chip order, value substitutions. Layout only; the circuit is unchanged.', inputSchema: { project, board: z.enum(['auto', 'half', 'full']).optional(), railSplit: z.boolean().nullable().optional(), dipSwitchPositions: z.number().int().min(0).max(16).optional().describe('0 = separate switches; N = fold them into an N-position DIP switch'), packageOrder: z.array(z.string()).optional(), substitutions: z.record(z.string(), z.string()).optional().describe('ref -> value shown on the board'), wireStyle: z.enum(['arc', 'orthogonal']).optional().describe('how the 2D board draws jumpers: bowed arcs, or square-cornered runs that never share a line') } }, ({ project: id, ...patch }) => guard(async () => {
+  server.registerTool('set_layout_options', { title: 'Layout options', description: 'Board size, rail split, folding separate switches into one DIP switch, chip order, value substitutions, resistor type. Layout only; the circuit is unchanged.', inputSchema: { project, board: z.enum(['auto', 'half', 'full', 'double', 'stacked']).optional().describe('double = two full boards end to end; stacked = the same two boards one above the other (columns 1-63 top, 64-126 bottom)'), railSplit: z.boolean().nullable().optional(), dipSwitchPositions: z.number().int().min(0).max(16).optional().describe('0 = separate switches; N = fold them into an N-position DIP switch'), packageOrder: z.array(z.string()).optional(), substitutions: z.record(z.string(), z.string()).optional().describe('ref -> value shown on the board'), wireStyle: z.enum(['arc', 'orthogonal']).optional().describe('how the 2D board draws jumpers: bowed arcs, or square-cornered runs that never share a line'), resistorKind: z.enum(['carbon', 'metal']).optional().describe('carbon = tan 5% resistors with four bands; metal = blue 1% metal film with five bands') } }, ({ project: id, ...patch }) => guard(async () => {
     const p = await service.setOptions((await open(id)).info.id, patch);
     return { content: [text(`Options now ${JSON.stringify(p.sidecar.options)}. ${p.doc.packages.some((x) => x.kind === 'dipswitch') ? 'The board uses a DIP switch. ' : ''}${summarize(p.doc)}`)], structuredContent: { options: p.sidecar.options, checks: p.doc.checks } };
   })());
