@@ -807,6 +807,30 @@ const SCENARIOS: Record<string, (page: CDP, id: string) => Promise<void>> = {
     if (await page.eval<number>(`__e3d.tintCount()`)) throw new Error('strip tints left behind');
     if (!(await page.eval<boolean>(`!!document.querySelector('.ws')`))) throw new Error('Esc while armed closed the editor');
   },
+  async 'a search that hides the armed tile disarms it'(page) {
+    await open3d(page);
+    const before = await page.eval<string[]>(`__e3d.components()`);
+    // Tiles, scrollbar and all, sit inside the tray: nothing is clipped by its fixed height.
+    await page.eval(`document.querySelector('.ws-chip[data-group=All]').click()`);
+    const fit = await page.eval<{ tray: number; scroll: boolean; worst: number }>(
+      `(() => { const t = document.querySelector('.ws-tray'); const r = t.getBoundingClientRect(); const inner = r.top + t.clientTop + t.clientHeight; return { tray: inner, scroll: t.scrollWidth > t.clientWidth, worst: Math.max(...[...t.querySelectorAll('.ws-tile, .ws-tile svg')].map((e) => e.getBoundingClientRect().bottom)) }; })()`,
+    );
+    if (!fit.scroll) throw new Error('the All group did not overflow the tray, so the scrollbar case was not checked');
+    if (fit.worst > fit.tray + 0.5) throw new Error(`tiles reach ${fit.worst}px, below the tray's visible ${fit.tray}px`);
+    await page.eval(`document.querySelector('.ws-chip[data-group=Basic]').click()`);
+    await armTile(page, 'resistor');
+    const spot = await freeSpot(page, 4);
+    await page.mouse('mouseMoved', spot.x, spot.y);
+    await page.until(`__e3d.ghostCount() > 0`, 'the drop ghost');
+    await page.eval(`(() => { const s = document.querySelector('.ws-search'); s.value = 'zzz-no-such-part'; s.dispatchEvent(new Event('input')); })()`);
+    await page.until(`document.querySelector('.ws-tray-empty') && !document.querySelector('.ws-tile.is-armed') && __e3d.ghostCount() === 0`, 'the hidden part to disarm and its ghost to go', 3000);
+    await page.mouse('mouseMoved', spot.x + 1, spot.y);
+    await page.mouse('mousePressed', spot.x, spot.y);
+    await page.mouse('mouseReleased', spot.x, spot.y);
+    await sleep(1500);
+    if ((await page.eval<string[]>(`__e3d.components()`)).length !== before.length) throw new Error('a click after the search added a part');
+    if (await page.eval<number>(`__e3d.ghostCount()`)) throw new Error('a ghost came back after the search');
+  },
   async 'a refused move after add still leaves the part placed'(page, id) {
     await open3d(page);
     const before = await page.eval<string[]>(`__e3d.components()`);

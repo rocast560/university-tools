@@ -79,7 +79,12 @@ export function attachTray(ws: Workspace): () => void {
     const list = listParts(parts, group, query);
     tilesEl.innerHTML = list.length ? list.map((a) => tileHtml(a, fps.get(a.alias), kind(), armed?.alias === a.alias)).join('') : `<span class="ws-tray-empty">${parts.length ? 'No part matches' : 'Loading parts…'}</span>`;
     // The armed tile may have been re-drawn; keep pointing at the live one.
-    if (armed) armed.tile = tileFor(armed.alias) ?? armed.tile;
+    // A search or group that hides it disarms: no part is dropped from a tile nobody can see.
+    if (armed) {
+      const tile = tileFor(armed.alias);
+      if (tile) armed.tile = tile;
+      else disarm();
+    }
   };
   /** A chip's leg count is only known once its footprint is in: redraw its icon then. */
   const paintIcon = (alias: string) => {
@@ -319,6 +324,7 @@ export function attachTray(ws: Workspace): () => void {
   search.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       e.stopPropagation();
+      cancel();
       search.blur();
     }
   });
