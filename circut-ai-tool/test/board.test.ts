@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { Board, Occupancy, halfOf, hole, holeKey, holeName, isRail, parseHole, stripOf } from '../src/layout/board.ts';
-import { emptySidecar, normalizeSidecar } from '../src/layout/types.ts';
+import { emptySidecar, normalizeSidecar, normalizeWirePath } from '../src/layout/types.ts';
 
 describe('holes and strips', () => {
   test('naming', () => {
@@ -48,5 +48,32 @@ describe('sidecar', () => {
     expect(s.pinned).toEqual({ R1: { '1': { col: 3, row: 'a' } } });
     expect(s.colors['/A']).toBe('#123456');
     expect(s.placed).toEqual({});
+  });
+
+  test('wire shapes: an old sidecar has none, good ones are kept, malformed ones dropped', () => {
+    expect(normalizeSidecar({ pinned: {} }).wirePaths).toEqual({});
+    expect(emptySidecar().wirePaths).toEqual({});
+    const good = { points: [{ col: 12.5, gap: 'c|d', lane: 0 }, { col: 20, gap: 'e|f', lane: -1 }] };
+    const s = normalizeSidecar({
+      wirePaths: {
+        '/A|a12|e20': good,
+        '/B|a1|a2': { points: [{ col: 'x', gap: 'c|d', lane: 0 }] },
+        '/C|a1|a3': { points: [{ col: 3, gap: 'c|d', lane: 0.5 }] },
+        '/D|a1|a4': 'nope',
+      },
+    });
+    expect(s.wirePaths).toEqual({ '/A|a12|e20': good });
+    expect(normalizeWirePath({ points: [] })).toEqual({ points: [] });
+    expect(normalizeWirePath({ points: [{ col: 3, gap: 'c|d', lane: 9 }] })).toBeNull();
+  });
+
+  test('wire shapes: a "__proto__", "constructor" or "prototype" key in the file is skipped, never set as the prototype', () => {
+    const good = { points: [{ col: 12.5, gap: 'c|d', lane: 0 }] };
+    // As it arrives from disk: JSON.parse makes "__proto__" an ordinary own key.
+    const raw = JSON.parse(`{"wirePaths": {"__proto__": ${JSON.stringify(good)}, "constructor": ${JSON.stringify(good)}, "prototype": ${JSON.stringify(good)}, "/A|a12|e20": ${JSON.stringify(good)}}}`);
+    const s = normalizeSidecar(raw);
+    expect(Object.getPrototypeOf(s.wirePaths)).toBe(Object.prototype);
+    expect(Object.keys(s.wirePaths)).toEqual(['/A|a12|e20']);
+    expect((s.wirePaths as Record<string, unknown>).points).toBeUndefined();
   });
 });

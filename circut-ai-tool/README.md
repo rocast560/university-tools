@@ -80,6 +80,52 @@ with bun added. The original design notes are in
 
 ## Environment variables
 
+Choose **Create Lab 3 prelab example** on the home page to create an editable
+BCD-to-seven-segment circuit using the instructor's L3 Auxiliary module.
+The module is also available in the part picker. See [Lab 3 notes](docs/lab3.md)
+for its labeled header, logic expressions, display pinout, and model limits.
+
+    bun run build      # once, and after client changes
+    bun start          # http://localhost:8765
+
+Open a `.kicad_sch` from the home page (your `Documents\KiCad\9.0\projects`
+folder is scanned), drag parts, click switches, follow the guide, print it.
+Moved parts, options and colours are saved in `NAME.breadboard.json` next to
+the schematic. Saving the schematic in KiCad reloads the board.
+
+## 3D editor
+
+Press **3D** on a project to open the full-screen 3D editor. Click a part to select it, then drag it to new holes, turn it (R), flip a chip (Shift+R), edit its value or delete it from the card beside it, and press F to fly to it. With square wires, click a jumper to reshape it by its handles or recolour its net (keys 1 to 9). Ctrl+Z undoes layout changes. A parts tray (press / to search) adds parts: drag a tile onto a hole, or tap it and click one. The wire tool (W) draws a jumper that joins a loose leg to a net, and D duplicates the selected part. Tray drops, jumpers, duplicates and deletes edit the schematic after a backup and are not on Ctrl+Z. See [docs/editor3d.md](docs/editor3d.md). Agents working on the code should read [AGENTS.md](AGENTS.md).
+
+## Run in Docker
+
+    docker compose up --build -d      # http://localhost:8765, restarts with Docker Desktop
+    bun run docker:smoke              # optional: end-to-end check against the container
+    docker compose down               # stop; `docker compose down -v` also drops the cache volume
+
+The image is `kicad/kicad:9.0.9` (kicad-cli plus the stock symbol libraries)
+with bun added. Your KiCad projects folder is mounted at `/projects`; it must
+already exist before `docker compose up`, since Docker Desktop otherwise
+creates an empty root-owned folder there instead of refusing to start. Set
+`KICAD_PROJECTS` in a `.env` file (see `.env.example`) to use another folder.
+Windows paths sent by Claude Code or the API are translated into `/projects/...`
+automatically. The recent list and the kicad-cli cache live in the
+`circuit-data` volume; cloudflared is baked into the image at
+`/usr/local/bin/cloudflared`. Port 8765 is bound to localhost only; set
+`CIRCUIT_HOST_PORT=8766` in `.env` to run it beside `bun start`.
+
+The old `circuit-designer` container used the same port and the same Claude
+Code registration (`/mcp-server/mcp`), so nothing needs re-registering.
+
+## Connect Claude, ChatGPT or Claude Code
+
+Open `http://localhost:8765/#/connect` for copy-paste snippets. The MCP
+endpoint is `/mcp` (alias `/mcp-server/mcp`); a stdio entry point for Claude
+Desktop is `bun server/mcp-stdio.ts`. ChatGPT needs a tunnel (cloudflared or
+ngrok) because it only reaches servers on the internet.
+
+## Environment
+
 | Variable | Default | What it does |
 |---|---|---|
 | `CIRCUIT_PORT` | 8765 | Port the server listens on |

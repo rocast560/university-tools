@@ -2503,6 +2503,125 @@ tr:hover td {
   border-radius: var(--r-md);
 }
 
+/* ---------- 3D editor workspace ---------- */
+body.ws-open { overflow: hidden; }
+.ws {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  /* One column no wider than the screen: a long hint or a full tray must never widen the canvas. */
+  grid-template-columns: minmax(0, 1fr);
+  /* Matches the renderer's clear colour, so a resize never flashes. */
+  background: #070910;
+  color: #e8ecf4;
+}
+.ws-tray {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* A fixed height, scrollbar included: tiles loading in, or a scrollbar
+     appearing, must never move the canvas (and every point on it) down. */
+  box-sizing: border-box;
+  height: 84px;
+  padding: 6px 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-bottom: 1px solid rgba(255, 255, 255, .08);
+  background: rgba(16, 19, 26, .92);
+}
+.ws-tray.is-busy { opacity: .6; pointer-events: none; }
+.ws-tray input[type=search] { flex: 0 0 170px; padding: 4px 8px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, .2); background: rgba(0, 0, 0, .3); color: inherit; font: inherit; font-size: 12px; }
+.ws-chips { display: flex; gap: 4px; flex: none; }
+.ws-chip { height: auto; box-shadow: none; padding: 3px 9px; border-radius: 10px; border: 0; background: rgba(255, 255, 255, .06); color: inherit; font: inherit; font-size: 12px; cursor: pointer; }
+.ws-chip:hover { background: rgba(255, 255, 255, .12); }
+.ws-chip.is-on { color: #fff; background: rgba(255, 255, 255, .22); outline: 1px solid rgba(255, 255, 255, .5); }
+.ws-tiles { display: flex; gap: 6px; flex: none; }
+.ws-tray-empty { opacity: .5; font-size: 12px; }
+.ws-tile { height: auto; box-shadow: none; font: inherit; display: flex; flex-direction: column; align-items: center; gap: 2px; width: 72px; flex: none; padding: 4px 2px 3px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, .08); background: rgba(255, 255, 255, .04); color: inherit; cursor: grab; touch-action: none; transition: transform .12s, background .12s; }
+.ws-tile:hover { transform: translateY(-2px); background: rgba(255, 255, 255, .1); }
+.ws-tile span { font-size: 11px; line-height: 1.15; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-tile.is-armed { outline: 2px solid #4da3ff; background: rgba(77, 163, 255, .16); }
+.ws-drag-ghost { position: fixed; left: 0; top: 0; z-index: 70; pointer-events: none; opacity: .85; }
+.ws-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: rgba(16, 19, 26, .78);
+  border-bottom: 1px solid rgba(255, 255, 255, .06);
+  font-size: 13px;
+}
+.ws-btn {
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, .16);
+  background: rgba(40, 44, 52, .7);
+  color: inherit;
+  cursor: pointer;
+}
+.ws-btn:hover:not(:disabled) { background: rgba(60, 66, 78, .9); }
+.ws-btn:disabled { opacity: .4; cursor: default; }
+.ws-step { max-width: 34ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .85; }
+.ws-hint { margin-left: auto; opacity: .6; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ws-canvas { position: relative; min-height: 0; }
+.ws-legend {
+  position: fixed;
+  left: 12px;
+  bottom: 12px;
+  z-index: 51;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: min(60vw, 720px);
+  font-size: 12px;
+}
+.ws-legend span[data-legend] { display: inline-flex; align-items: center; gap: 5px; padding: 2px 7px; border-radius: 10px; background: rgba(16, 19, 26, .72); cursor: pointer; }
+.ws-legend span[data-legend]:hover { background: rgba(255, 255, 255, .12); }
+.ws-legend span[data-legend].is-on { background: rgba(255, 255, 255, .22); outline: 1px solid rgba(255, 255, 255, .5); }
+.ws-legend i { width: 14px; height: 5px; border-radius: 3px; display: inline-block; }
+/* The page's toast has to show over the workspace too. */
+.toast { z-index: 60; }
+@media (max-width: 640px) {
+  .ws-hint { display: none; }
+  .ws-step { max-width: 16ch; }
+}
+
+.ws-card {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 2;
+  width: 250px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(18, 21, 29, .94);
+  border: 1px solid rgba(77, 163, 255, .45);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .45);
+  font-size: 12.5px;
+  will-change: transform;
+}
+.ws-card.is-busy { opacity: .6; pointer-events: none; }
+.ws-card header { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+.ws-card header span { opacity: .65; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-card-x { margin-left: auto; background: none; border: 0; color: inherit; font-size: 16px; cursor: pointer; opacity: .7; }
+.ws-card label { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.ws-card input { flex: 1; min-width: 0; padding: 3px 6px; border-radius: 5px; border: 1px solid rgba(255, 255, 255, .2); background: rgba(0, 0, 0, .3); color: inherit; font: inherit; }
+.ws-card-pins { list-style: none; margin: 0 0 8px; padding: 0; max-height: 150px; overflow: auto; }
+.ws-card-pins li { display: grid; grid-template-columns: 2.5em 3.5em 1fr; gap: 6px; align-items: center; padding: 1px 0; }
+.ws-card-pins button { justify-self: start; background: rgba(255, 255, 255, .08); border: 0; border-radius: 8px; padding: 1px 7px; color: inherit; cursor: pointer; font: inherit; }
+.ws-card-pins i { opacity: .5; }
+.ws-card footer { display: flex; flex-wrap: wrap; gap: 6px; }
+.ws-card footer button, .ws-card-confirm button { padding: 3px 9px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, .16); background: rgba(40, 44, 52, .8); color: inherit; cursor: pointer; font: inherit; }
+.ws-card .danger { border-color: rgba(239, 68, 68, .6); }
+.ws-card-confirm { margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, .1); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.ws-wirecard .ws-card-note { margin: 0 0 8px; opacity: .75; }
+.ws-swatches { display: flex; gap: 5px; margin-bottom: 8px; }
+.ws-swatches button { width: 18px; height: 18px; padding: 0; border-radius: 50%; border: 2px solid rgba(255, 255, 255, .25); cursor: pointer; }
+.ws-swatches button.is-on { border-color: #4da3ff; box-shadow: 0 0 0 2px rgba(77, 163, 255, .35); }
+.ws-card-hint { margin: 8px 0 0; font-size: 11px; opacity: .6; }
+.ws-card-warn { margin: 0 0 8px; color: #fbbf24; }
 /* The wordmark: "Mate" in the accent, so the name reads as two words. */
 .home h1 .brand-mate {
   color: var(--accent);
@@ -2688,4 +2807,17 @@ tr:hover td {
   #board .callout-bob {
     animation: none;
   }
+}
+
+/* The Show filter in the 3D workspace's legend. */
+.ws-legend .showbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 6px;
+  pointer-events: auto;
+}
+.ws-legend .showbar .btn {
+  padding: 2px 9px;
+  font-size: 12px;
 }

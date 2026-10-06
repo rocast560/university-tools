@@ -27,7 +27,7 @@ export function mountBoard(container: HTMLElement): () => void {
   let view = { x: -100, y: 0, w: 0, h: 350 };
   let lastKey = '';
   let leds = new Map<string, LedNodes>();
-  let drag: { ref: string; columnsOnly: boolean; startX: number; startY: number; origin: Record<string, { col: number; row: never }>; preview: string | null; valid: boolean } | null = null;
+  let drag: { ref: string; columnsOnly: boolean; startX: number; startY: number; origin: Record<string, { col: number; row: never }>; preview: string | null; valid: boolean; holesKey: string } | null = null;
   let panning: { x: number; y: number; vx: number; vy: number } | null = null;
 
   const svgPoint = (e: PointerEvent) => {
@@ -137,7 +137,7 @@ export function mountBoard(container: HTMLElement): () => void {
       const ref = part.getAttribute('data-ref')!;
       if (!p.doc.pinHoles[ref]) return;
       const { x, y } = svgPoint(e);
-      drag = { ref, columnsOnly: part.classList.contains('pkg'), startX: x, startY: y, origin: p.doc.pinHoles[ref] as never, preview: null, valid: true };
+      drag = { ref, columnsOnly: part.classList.contains('pkg'), startX: x, startY: y, origin: p.doc.pinHoles[ref] as never, preview: null, valid: true, holesKey: '' };
       container.querySelector('svg')!.classList.add('dragging');
       (e.currentTarget as Element).setPointerCapture(e.pointerId);
       return;
@@ -161,8 +161,14 @@ export function mountBoard(container: HTMLElement): () => void {
       const holes = shiftHoles(drag.origin, x - drag.startX, y - drag.startY, p.doc.board, drag.columnsOnly);
       if (!holes) {
         drag.valid = false;
+        drag.holesKey = '';
         return;
       }
+      // Routing square wires is slow on a big board, so rebuild the preview
+      // only when the snapped holes change, not on every pointer move.
+      const key = JSON.stringify(holes);
+      if (key === drag.holesKey) return;
+      drag.holesKey = key;
       const sidecar = { ...p.sidecar, pinned: { ...p.sidecar.pinned, [drag.ref]: holes } };
       const doc = buildLayoutDoc(p.design, sidecar);
       drag.valid = !doc.warnings.some((w) => w.startsWith(`pinned placement for ${drag!.ref} dropped`));
@@ -177,7 +183,12 @@ export function mountBoard(container: HTMLElement): () => void {
 
   const onPointerUp = async (e: PointerEvent) => {
     if (panning) {
+      const moved = Math.hypot(e.clientX - panning.x, e.clientY - panning.y);
       panning = null;
+      // A click (not a pan) off any part lets go of the part the 3D editor
+      // picked; otherwise its hard outline would dim the board with no way out.
+      const p = store.get().project;
+      if (moved < 4 && p?.selectedRef) store.setProject({ selectedRef: null });
       return;
     }
     if (!drag) return;
@@ -231,8 +242,14 @@ export const stepHighlight = (p: NonNullable<AppState['project']>, n: number): H
   return null;
 };
 
-/** The highlight the board should show right now: a followed net, the active build step, or else the Show filter's part group. */
-export const currentHighlight = (p: NonNullable<AppState['project']>): Highlight | null => p.highlight ?? (p.activeStep !== null ? stepHighlight(p, p.activeStep) : null) ?? (p.partGroup ? { group: p.partGroup } : null);
+/**
+ * The highlight the board should show right now, most specific first: a
+ * followed net, the active build step, the selected part, then the Show
+ * filter's part group. `selection` lets the 3D editor show a selected part
+ * softly.
+ */
+export const currentHighlight = (p: NonNullable<AppState['project']>, selection: (ref: string) => Highlight = (ref) => ({ ref })): Highlight | null =>
+  p.highlight ?? (p.activeStep !== null ? stepHighlight(p, p.activeStep) : null) ?? (p.selectedRef ? selection(p.selectedRef) : null) ?? (p.partGroup ? { group: p.partGroup } : null);
 
 export function fitView(container: HTMLElement) {
   const svg = container.querySelector('svg');

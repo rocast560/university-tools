@@ -52,7 +52,8 @@ const v3 = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
  * lot is released in a single pass when the view closes.
  */
 export class Kit {
-  private readonly bin: { dispose(): void }[] = [];
+  // A set, so a buffer swapped out while the board is open can leave it again.
+  private readonly bin = new Set<{ dispose(): void }>();
   readonly M: Materials;
 
   constructor() {
@@ -60,8 +61,15 @@ export class Kit {
   }
 
   keep<T extends { dispose(): void }>(x: T): T {
-    this.bin.push(x);
+    this.bin.add(x);
     return x;
+  }
+
+  /** Free `old` now and keep `next` in its place (a drag preview's buffers), so the kit never piles up the ones it replaced. */
+  swap<T extends { dispose(): void }>(old: { dispose(): void }, next: T): T {
+    old.dispose();
+    this.bin.delete(old);
+    return this.keep(next);
   }
 
   std(o: THREE.MeshStandardMaterialParameters): THREE.MeshStandardMaterial {
@@ -82,7 +90,7 @@ export class Kit {
 
   dispose(): void {
     for (const x of this.bin) x.dispose();
-    this.bin.length = 0;
+    this.bin.clear();
   }
 }
 
@@ -98,7 +106,24 @@ export class Kit {
  * Left in linear space deliberately: a roughness or bump map is data, not
  * colour, and tagging it sRGB would bend the values on the way in.
  */
+/**
+ * mulberry32: a tiny seeded PRNG. Every procedural texture draws from its own
+ * fixed seed, so a rebuild after each move paints the same surface again
+ * instead of visibly re-rolling the speckle.
+ */
+export function seededRandom(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 function grain(kit: Kit, px: number, spread: number, mid = 0.5): THREE.CanvasTexture {
+  const random = seededRandom(0x9e3779b9);
   const cv = document.createElement('canvas');
   cv.width = cv.height = px;
   const g = cv.getContext('2d')!;
@@ -109,7 +134,7 @@ function grain(kit: Kit, px: number, spread: number, mid = 0.5): THREE.CanvasTex
     const x = i % px;
     const y = (i / px) | 0;
     const slow = Math.sin(x * 0.19) * Math.cos(y * 0.23) * 0.5 + 0.5;
-    const value = mid + (Math.random() - 0.5) * spread + (slow - 0.5) * spread * 0.6;
+    const value = mid + (random() - 0.5) * spread + (slow - 0.5) * spread * 0.6;
     const b = Math.max(0, Math.min(255, Math.round(value * 255)));
     img.data[i * 4] = img.data[i * 4 + 1] = img.data[i * 4 + 2] = b;
     img.data[i * 4 + 3] = 255;
@@ -179,12 +204,13 @@ function ceramic(kit: Kit): THREE.CanvasTexture {
   const g = cv.getContext('2d')!;
   g.fillStyle = '#e3cfa0';
   g.fillRect(0, 0, px, px);
+  const random = seededRandom(0x85ebca6b);
   for (let i = 0; i < 900; i++) {
-    const a = Math.random() * 0.09;
-    g.fillStyle = Math.random() > 0.5 ? `rgba(150,126,80,${a})` : `rgba(255,246,220,${a})`;
-    const r = 2 + Math.random() * 9;
+    const a = random() * 0.09;
+    g.fillStyle = random() > 0.5 ? `rgba(150,126,80,${a})` : `rgba(255,246,220,${a})`;
+    const r = 2 + random() * 9;
     g.beginPath();
-    g.arc(Math.random() * px, Math.random() * px, r, 0, Math.PI * 2);
+    g.arc(random() * px, random() * px, r, 0, Math.PI * 2);
     g.fill();
   }
   const tex = kit.keep(new THREE.CanvasTexture(cv));
@@ -381,7 +407,7 @@ export function buildPackage(kit: Kit, pkg: Package, doc: LayoutDoc): BuiltPacka
   else group.add(markingPlane(kit, chipMarking(kit, pkg, doc, length), length, BODY_HALF_Z * 2, cx, yTop + 0.15, cz));
 
   // Legs: out of the body side, angled down, then straight into the socket.
-  const legs = new THREE.InstancedMesh(kit.keep(new THREE.BoxGeometry(1, 1, 1)), kit.M.leg, pins.length * 2);
+  const legs = kit.keep(new THREE.InstancedMesh(kit.keep(new THREE.BoxGeometry(1, 1, 1)), kit.M.leg, pins.length * 2));
   legs.castShadow = true;
   const m4 = new THREE.Matrix4();
   pins.forEach(([, hole], i) => {
@@ -438,9 +464,9 @@ function buildModule(kit: Kit, pkg: Package, doc: LayoutDoc): BuiltPackage {
   strip.position.set(cx, TOP + HEADER_H / 2, zh);
   group.add(strip);
   const pinTop = pcbTop + 1.5 * MM;
-  const pins = new THREE.InstancedMesh(kit.keep(new THREE.BoxGeometry(0.64 * MM, 1, 0.64 * MM)), kit.M.leg, holes.length);
+  const pins = kit.keep(new THREE.InstancedMesh(kit.keep(new THREE.BoxGeometry(0.64 * MM, 1, 0.64 * MM)), kit.M.leg, holes.length));
   pins.castShadow = true;
-  const pads = new THREE.InstancedMesh(kit.keep(new THREE.CylinderGeometry(0.95 * MM, 0.95 * MM, 0.08 * MM, 18)), kit.std({ color: '#c7a544', roughness: 0.32, metalness: 0.85 }), holes.length);
+  const pads = kit.keep(new THREE.InstancedMesh(kit.keep(new THREE.CylinderGeometry(0.95 * MM, 0.95 * MM, 0.08 * MM, 18)), kit.std({ color: '#c7a544', roughness: 0.32, metalness: 0.85 }), holes.length));
   holes.forEach((h, i) => {
     const x = holeX(h);
     pins.setMatrixAt(i, m4.makeTranslation(x, (TOP - 5 + pinTop) / 2, zh).scale(new THREE.Vector3(1, pinTop - (TOP - 5), 1)));
@@ -589,7 +615,7 @@ function buildSevenSeg(kit: Kit, pkg: Package, doc: LayoutDoc): BuiltPackage {
 
   // Legs straight down from the body into the sockets.
   const pins = Object.entries(doc.pinHoles[pkg.id] ?? {});
-  const legs = new THREE.InstancedMesh(kit.keep(new THREE.BoxGeometry(0.5 * MM, 1, 0.5 * MM)), kit.M.leg, holes.length);
+  const legs = kit.keep(new THREE.InstancedMesh(kit.keep(new THREE.BoxGeometry(0.5 * MM, 1, 0.5 * MM)), kit.M.leg, holes.length));
   legs.castShadow = true;
   const m4 = new THREE.Matrix4();
   holes.forEach((hole, i) => legs.setMatrixAt(i, spanMatrix(m4, v3(holeX(hole), yBottom + 1, holeZ(hole)), v3(holeX(hole), TOP - 5, holeZ(hole)), 3.4, 2)));
@@ -655,7 +681,7 @@ function dipSwitchTop(kit: Kit, pkg: Package, x0: number, x1: number, cz: number
 
 function chipMarking(kit: Kit, pkg: Package, doc: LayoutDoc, length: number): THREE.CanvasTexture {
   const { code, description } = chipLegend(pkg, doc);
-  return marking(kit, length, BODY_HALF_Z * 2, (g, w, h) => {
+  const tex = marking(kit, length, BODY_HALF_Z * 2, (g, w, h) => {
     // The moulded half-round notch at the pin 1 end and the pin 1 dimple.
     // Both are shape rather than print, so they read as a lighter relief.
     g.fillStyle = 'rgba(255,255,255,0.10)';
@@ -677,6 +703,13 @@ function chipMarking(kit: Kit, pkg: Package, doc: LayoutDoc, length: number): TH
       g.fillText(description.toUpperCase(), cx, h * 0.68);
     }
   });
+  // Printed for pin 1 at the left; a chip turned end for end carries the
+  // same print rotated with it, notch and dimple included.
+  if (pkg.flipped) {
+    tex.center.set(0.5, 0.5);
+    tex.rotation = Math.PI;
+  }
+  return tex;
 }
 
 function dipMarking(kit: Kit, ways: number, length: number): THREE.CanvasTexture {

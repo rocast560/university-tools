@@ -353,7 +353,7 @@ export function renderPanels(panels: HTMLElement, toolbar: HTMLElement, legend: 
     if (action === 'reset') {
       try {
         const doc = await api.reset(p.id);
-        store.setProject({ doc, sidecar: { ...p.sidecar, pinned: {}, colors: {}, options: doc.board ? { ...p.sidecar.options, board: 'auto', railSplit: null, dipSwitchPositions: 0, packageOrder: [], substitutions: {}, wireStyle: 'arc' } : p.sidecar.options } });
+        store.setProject({ doc, sidecar: { ...p.sidecar, pinned: {}, colors: {}, wirePaths: {}, options: doc.board ? { ...p.sidecar.options, board: 'auto', railSplit: null, dipSwitchPositions: 0, packageOrder: [], substitutions: {}, wireStyle: 'arc' } : p.sidecar.options } });
       } catch (err) {
         toast((err as Error).message);
       }
@@ -415,16 +415,12 @@ export function renderPanels(panels: HTMLElement, toolbar: HTMLElement, legend: 
     if (action === 'step') analog.stepOnce(p);
     if (action === 'reset-sim') analog.reset(p);
     if (action === 'view3d') {
-      const card = document.querySelector<HTMLElement>('.board-card')!;
-      // Repaint the toolbar so the button flips to Exit, but only once the
-      // view is really up: opening it waits on three being downloaded, which
-      // is far longer than a zero timeout.
       const repaint = () => renderPanels(panels, toolbar, legend, store.get());
       if (is3dOpen()) {
         close3d();
         repaint();
       } else {
-        void open3d(card, p.doc).then(repaint);
+        void open3d().then(repaint);
       }
     }
   };

@@ -33,17 +33,57 @@ export function toast(message: string) {
   setTimeout(() => store.get().toast === message && store.set({ toast: null }), 4000);
 }
 
+/** Bumped per load, so a slower, older load cannot land over a newer one. */
+let loadSeq = 0;
+
 export async function loadProject(id: string) {
+  const seq = ++loadSeq;
   store.set({ loading: true });
   try {
     const [summary, netText, sidecar] = await Promise.all([api.summary(id), api.netlist(id), api.sidecar(id)]);
+    if (seq !== loadSeq) return;
     const design = parseNetlist(netText);
     const side = normalizeSidecar(sidecar);
     const doc = buildLayoutDoc(design, side);
+    // Read now, not before the fetch: anything the user did while it ran counts.
+    const prev = store.get().project;
+    const base = { id, name: summary.name, path: summary.path, design, sidecar: side, doc };
+    if (prev?.id === id) {
+      // The same project reloaded (an edit from the card, an agent, a save on
+      // disk): keep what the user was doing wherever it still makes sense in
+      // the new design, rather than dumping them back at the start.
+      const hl = prev.highlight;
+      const hlOk = !hl || (hl.net !== undefined ? !!doc.nets[hl.net] : hl.ref !== undefined ? !!doc.pinHoles[hl.ref] : hl.wire !== undefined ? hl.wire < doc.wires.length : true);
+      const running = prev.running && analog.isRunning();
+      const next = {
+        ...base,
+        switches: prev.switches,
+        highlight: hlOk ? hl : null,
+        activeStep: prev.activeStep !== null && doc.steps.some((x) => x.n === prev.activeStep) ? prev.activeStep : null,
+        selectedRef: prev.selectedRef && doc.pinHoles[prev.selectedRef] ? prev.selectedRef : null,
+        done: prev.done,
+        panel: prev.panel,
+        running,
+      };
+      store.set({ loading: false, project: next });
+      // A running simulation carries on with the new design; a stopped one
+      // just forgets the old solver, as before.
+      if (running) {
+        try {
+          analog.rebuild(next);
+        } catch (e) {
+          analog.invalidate();
+          store.setProject({ running: false });
+          toast(`Simulation stopped: ${(e as Error).message}`);
+        }
+      } else analog.invalidate();
+      return;
+    }
     // A different board means a different circuit: drop the old solver.
     analog.invalidate();
-    store.set({ loading: false, project: { id, name: summary.name, path: summary.path, design, sidecar: side, doc, switches: {}, highlight: null, activeStep: null, done: loadDone(id), panel: 'guide', running: false } });
+    store.set({ loading: false, project: { ...base, switches: {}, highlight: null, activeStep: null, selectedRef: null, done: loadDone(id), panel: 'guide', running: false } });
   } catch (e) {
+    if (seq !== loadSeq) return;
     store.set({ loading: false, project: null });
     toast(e instanceof ApiError && e.status === 404 ? 'That project is not open on the server. Open it from the home page.' : (e as Error).message);
     location.hash = '#/';
@@ -182,7 +222,10 @@ api.events((ev) => {
   const p = store.get().project;
   if (!p || ev.projectId !== p.id) return;
   if (ev.type === 'changed') {
-    toast('Schematic changed on disk; reloading');
+    // Service.edit() (the card, an agent over MCP, REST) announces itself as
+    // 'edit': the user or their agent asked for it, so no alarm. Anything else
+    // is the file changing under us.
+    if (ev.source !== 'edit') toast('Schematic changed on disk; reloading');
     void loadProject(p.id);
   } else if (ev.type === 'error') toast(`Reload failed: ${ev.message}`);
 });

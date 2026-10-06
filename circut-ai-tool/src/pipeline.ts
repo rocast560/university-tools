@@ -5,6 +5,8 @@ import { buildPartsList, buildPinouts, buildSteps, type PartsItem, type Pinout, 
 import { layout, type EngineResult } from './layout/engine.ts';
 import type { Sidecar } from './layout/types.ts';
 import type { Design } from './netlist.ts';
+import { wirePolylines } from './render/ortho.ts';
+import { routeWires, type RouteResult, type WireRoute } from './render/route3d.ts';
 import { buildSimModel, truthTable, type SimModel, type TruthTable } from './sim/index.ts';
 
 export interface LayoutDoc extends EngineResult {
@@ -13,6 +15,32 @@ export interface LayoutDoc extends EngineResult {
   partsList: PartsItem[];
   checks: Check[];
   sim: { model: SimModel; truthTable: TruthTable | null; note: string | null };
+  /**
+   * Square-cornered jumper routes, one per wire, present only when the
+   * sidecar asks for square wires. The flat board and the 3D board both draw
+   * these, so the two views always agree.
+   */
+  routes?: WireRoute[];
+}
+
+/** What buildLayoutDoc routes with. Test-only seam: a test swaps `route` to make the router throw. */
+export const router: { route: typeof routeWires } = { route: routeWires };
+
+/** Said on every wire, and in the checks, when the router itself fails. */
+export const ROUTER_FAILED = 'the wire router failed; showing simple square wires';
+
+/**
+ * Route the square wires. The router is not meant to throw, but a layout must
+ * never fail for want of pretty wires (spec section 7): if it does throw,
+ * every wire is drawn by the simple corridor router instead, flagged so the
+ * editor offers no handles for it.
+ */
+function routeSafely(res: EngineResult, sidecar: Sidecar): RouteResult {
+  try {
+    return router.route(res, sidecar.wirePaths ?? {});
+  } catch {
+    return { routes: wirePolylines(res.wires, res.packages, res.board).map((plan) => ({ plan, lifts: [], warning: ROUTER_FAILED })), warnings: [ROUTER_FAILED] };
+  }
 }
 
 export function buildLayoutDoc(design: Design, sidecar: Sidecar): LayoutDoc {
@@ -26,7 +54,17 @@ export function buildLayoutDoc(design: Design, sidecar: Sidecar): LayoutDoc {
   else if (model.inputs.length > 6) note = `${model.inputs.length} inputs is too many for a truth table (limit 6); use simulate with explicit levels`;
   else table = truthTable(model);
   if (!note && model.notSimulated.length) note = `not simulated: ${model.notSimulated.join(', ')}`;
-  return { ...res, steps: buildSteps(design, res, model), pinouts: buildPinouts(design, res), partsList: buildPartsList(res), checks, sim: { model, truthTable: table, note } };
+  const doc: LayoutDoc = { ...res, steps: buildSteps(design, res, model), pinouts: buildPinouts(design, res), partsList: buildPartsList(res), checks, sim: { model, truthTable: table, note } };
+  if (sidecar.options.wireStyle !== 'orthogonal') return doc;
+  // Routed here rather than at draw time so every view draws the one set of
+  // paths, and so what the router had to say (a stale or no-longer-fitting
+  // hand shape, a wire with no clean route) reaches doc.warnings and, as
+  // layout warnings, the checks: the Checks panel, the warning counts and
+  // the MCP summaries all read doc.checks. The checks ran before routing,
+  // so these are appended.
+  const routed = routeSafely(res, sidecar);
+  const more: Check[] = routed.warnings.map((message) => ({ id: 'layout', level: 'warning', message, refs: [] }));
+  return { ...doc, checks: [...checks, ...more], routes: routed.routes, warnings: [...res.warnings, ...routed.warnings] };
 }
 
 export function summarize(doc: LayoutDoc): string {

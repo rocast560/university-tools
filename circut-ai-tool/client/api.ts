@@ -1,7 +1,9 @@
 // Thin fetch wrappers over /api. Errors carry the server's message.
 
-import type { Hole, Options, Sidecar } from '../src/layout/types.ts';
+import type { Hole, Options, Sidecar, WirePath } from '../src/layout/types.ts';
 import type { LayoutDoc } from '../src/pipeline.ts';
+import type { PartAlias } from '../src/parts/aliases.ts';
+import type { Footprint } from '../src/parts/catalog.ts';
 
 export class ApiError extends Error {
   constructor(
@@ -27,6 +29,14 @@ async function call<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 const post = <T,>(url: string, body: unknown) => call<T>(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+
+export interface PartFootprint {
+  alias: string;
+  libId: string;
+  value: string;
+  pins: string[];
+  footprint: Footprint;
+}
 
 export interface ProjectSummary {
   id: string;
@@ -90,6 +100,11 @@ export const api = {
   },
   summary: (id: string) => call<ProjectSummary>(`/api/projects/${id}`),
   layout: (id: string) => call<LayoutDoc>(`/api/projects/${id}/layout`),
+  parts: () => call<PartAlias[]>('/api/parts'),
+  footprint: (part: string) => call<PartFootprint>(`/api/parts/footprint?part=${encodeURIComponent(part)}`),
+  editAdd: (id: string, body: { part: string; value?: string; connections?: Record<string, string>; spare?: boolean }) =>
+    post<{ ok: true; ref: string; backup: string; notes: string[] }>(`/api/projects/${id}/edit/add`, body),
+  editConnect: (id: string, ref: string, pin: string, net: string) => post<unknown>(`/api/projects/${id}/edit/connect`, { ref, pin, net }),
   netlist: async (id: string) => {
     const res = await fetch(`/api/projects/${id}/netlist`);
     if (!res.ok) throw new ApiError('netlist unavailable', res.status);
@@ -97,9 +112,13 @@ export const api = {
   },
   sidecar: (id: string) => call<Sidecar>(`/api/projects/${id}/sidecar`),
   move: (id: string, ref: string, holes: Record<string, Hole>) => post<LayoutDoc>(`/api/projects/${id}/layout/move`, { ref, holes }),
+  editValue: (id: string, ref: string, value: string) => post<unknown>(`/api/projects/${id}/edit/value`, { ref, value }),
+  editRemove: (id: string, ref: string) => post<unknown>(`/api/projects/${id}/edit/remove`, { ref }),
   options: (id: string, patch: Partial<Options>) => post<LayoutDoc>(`/api/projects/${id}/layout/options`, patch),
   color: (id: string, net: string, color: string | null) => post<LayoutDoc>(`/api/projects/${id}/layout/colors`, { net, color }),
   ledColor: (id: string, ref: string, color: string | null) => post<LayoutDoc>(`/api/projects/${id}/layout/ledcolor`, { ref, color }),
+  /** Keep a jumper's hand shape, or forget it with null; key "*" and null forget them all. */
+  wirePath: (id: string, key: string, path: WirePath | null) => post<LayoutDoc>(`/api/projects/${id}/layout/wire`, { key, path }),
   reset: (id: string) => post<LayoutDoc>(`/api/projects/${id}/layout/reset`, {}),
   connect: () => call<ConnectInfo>('/api/connect'),
   organizer: () => call<Organizer>('/api/organizer'),
@@ -109,7 +128,7 @@ export const api = {
   moveProject: (path: string, folderId: string | null) => post<{ ok: boolean }>('/api/organizer/move', { path, folderId }),
   clients: () => call<ClientSeen[]>('/api/clients'),
   tunnel: (action: 'start' | 'stop') => post<TunnelStatus>('/api/tunnel', { action }),
-  events(onEvent: (ev: { projectId: string; type: string; message?: string; client?: ClientSeen }) => void): () => void {
+  events(onEvent: (ev: { projectId: string; type: string; message?: string; source?: 'edit' | 'watch'; client?: ClientSeen }) => void): () => void {
     const es = new EventSource('/api/events');
     const handler = (e: MessageEvent) => {
       try {

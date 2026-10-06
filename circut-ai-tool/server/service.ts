@@ -6,21 +6,27 @@
 import { copyFile, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { addComponent, connectPin, disconnectPin, removeComponent, setValue, type OpResult } from '../src/kicad/ops.ts';
-import { parseSchematic, type Schematic } from '../src/kicad/schematic.ts';
-import type { Hole, Options, Sidecar } from '../src/layout/types.ts';
-import { emptySidecar } from '../src/layout/types.ts';
+import { parseLibSymbol, parseSchematic, type Schematic } from '../src/kicad/schematic.ts';
+import { componentFromSymbol } from '../src/edit/newpart.ts';
+import { resolveAlias } from '../src/parts/aliases.ts';
+import { isList, parse } from '../src/sexpr.ts';
+import type { Hole, Options, Sidecar, WirePath } from '../src/layout/types.ts';
+import { emptySidecar, normalizeWirePath } from '../src/layout/types.ts';
 import { parseNetlist, type Design } from '../src/netlist.ts';
 import { buildLayoutDoc, type LayoutDoc } from '../src/pipeline.ts';
 import { footprintPins } from '../src/layout/engine.ts';
 import { normalizeTests } from '../src/sim/test-spec.ts';
 import { classify } from '../src/parts/catalog.ts';
 import { LED_COLOURS, type LedColour } from '../src/parts/led.ts';
+import { shapePlan, takenNodes, wireKey } from '../src/render/route3d.ts';
 import { RESISTOR_KINDS } from '../src/parts/resistor.ts';
 import { simulate, type SimResult } from '../src/sim/index.ts';
 import type { KicadCli } from './kicad-cli.ts';
 import type { LibraryLookup } from './libraries.ts';
 import { importSchematic, mapHostPath, normalizePath, projectId, readSidecar, scanProjects, writeSidecar, type PathMapping, type ProjectInfo, type ProjectRegistry } from './projects.ts';
 import { watchFile, type Events } from './watch.ts';
+
+const PATH_HELP = 'path must be {"points": [{"col": 12.5, "gap": "c|d", "lane": 0}, ...]}, with corridors named "top", "T+|T-", "a|b" ... "B-|B+", "bottom"';
 
 export class ServiceError extends Error {
   constructor(
@@ -46,6 +52,12 @@ export interface ProjectEvent {
   projectId: string;
   type: 'changed' | 'error' | 'closed' | 'client';
   message?: string;
+  /**
+   * For 'changed': 'edit' when Service.edit() wrote the schematic (the MCP
+   * server, REST /edit/*, or a card in some page), 'watch' when the file
+   * changed on disk underneath us. Clients reload quietly for 'edit'.
+   */
+  source?: 'edit' | 'watch';
   /** For 'client': the MCP client that was just heard from. */
   client?: import('./clients.ts').ClientSeen;
 }
@@ -80,6 +92,20 @@ export class Service {
   private stops = new Map<string, () => void>();
 
   constructor(private deps: ServiceDeps) {}
+
+  /** What a tray part would be on the board: its footprint and leg order, before it exists. */
+  async partFootprint(part: string) {
+    const alias = resolveAlias(part);
+    if (!alias) throw new ServiceError(`no part called "${part}"`, 404);
+    const node = parse(await this.deps.libs.symbolText(alias.libId)).items[0];
+    if (!isList(node)) throw new ServiceError(`the symbol for ${alias.libId} could not be read`, 500);
+    const lib = parseLibSymbol(node);
+    const value = alias.defaultValue ?? lib.name;
+    const comp = componentFromSymbol(lib, value);
+    const footprint = classify(comp);
+    const pins = footprint.kind === 'power' || footprint.kind === 'supply' || footprint.kind === 'unsupported' ? [] : footprintPins(footprint, comp);
+    return { alias: alias.alias, libId: alias.libId, value, pins, footprint };
+  }
 
   has(id: string): boolean {
     return this.open_.has(id);
@@ -142,15 +168,30 @@ export class Service {
     return { info, schematic, design, sidecar, doc, netlistText, mtimeMs: s.mtimeMs, size: s.size };
   }
 
+  /** What edit() last wrote per project, so the watcher can tell its own write from an external one. */
+  private selfWrites = new Map<string, { mtimeMs: number; size: number }>();
+
   private startWatch(id: string, file: string) {
     this.stops.get(id)?.();
     this.stops.set(
       id,
       watchFile(
         file,
-        () => {
+        async () => {
+          // Our own edit() wrote this file, refreshed from it and already
+          // announced it with source 'edit': a second refresh and event would
+          // be noise. Only our own recorded write counts; matching the open
+          // project's mtime/size would also swallow a genuine external save
+          // once anything else had refreshed first.
+          try {
+            const st = await stat(file);
+            const mine = this.selfWrites.get(id);
+            if (mine && st.mtimeMs === mine.mtimeMs && st.size === mine.size) return;
+          } catch {
+            /* missing: fall through, refresh reports it */
+          }
           this.refresh(id)
-            .then(() => this.deps.events.emit({ projectId: id, type: 'changed' }))
+            .then(() => this.deps.events.emit({ projectId: id, type: 'changed', source: 'watch' }))
             .catch((e) => this.deps.events.emit({ projectId: id, type: 'error', message: (e as Error).message }));
         },
         { pollMs: this.deps.watchPollMs ?? 0 },
@@ -170,6 +211,7 @@ export class Service {
     this.stops.get(id)?.();
     this.stops.delete(id);
     this.open_.delete(id);
+    this.selfWrites.delete(id);
     this.deps.events.emit({ projectId: id, type: 'closed' });
   }
 
@@ -210,6 +252,8 @@ export class Service {
     // This is against the SAME p.mtimeMs/p.size captured before run(), not a fresh read of "now".
     await this.assertFresh(p);
     await writeFile(p.info.path, result.text);
+    const written = await stat(p.info.path);
+    this.selfWrites.set(id, { mtimeMs: written.mtimeMs, size: written.size });
     try {
       const removed = result.placed['-'];
       if (removed) {
@@ -233,6 +277,10 @@ export class Service {
       }
       await writeSidecar(p.info.path, p.sidecar);
       const fresh = await this.refresh(id);
+      // Tell every open page (and the watcher knows to stay quiet about this
+      // write via selfWrites). Without this, MCP and REST edits never reach
+      // the browser.
+      this.deps.events.emit({ projectId: id, type: 'changed', source: 'edit' });
       return { project: fresh, backup, notes: result.notes, ref: result.ref, unit: result.unit };
     } catch (e) {
       // The schematic write already succeeded at this point; say so and name the backup so the
@@ -241,7 +289,7 @@ export class Service {
     }
   }
 
-  addComponent(id: string, a: { libId: string; value?: string; ref?: string; connections?: Record<string, string> }) {
+  addComponent(id: string, a: { libId: string; value?: string; ref?: string; connections?: Record<string, string>; spare?: boolean }) {
     return this.edit(id, (p) => addComponent(p.schematic, p.design, a, this.deps.libs.symbolText).catch(rethrow));
   }
   connect(id: string, ref: string, pin: string, net: string) {
@@ -323,12 +371,48 @@ export class Service {
     if (missing.length) throw new ServiceError(`move_part needs a hole for every pin of ${ref}; missing pin ${missing.join(', pin ')}`);
     const before = { ...p.sidecar.pinned };
     p.sidecar.pinned[ref] = Object.fromEntries(expected.map((pin) => [pin, { col: holes[pin].col, row: holes[pin].row }]));
-    const doc = buildLayoutDoc(p.design, p.sidecar);
+    // Only the engine's verdict is wanted here, so the arc style skips routing
+    // (the rebuild below routes once, as manipulate.ts's drag verdict does).
+    const doc = buildLayoutDoc(p.design, { ...p.sidecar, options: { ...p.sidecar.options, wireStyle: 'arc' } });
     const dropped = doc.warnings.find((w) => w.startsWith(`pinned placement for ${ref} dropped`));
     if (dropped) {
       p.sidecar.pinned = before;
       throw new ServiceError(dropped.replace('pinned placement for', 'cannot move'));
     }
+    return this.rebuild(p);
+  }
+
+  /**
+   * Keep the hand shape of one jumper (or, with null, forget it), keyed as
+   * wireKey() makes it: net|holeA|holeB with the holes sorted. Key "*" with
+   * null forgets every one. Only the layout sidecar changes, never the
+   * schematic. A shape that is not square, does not leave its holes along
+   * their columns, leaves the board, runs through a package or lies over a
+   * leg or another jumper's end is refused.
+   */
+  async setWirePath(id: string, key: string, path: WirePath | null): Promise<OpenProject> {
+    const p = this.get(id);
+    if (key === '*') {
+      if (path !== null) throw new ServiceError('key "*" only clears every hand shape: send "path": null');
+      p.sidecar.wirePaths = {};
+      return this.rebuild(p);
+    }
+    const wire = p.doc.wires.find((w) => wireKey(w) === key);
+    if (!wire && path === null && Object.hasOwn(p.sidecar.wirePaths, key)) {
+      // A shape for a jumper that is gone: let it be forgotten.
+      delete p.sidecar.wirePaths[key];
+      return this.rebuild(p);
+    }
+    if (!wire) throw new ServiceError(`no jumper ${key} on the board (a key is net|holeA|holeB with the holes sorted, for example "/A|a12|e20")`, 404);
+    if (path === null) {
+      delete p.sidecar.wirePaths[key];
+      return this.rebuild(p);
+    }
+    const clean = normalizeWirePath(path);
+    if (!clean) throw new ServiceError(PATH_HELP);
+    const { why } = shapePlan(wire, clean, p.doc.packages, p.doc.board, takenNodes(p.doc));
+    if (why) throw new ServiceError(why.startsWith('it names') ? PATH_HELP : `cannot shape the ${wire.net} jumper: ${why}`);
+    p.sidecar.wirePaths[key] = clean;
     return this.rebuild(p);
   }
 

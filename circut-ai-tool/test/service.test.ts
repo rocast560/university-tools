@@ -4,9 +4,12 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { ProjectRegistry, normalizePath, sidecarPath, type PathMapping } from '../server/projects.ts';
 import { Service, ServiceError, type ProjectEvent } from '../server/service.ts';
+import { moveSegment } from '../src/edit/wireshape.ts';
+import { LANE, planToPath, routeWires, wireKey } from '../src/render/route3d.ts';
 import { Events } from '../server/watch.ts';
 import { fakeKicad } from './fake-kicad.ts';
 import { FIXTURES, readFixture } from './smoke.test.ts';
+import { router } from '../src/pipeline.ts';
 
 export async function makeService(opts: { watch?: boolean; watchPollMs?: number; pathMap?: PathMapping[] } = {}) {
   const work = mkdtempSync(path.join(tmpdir(), 'svc-'));
@@ -85,6 +88,23 @@ describe('Service', () => {
     expect(reset.sidecar.pinned).toEqual({});
   });
 
+  test('movePart with square wires routes once, for the kept doc, not for its verdict too', async () => {
+    const { service, sch } = await makeService();
+    const p = await service.open(sch);
+    await service.setOptions(p.info.id, { wireStyle: 'orthogonal' });
+    const d2 = p.doc.pinHoles.D2;
+    const was = router.route;
+    let calls = 0;
+    router.route = (...args) => (calls++, was(...args));
+    try {
+      const moved = await service.movePart(p.info.id, 'D2', { '1': { col: d2['1'].col + 3, row: d2['1'].row }, '2': { col: d2['2'].col + 3, row: d2['2'].row } });
+      expect(calls).toBe(1);
+      expect(moved.doc.routes?.length).toBe(moved.doc.wires.length);
+    } finally {
+      router.route = was;
+    }
+  });
+
   test('options, colours and simulation', async () => {
     const { service, sch } = await makeService();
     const p = await service.open(sch);
@@ -117,6 +137,41 @@ describe('Service', () => {
     expect(service.has(p.info.id)).toBe(false);
   });
 
+  test('an edit announces itself once with source "edit", and the watcher does not echo it', async () => {
+    const { service, sch, events } = await makeService({ watch: true, watchPollMs: 100 });
+    const p = await service.open(sch);
+    const got: ProjectEvent[] = [];
+    events.subscribe((e) => got.push(e));
+    await new Promise((r) => setTimeout(r, 250));
+    await service.setValue(p.info.id, 'R1', '2k');
+    // Emitted synchronously after the refresh, so MCP/REST edits reach open pages.
+    expect(got.filter((e) => e.type === 'changed')).toEqual([{ projectId: p.info.id, type: 'changed', source: 'edit' }]);
+    // Long enough for the poller and its debounce to see the write: no second event.
+    await new Promise((r) => setTimeout(r, 1200));
+    expect(got.filter((e) => e.type === 'changed')).toEqual([{ projectId: p.info.id, type: 'changed', source: 'edit' }]);
+    // An external save afterwards is still announced, by the watcher.
+    writeFileSync(sch, `${readFileSync(sch, 'utf8')}
+`);
+    await new Promise((r) => setTimeout(r, 1200));
+    expect(got.filter((e) => e.type === 'changed' && e.source === 'watch').length).toBe(1);
+    service.close(p.info.id);
+  });
+
+  test('an external save is announced even after something else refreshed first', async () => {
+    const { service, sch, events } = await makeService({ watch: true, watchPollMs: 100 });
+    const p = await service.open(sch);
+    const got: ProjectEvent[] = [];
+    events.subscribe((e) => got.push(e));
+    await new Promise((r) => setTimeout(r, 250));
+    writeFileSync(sch, `${readFileSync(sch, 'utf8')}
+`);
+    // A REST /refresh racing the watcher leaves the open project matching the file on disk.
+    await service.refresh(p.info.id);
+    await new Promise((r) => setTimeout(r, 1200));
+    expect(got.some((e) => e.type === 'changed' && e.source === 'watch')).toBe(true);
+    service.close(p.info.id);
+  });
+
   test('reloads through the polling watcher when asked', async () => {
     const { service, sch, events } = await makeService({ watch: true, watchPollMs: 100 });
     const p = await service.open(sch);
@@ -125,6 +180,7 @@ describe('Service', () => {
     writeFileSync(sch, `${readFileSync(sch, 'utf8')}\n`);
     const ev = await Promise.race([got, new Promise<ProjectEvent>((_, reject) => setTimeout(() => reject(new Error('no event within 3 s')), 3000))]);
     expect(ev.type).toBe('changed');
+    expect(ev.source).toBe('watch');
     service.close(p.info.id);
   });
 });
@@ -173,5 +229,69 @@ describe('Service.edit safety (backup-before-write, stale guard)', () => {
     for (let i = 0; i < 6; i++) await service.setValue(p.info.id, 'R1', `${i}k`);
     const backups = readdirSync(path.join(work, '.circuit-ai-backups')).filter((f) => f.endsWith('.kicad_sch'));
     expect(backups.length).toBe(6);
+  });
+});
+
+describe('hand-shaped wires', () => {
+  test('setWirePath keeps a shape, the doc routes it as saved, and null or "*" forgets it', async () => {
+    const { service, sch } = await makeService();
+    const p = await service.open(sch);
+    const square = await service.setOptions(p.info.id, { wireStyle: 'orthogonal' });
+    const i = square.doc.routes!.findIndex((r) => r.plan.length >= 4);
+    const w = square.doc.wires[i];
+    const auto = square.doc.routes![i].plan;
+    // Slide the second run one lane over, as a hand drag would.
+    const across = auto[1][0] === auto[2][0] ? 0 : 1;
+    const shaped = auto.map((q, n) => (n === 1 || n === 2 ? ((across ? [q[0], q[1] + LANE] : [q[0] + LANE, q[1]]) as [number, number]) : q));
+    const key = wireKey(w);
+    const saved = await service.setWirePath(p.info.id, key, planToPath(w, shaped)!);
+    expect(saved.doc.routes![i].plan).toEqual(shaped);
+    expect(saved.doc.routes![i].locked).toBe(true);
+    expect(JSON.parse(readFileSync(sidecarPath(sch), 'utf8')).wirePaths[key]).toEqual(planToPath(w, shaped));
+    const cleared = await service.setWirePath(p.info.id, key, null);
+    expect(cleared.sidecar.wirePaths[key]).toBeUndefined();
+    expect(cleared.doc.routes![i].locked).toBeUndefined();
+    await service.setWirePath(p.info.id, key, planToPath(w, shaped)!);
+    const all = await service.setWirePath(p.info.id, '*', null);
+    expect(all.sidecar.wirePaths).toEqual({});
+  });
+
+  test('setWirePath refuses an unknown wire, a malformed path, a path through a chip or over a leg, and "*" with a path', async () => {
+    const { service, sch } = await makeService();
+    const p = await service.open(sch);
+    const w = p.doc.wires[0];
+    await expect(service.setWirePath(p.info.id, '/NOPE|a1|a2', null)).rejects.toThrow(/no jumper/);
+    await expect(service.setWirePath(p.info.id, wireKey(w), { points: [{ col: 3, gap: 'x|y', lane: 0 }] })).rejects.toThrow(/path must be/);
+    await expect(service.setWirePath(p.info.id, wireKey(w), { nope: 1 } as never)).rejects.toThrow(/path must be/);
+    // d22 to d27 runs above U3; down into the centre channel and along it goes straight through the chip.
+    const over = p.doc.wires.find((k) => wireKey(k) === 'Net-(U3-Pad13)|d22|d27')!;
+    const through = { points: [{ col: 22, gap: 'e|f', lane: 0 }, { col: 27, gap: 'e|f', lane: 0 }] };
+    await expect(service.setWirePath(p.info.id, wireKey(over), through)).rejects.toThrow('cannot shape the Net-(U3-Pad13) jumper: the path runs through U3');
+    await expect(service.setWirePath(p.info.id, '*', { points: [] })).rejects.toThrow(/only clears/);
+    // g3 to g21 with its long run dragged below row j: the stub out of g3 would lie over the leg in j3.
+    const a = p.doc.wires.find((k) => wireKey(k) === '/A|g21|g3')!;
+    const overLeg = planToPath(a, moveSegment(routeWires(p.doc).routes[p.doc.wires.indexOf(a)].plan, 1, 273))!;
+    await expect(service.setWirePath(p.info.id, wireKey(a), overLeg)).rejects.toThrow('cannot shape the /A jumper: the path runs over a leg at j3');
+    const reset = await service.resetLayout(p.info.id);
+    expect(reset.sidecar.wirePaths).toEqual({});
+  });
+
+  test('setWirePath checks the shape as it will be drawn: a bend on its own hole is refused at save, not dropped at layout', async () => {
+    const { service, sch } = await makeService();
+    const p = await service.open(sch);
+    const w = p.doc.wires.find((k) => wireKey(k) === '+5V|T+11|a12')!;
+    // The first bend lands on the T+11 hole itself, so it simplifies away and the run leaves sideways.
+    const onHole = { points: [{ col: 11, gap: 'top', lane: 2 }, { col: 12, gap: 'top', lane: 2 }] };
+    await expect(service.setWirePath(p.info.id, wireKey(w), onHole)).rejects.toThrow(/leave each hole straight/);
+    expect((await service.setWirePath(p.info.id, '*', null)).sidecar.wirePaths).toEqual({});
+  });
+
+  test('a shape kept for a jumper that is gone can still be forgotten; a key nobody knows is a 404', async () => {
+    const { service, sch } = await makeService();
+    const p = await service.open(sch);
+    p.sidecar.wirePaths['/GONE|a1|a9'] = { points: [] };
+    const after = await service.setWirePath(p.info.id, '/GONE|a1|a9', null);
+    expect(after.sidecar.wirePaths['/GONE|a1|a9']).toBeUndefined();
+    await expect(service.setWirePath(p.info.id, '/GONE|a1|a9', null)).rejects.toThrow(/no jumper/);
   });
 });

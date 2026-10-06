@@ -1,0 +1,200 @@
+// Pure rules for putting a part's legs into breadboard holes: which holes are
+// taken, what a leg would short or join, and where a quarter turn puts a
+// two-lead part. No DOM and no three, so every rule is a unit test away and
+// the 3D editor, the tray and any future MCP tool all judge a placement the
+// same way.
+
+import { isRail, stripOf } from '../layout/board.ts';
+import type { BoardSpec, Hole, Row } from '../layout/types.ts';
+import { displayName, type Design } from '../netlist.ts';
+import type { LayoutDoc } from '../pipeline.ts';
+
+export type Tone = 'ok' | 'join' | 'bad';
+export interface Tint {
+  hole: Hole;
+  tone: Tone;
+  /** The net a 'join' leg would join, or the net a 'bad' leg would short to. */
+  label?: string;
+}
+export interface Verdict {
+  ok: boolean;
+  /** The first reason the placement is refused, in words a user can act on. */
+  reason: string | null;
+  tints: Tint[];
+}
+
+/** Every row top to bottom, so a turn can be done in whole row steps. */
+export const ROW_ORDER: Row[] = ['T+', 'T-', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'B-', 'B+'];
+
+const short = (net: string) => net.split('/').filter(Boolean).pop() ?? net;
+const name = (h: Hole) => `${h.row}${h.col}`;
+
+export function inBoard(h: Hole, board: BoardSpec): boolean {
+  if (h.col < 1 || h.col > board.cols) return false;
+  return !(isRail(h.row) && h.col % board.railGapEvery === 0);
+}
+
+/**
+ * The nets each strip already carries: from every leg on the board except
+ * those of `except`, and from the supply leads on the rails. Wires are left
+ * out on purpose: the engine re-routes them after any move, so a jumper
+ * landing in a strip today says nothing about where it will land tomorrow.
+ */
+export function stripNets(doc: LayoutDoc, design: Design, except: string | null): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
+  const add = (h: Hole, net: string) => {
+    if (!net) return;
+    const k = stripOf(h);
+    let s = out.get(k);
+    if (!s) out.set(k, (s = new Set()));
+    s.add(net);
+  };
+  for (const [ref, pins] of Object.entries(doc.pinHoles)) {
+    if (ref === except) continue;
+    const comp = design.components.get(ref);
+    for (const [pin, h] of Object.entries(pins)) add(h, comp?.pins.get(pin)?.net ?? '');
+  }
+  for (const lead of doc.supply?.leads ?? []) add(lead.hole, lead.net);
+  return out;
+}
+
+/** Hole name -> the part whose leg is in it, for every part but `except`. */
+export function takenHoles(doc: LayoutDoc, except: string | null): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const [ref, pins] of Object.entries(doc.pinHoles)) {
+    if (ref === except) continue;
+    for (const h of Object.values(pins)) out.set(name(h), ref);
+  }
+  return out;
+}
+
+/**
+ * Whether `ref`'s legs may go in `holes`, with a tint for every leg. A leg
+ * whose pin has no net yet (a part fresh from the tray) joins whatever its
+ * strip carries; a leg with a net may only share a strip with that net.
+ */
+export function validatePlacement(doc: LayoutDoc, design: Design, ref: string, holes: Record<string, Hole>, netOf?: (pin: string) => string): Verdict {
+  const comp = design.components.get(ref);
+  const net = netOf ?? ((pin: string) => comp?.pins.get(pin)?.net ?? '');
+  const nets = stripNets(doc, design, ref);
+  const taken = takenHoles(doc, ref);
+  const tints: Tint[] = [];
+  let reason: string | null = null;
+  const fail = (why: string) => {
+    reason ??= why;
+  };
+  /** Strip -> the net of the first of this part's own legs placed in it. */
+  const mine = new Map<string, string>();
+  // A two-lead part with both legs in one strip is shorted out whatever its
+  // nets say: unconnected legs, or a part whose pins share a net, still do
+  // nothing there (spec §4.4). A part not in the doc yet (fresh from the tray)
+  // counts as two-lead when it has two legs.
+  const inDoc = !!doc.pinHoles[ref] || doc.parts.some((p) => p.id === ref) || doc.packages.some((p) => p.id === ref);
+  const twoLead = doc.parts.find((p) => p.id === ref)?.kind === 'lead2' || (!inDoc && Object.keys(holes).length === 2);
+  for (const [pin, h] of Object.entries(holes)) {
+    let tone: Tone = 'ok';
+    let label: string | undefined;
+    const n = net(pin);
+    if (!inBoard(h, doc.board)) {
+      tone = 'bad';
+      fail(`pin ${pin} would be off the board at ${name(h)}`);
+    } else if (taken.has(name(h))) {
+      tone = 'bad';
+      fail(`hole ${name(h)} is taken by ${taken.get(name(h))}`);
+    } else {
+      const k = stripOf(h);
+      const there = [...(nets.get(k) ?? [])].filter((x) => x !== n);
+      if (there.length && n) {
+        tone = 'bad';
+        label = there[0];
+        fail(`pin ${pin} would short ${short(n)} to ${short(there[0])} at ${name(h)}`);
+      } else if (there.length) {
+        tone = 'join';
+        label = there[0];
+      }
+      const prev = mine.get(k);
+      if (prev !== undefined && twoLead) {
+        tone = 'bad';
+        fail(`${ref}'s legs would short each other in one strip at ${name(h)}`);
+      } else if (prev !== undefined && prev !== n) {
+        tone = 'bad';
+        fail(`${ref}'s pins would short each other in one strip (${short(prev) || 'unconnected'} and ${short(n) || 'unconnected'})`);
+      }
+      mine.set(k, n);
+    }
+    tints.push({ hole: h, tone, label });
+  }
+  const pkg = doc.packages.find((p) => p.id === ref);
+  if (pkg?.kind === 'dip' && Object.values(holes).some((h) => h.row !== 'e' && h.row !== 'f')) fail(`${ref} has to straddle the centre channel (rows e and f)`);
+  return { ok: reason === null, reason, tints };
+}
+
+/**
+ * A quarter turn clockwise, as seen from above, about pin 1, in whole column
+ * and row steps. Null when the turned leg would leave the rows altogether.
+ * Whether the result is sensible (a part stood inside one half shorts itself)
+ * is validatePlacement's call, not this one's.
+ */
+export function rotateLead2(holes: Record<string, Hole>, pins: [string, string]): Record<string, Hole> | null {
+  const [p1, p2] = pins;
+  const a = holes[p1];
+  const b = holes[p2];
+  const ra = ROW_ORDER.indexOf(a.row);
+  const dc = b.col - a.col;
+  const dr = ROW_ORDER.indexOf(b.row) - ra;
+  // Screen axes: x to the right, rows downward. Clockwise takes (dx, dy) to (-dy, dx).
+  const row = ROW_ORDER[ra + dc];
+  if (!row) return null;
+  return { [p1]: { ...a }, [p2]: { col: a.col - dr, row } };
+}
+
+/**
+ * Half a turn about the chip's centre: the notch goes to the other end and
+ * pin 1 to the opposite corner, each leg landing in the hole its opposite
+ * number used. Only ever used on a DIP across the channel, so rows e and f
+ * simply trade places.
+ */
+export function flipDip(holes: Record<string, Hole>): Record<string, Hole> {
+  const cols = Object.values(holes).map((h) => h.col);
+  const lo = Math.min(...cols);
+  const hi = Math.max(...cols);
+  const other = (row: Row): Row => (row === 'e' ? 'f' : row === 'f' ? 'e' : row);
+  return Object.fromEntries(Object.entries(holes).map(([pin, h]) => [pin, { col: lo + hi - h.col, row: other(h.row) }]));
+}
+
+const unconnected = (net: string) => !net || net.startsWith('unconnected-');
+
+/** Pin -> net for each leg of a new part whose strip already carries exactly one net. */
+export function legsToConnections(doc: LayoutDoc, design: Design, holes: Record<string, Hole>): Record<string, string> {
+  const nets = stripNets(doc, design, null);
+  const out: Record<string, string> = {};
+  for (const [pin, h] of Object.entries(holes)) {
+    const s = [...(nets.get(stripOf(h)) ?? [])].filter((n) => !unconnected(n));
+    if (s.length === 1) out[pin] = s[0];
+  }
+  return out;
+}
+
+export type JumperOutcome = { kind: 'connect'; net: string; pins: { ref: string; pin: string }[] } | { kind: 'same'; net: string } | { kind: 'refuse'; reason: string };
+
+/** What a jumper from `a` to `b` would do to the schematic (spec 6.3). */
+export function jumperOutcome(doc: LayoutDoc, design: Design, a: Hole, b: Hole): JumperOutcome {
+  const sa = stripOf(a);
+  const sb = stripOf(b);
+  if (sa === sb) return { kind: 'refuse', reason: 'both ends are in the same strip' };
+  const all = stripNets(doc, design, null);
+  const netsOf = (s: string) => [...(all.get(s) ?? [])].filter((n) => !unconnected(n));
+  const loose = (s: string) => {
+    const out: { ref: string; pin: string }[] = [];
+    for (const [ref, pins] of Object.entries(doc.pinHoles)) for (const [pin, h] of Object.entries(pins)) if (stripOf(h) === s && unconnected(design.components.get(ref)?.pins.get(pin)?.net ?? '')) out.push({ ref, pin });
+    return out;
+  };
+  const [na, nb] = [netsOf(sa), netsOf(sb)];
+  if (na.length > 1 || nb.length > 1) return { kind: 'refuse', reason: 'that strip already joins two nets' };
+  if (na.length && nb.length) return na[0] === nb[0] ? { kind: 'same', net: na[0] } : { kind: 'refuse', reason: `would join ${displayName(na[0])} and ${displayName(nb[0])}. Merge nets in the schematic` };
+  const nothing: JumperOutcome = { kind: 'refuse', reason: 'nothing to connect yet. Place a part first' };
+  const net = na[0] ?? nb[0];
+  if (!net) return nothing;
+  const pins = loose(na.length ? sb : sa);
+  return pins.length ? { kind: 'connect', net, pins } : nothing;
+}

@@ -6,6 +6,10 @@ import { pngAvailable } from '../server/png.ts';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { makeService } from './service.test.ts';
 import { FIXTURES } from './smoke.test.ts';
+import { KICAD_SYMBOL_DIR } from '../server/config.ts';
+import { Events } from '../server/watch.ts';
+import type { ProjectEvent } from '../server/service.ts';
+import { createLibraryLookup } from '../server/libraries.ts';
 
 async function setup() {
   const { service, sch, events, work } = await makeService();
@@ -63,11 +67,32 @@ describe('REST API', () => {
     expect(opts.packages[0].kind).toBe('dipswitch');
     const col = await (await json(`/api/projects/${id}/layout/colors`, { net: '/A', color: '#abcdef' })).json();
     expect(col.nets['/A'].color).toBe('#abcdef');
+    const wire = await json(`/api/projects/${id}/layout/wire`, { key: '*', path: null });
+    expect(wire.status).toBe(200);
+    const badWire = await json(`/api/projects/${id}/layout/wire`, { key: '/NOPE|a1|a2', path: null });
+    expect(badWire.status).toBe(404);
+    expect((await json(`/api/projects/${id}/layout/wire`, { path: null })).status).toBe(400);
     const reset = await (await json(`/api/projects/${id}/layout/reset`, {})).json();
     expect(reset.packages[0].kind).toBe('dip');
     const sim = await (await json(`/api/projects/${id}/sim`, { levels: { '/A': 1, '/B': 1 } })).json();
     expect(sim.nets['/Y1']).toBe(0);
     expect((await json(`/api/projects/zzz/layout`)).status).toBe(404);
+  });
+
+  test('a body that is not a JSON object is a 400 on every layout and edit route, not a 500', async () => {
+    const { app, json, sch } = await setup();
+    const { id } = await (await json('/api/projects/open', { path: sch })).json();
+    const routes = ['layout/options', 'layout/move', 'layout/colors', 'layout/ledcolor', 'layout/wire', 'edit/add', 'edit/connect', 'edit/disconnect', 'edit/remove', 'edit/value'];
+    for (const route of routes) {
+      for (const body of ['null', '[]', '7', '"x"', '{nope']) {
+        const res = await app.request(`/api/projects/${id}/${route}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body });
+        expect(`${route} ${body} ${res.status}`).toBe(`${route} ${body} 400`);
+        expect((await res.json()).error).toMatch(/JSON object/);
+      }
+    }
+    // The routes that always took a missing body as empty still do, null included.
+    expect((await json('/api/projects/open', null)).status).toBe(400);
+    expect((await json(`/api/projects/${id}/sim`, null)).status).toBe(200);
   });
 
   test('import copies a schematic into the library, opens it, and never overwrites', async () => {
@@ -165,5 +190,47 @@ describe('REST API', () => {
       const res = await app.request(path, { method: 'OPTIONS', headers: { origin, 'access-control-request-method': 'POST' } });
       expect(res.headers.get('access-control-allow-origin')).toBe('*');
     }
+  });
+});
+
+// Needs a real KiCad symbol library, like the edit tests.
+describe.skipIf(!existsSync(path.join(KICAD_SYMBOL_DIR, 'Device.kicad_sym')))('part footprints', () => {
+  test('GET /api/parts/footprint describes a part from its symbol', async () => {
+    const { service } = await makeService();
+    // makeService stubs the libraries; swap in the real ones.
+    (service as unknown as { deps: { libs: unknown } }).deps.libs = createLibraryLookup({ symbolDir: KICAD_SYMBOL_DIR });
+    const app = createApp({ service, events: new Events<ProjectEvent>(), mcp: () => new McpServer({ name: 'stub', version: '0' }) });
+    const res = await app.request('/api/parts/footprint?part=resistor');
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toMatchObject({ libId: 'Device:R', pins: ['1', '2'], footprint: { kind: 'lead2', style: 'R' } });
+    const bad = await app.request('/api/parts/footprint?part=nope');
+    expect(bad.status).toBe(404);
+    expect(await bad.json()).toHaveProperty('error');
+  });
+});
+
+describe.skipIf(!existsSync(path.join(KICAD_SYMBOL_DIR, '74xx.kicad_sym')))('edit/add spare', () => {
+  // The fake kicad keeps returning PL1's netlist, so only the ref and notes are checked here.
+  const addApp = async () => {
+    const { service, sch } = await makeService();
+    (service as unknown as { deps: { libs: unknown } }).deps.libs = createLibraryLookup({ symbolDir: KICAD_SYMBOL_DIR });
+    const app = createApp({ service, events: new Events<ProjectEvent>(), mcp: () => new McpServer({ name: 'stub', version: '0' }) });
+    const json = (p: string, body: unknown) => app.request(p, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const { id } = await (await json('/api/projects/open', { path: sch })).json();
+    return { json, id };
+  };
+  test('spare: false adds a new 74LS86 instead of filling a spare gate of U1', async () => {
+    const { json, id } = await addApp();
+    const res = await json(`/api/projects/${id}/edit/add`, { part: '74LS86', spare: false });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ref).toBe('U4');
+    expect(body.notes.join(' ')).not.toMatch(/spare gate/);
+  });
+  test('without spare the default still reuses a spare gate', async () => {
+    const { json, id } = await addApp();
+    const body = await (await json(`/api/projects/${id}/edit/add`, { part: '74LS86' })).json();
+    expect(body.ref).toBe('U1');
   });
 });

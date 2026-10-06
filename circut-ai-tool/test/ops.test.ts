@@ -54,14 +54,23 @@ describe('addComponent', () => {
     expect(r.notes.join(' ')).toMatch(/spare gate/);
   });
 
-  test('a new chip gets unit 1 and its power unit, and a note about pins outside the unit', async () => {
+  test('a new chip gets unit 1 and its power unit, plus the unit of any other connected pin', async () => {
     const r = await addComponent(sch, design, { libId: '74xx:74LS00', connections: { '1': 'A', '14': '+5V', '9': 'B' } }, libs);
     expect(r.ref).toBe('U4');
     const s = parseSchematic(r.text, 'PL1_1');
     const units = s.symbols.filter((x) => x.ref === 'U4').map((x) => x.unit).sort();
-    expect(units).toEqual([1, 5]);
-    expect(r.notes.join(' ')).toMatch(/pin 9/);
+    expect(units).toEqual([1, 3, 5]);
+    expect(r.notes.join(' ')).toMatch(/unit 3 of U4/);
+    expect(Object.keys(r.placed.U4).sort()).toEqual(['1', '14', '9']);
     expect(s.symbols.some((x) => x.libId === 'power:+5V' && x.at.y > 0)).toBe(true);
+  });
+
+  test('a reused spare gate never connects a pin of a gate the chip already uses', async () => {
+    // U1 unit 1 (pins 1-3) is the user's gate; the spare gate is unit 2 (pins 4-6).
+    const r = await addComponent(sch, design, { libId: '74xx:74LS86', connections: { '1': 'A', '4': 'B' } }, libs);
+    expect(r.ref).toBe('U1');
+    expect(r.notes.join(' ')).toMatch(/pin 1 is not part of the placed unit/);
+    expect(Object.keys(r.placed.U1)).toEqual(['4']);
   });
 
   test('spare-gate reuse requires a matching value; a differently-valued request falls through to a new chip', async () => {
@@ -70,6 +79,15 @@ describe('addComponent', () => {
     const s = parseSchematic(r.text, 'PL1_1');
     expect(s.symbols.filter((x) => x.ref === 'U1').every((x) => x.value === '74LS86')).toBe(true);
     expect(s.symbols.some((x) => x.ref === r.ref && x.libId === '74xx:74LS86' && x.value === '74HC86')).toBe(true);
+  });
+
+  test('spare: false adds a new chip even when a same-valued chip has a spare gate (tray drop, Duplicate)', async () => {
+    const r = await addComponent(sch, design, { libId: '74xx:74LS86', value: '74LS86', spare: false }, libs);
+    expect(r.ref).toBe('U4');
+    expect(r.notes.join(' ')).not.toMatch(/spare gate/);
+    const s = parseSchematic(r.text, 'PL1_1');
+    expect(s.symbols.filter((x) => x.ref === 'U1').map((x) => x.unit).sort()).toEqual([1, 5]);
+    expect(s.symbols.filter((x) => x.ref === 'U4').map((x) => x.unit).sort()).toEqual([1, 5]);
   });
 
   test('explicit ref and unknown lib', async () => {
@@ -105,6 +123,21 @@ describe('connect, disconnect, remove, setValue', () => {
     expect(parseSchematic(r2.text, 'PL1_1').symbols.filter((x) => x.libId === 'power:GND')).toHaveLength(7);
     await expect(connectPin(sch, design, 'R4', '9', 'Y1', libs)).rejects.toThrow(/pin 9/);
     await expect(connectPin(sch, design, 'R99', '1', 'Y1', libs)).rejects.toThrow(/R99/);
+  });
+
+  test('connect a pin of a gate unit that is not in the schematic yet places that unit first', async () => {
+    // PL1's U1 (74LS86) has units 1 and 5; pin 13 is gate D, unit 4.
+    expect(design.components.get('U1')!.pins.get('13')!.net).toBe('unconnected-(U1-Pad13)');
+    const r = await connectPin(sch, design, 'U1', '13', 'A', libs);
+    const s = parseSchematic(r.text, 'PL1_1');
+    expect(s.symbols.filter((x) => x.ref === 'U1').map((x) => x.unit).sort()).toEqual([1, 4, 5]);
+    const u4 = s.symbols.find((x) => x.ref === 'U1' && x.unit === 4)!;
+    expect(u4.value).toBe('74LS86');
+    const pin13 = pinsOfUnit(s.libSymbols.get('74xx:74LS86')!, 4).find((p) => p.number === '13')!;
+    const end = pinPosition(u4, pin13);
+    expect(s.labels.some((l) => l.text === 'A' && l.at.x === end.x && l.at.y === end.y)).toBe(true);
+    expect(r.notes.join(' ')).toMatch(/placed unit 4 of U1/);
+    await expect(connectPin(sch, design, 'U1', '99', 'A', libs)).rejects.toThrow(/no pin 99/);
   });
 
   test('remove every unit and placed labels; setValue on all units', async () => {

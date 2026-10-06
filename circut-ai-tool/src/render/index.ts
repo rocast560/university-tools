@@ -6,7 +6,7 @@ import { callouts } from './callouts.ts';
 import { isRail } from '../layout/board.ts';
 import { moduleRect, P, placeAt, pt, ROWY, svgSize, tierCols, tierCount, TIER_PITCH, tierShift, X0 } from './geometry.ts';
 import { wireControls, type Control } from './routing.ts';
-import { wirePolylines, type Point as OrthoPoint } from './ortho.ts';
+import { routeWires, type Point as OrthoPoint, type WireRoute } from './route3d.ts';
 import type { EngineResult } from '../layout/engine.ts';
 import type { BoardSpec, Hole, Package, PlacedPart, Row, Wire } from '../layout/types.ts';
 import { displayName } from '../netlist.ts';
@@ -225,8 +225,11 @@ function drawPackage(pkg: Package, res: EngineResult, t: Theme, sim: SimState | 
     parts.push(text(cx, by1 - 4, `${pkg.id} ${pkg.name}`, { fill: t.text, 'font-size': 8 }));
   } else {
     parts.push(el('rect', { x: x1, y: y1, width: x2 - x1, height: y2 - y1, rx: 3, fill: t.chip, stroke: '#000' }));
-    parts.push(el('circle', { cx: x1, cy: ym, r: 5, fill: t.notch }));
-    parts.push(el('circle', { cx: x1 + 8, cy: y2 - 8, r: 1.8, fill: t.chipText }));
+    // The notch and the pin 1 dimple mark the pin 1 end, which is the right
+    // end once the chip has been turned round.
+    const flip = !!pkg.flipped;
+    parts.push(el('circle', { cx: flip ? x2 : x1, cy: ym, r: 5, fill: t.notch }));
+    parts.push(el('circle', { cx: flip ? x2 - 8 : x1 + 8, cy: flip ? y1 + 8 : y2 - 8, r: 1.8, fill: t.chipText }));
     parts.push(text((x1 + x2) / 2, ym + 3, pkg.name, { fill: t.chipText, 'font-size': 9, 'font-weight': 600 }));
     parts.push(text((x1 + x2) / 2, y1 - 4, pkg.id, { fill: t.text, 'font-size': 8 }));
   }
@@ -391,8 +394,12 @@ function drawWire(w: Wire, i: number, color: string, t: Theme, opacity: number |
   return el('g', { class: 'wire', 'data-net': w.net, 'data-wire': i, opacity }, body ?? el('path', { d: `M ${n(ax)} ${n(ay)} Q ${n(cx)} ${n(cy)} ${n(bx)} ${n(by)}`, fill: 'none', stroke: color, 'stroke-width': rail ? 2.2 : 2.6, 'stroke-linecap': 'round' }) + (body ? '' : el('circle', { cx: ax, cy: ay, r: 3.2, fill: color, stroke: t.chip, 'stroke-width': 0.8 }) + el('circle', { cx: bx, cy: by, r: 3.2, fill: color, stroke: t.chip, 'stroke-width': 0.8 })));
 }
 
-/** A square-cornered jumper: a dark edge under the coloured run, mitred corners, and a dot in each hole. */
-function drawOrthoWire(w: Wire, i: number, color: string, t: Theme, opacity: number | undefined, pts: OrthoPoint[]): string {
+/**
+ * A square-cornered jumper: a dark edge under the coloured run, mitred
+ * corners, and a dot in each hole. One the router could not route cleanly is
+ * dashed, the same flag the 3D board shows as a red tint.
+ */
+function drawOrthoWire(w: Wire, i: number, color: string, t: Theme, opacity: number | undefined, pts: OrthoPoint[], warn: boolean): string {
   const rail = isRail(w.a.row) || isRail(w.b.row);
   const width = rail ? 2.2 : 2.6;
   const d = pts.map(([x, y], k) => `${k ? 'L' : 'M'} ${n(x)} ${n(y)}`).join(' ');
@@ -402,7 +409,7 @@ function drawOrthoWire(w: Wire, i: number, color: string, t: Theme, opacity: num
     'g',
     { class: 'wire', 'data-net': w.net, 'data-wire': i, opacity },
     el('path', { d, fill: 'none', stroke: 'rgba(0,0,0,0.38)', 'stroke-width': width + 1.6, 'stroke-linejoin': 'miter', 'stroke-linecap': 'round' }) +
-      el('path', { d, fill: 'none', stroke: color, 'stroke-width': width, 'stroke-linejoin': 'miter', 'stroke-linecap': 'round' }) +
+      el('path', { d, fill: 'none', stroke: color, 'stroke-width': width, 'stroke-linejoin': 'miter', 'stroke-linecap': 'round', 'stroke-dasharray': warn ? '5 3' : undefined }) +
       el('circle', { cx: ax, cy: ay, r: 3.2, fill: color, stroke: t.chip, 'stroke-width': 0.8 }) +
       el('circle', { cx: bx, cy: by, r: 3.2, fill: color, stroke: t.chip, 'stroke-width': 0.8 }),
   );
@@ -440,7 +447,11 @@ function drawCallouts(c: ReturnType<typeof callouts>): string {
   return el('g', { class: 'callouts', 'pointer-events': 'none' }, rings.join('') + arrows.join(''));
 }
 
-export function renderSvg(res: EngineResult, opts: RenderOptions = {}): string {
+/**
+ * `res.routes` is what the pipeline routed for square wires (LayoutDoc has it
+ * when the sidecar asks for them); a bare engine result is routed here.
+ */
+export function renderSvg(res: EngineResult & { routes?: WireRoute[] }, opts: RenderOptions = {}): string {
   const t = opts.theme ?? LIGHT;
   const sk = opts.skin ?? FLAT;
   const hl = opts.highlight ?? null;
@@ -458,7 +469,8 @@ export function renderSvg(res: EngineResult, opts: RenderOptions = {}): string {
   const size = svgSize(res.board, res.packages);
   const ortho = opts.wireStyle === 'orthogonal';
   const controls = ortho ? [] : wireControls(res.wires, (h) => placeAt(res.board, h));
-  const polylines = ortho ? wirePolylines(res.wires, res.packages, res.board) : [];
+  // Fallback for bare EngineResult callers only: it ignores saved wirePaths (the pipeline routes with them).
+  const routes = ortho ? (res.routes ?? routeWires(res).routes) : [];
   const ctx: SkinContext = { parts: res.parts, board: res.board, ledColors: res.ledColors ?? {}, leds: Object.fromEntries(res.parts.filter((p) => p.style === 'LED').map((p) => [p.id, ledState(p.id, sim)])) };
   const defs = sk.defs?.(ctx, t);
   const layers = [
@@ -470,7 +482,7 @@ export function renderSvg(res: EngineResult, opts: RenderOptions = {}): string {
     wrap('l-spill', 'mix-blend-mode:multiply', sk.spillLayer?.(ctx, t)),
     el('g', { class: 'packages' }, res.packages.map((p) => drawPackage(p, res, t, sim, hl?.wire !== undefined || hl?.net !== undefined ? () => undefined : dim)).join('')),
     el('g', { class: 'parts' }, res.parts.map((p) => drawPart(p, res, t, sim, dimPart, sk)).join('')),
-    el('g', { class: 'wires' }, res.wires.map((w, i) => (ortho ? drawOrthoWire(w, i, res.nets[w.net]?.color ?? t.text, t, dim([w.net], [], i), polylines[i]) : drawWire(w, i, res.nets[w.net]?.color ?? t.text, t, dim([w.net], [], i), sk, controls[i], res.board))).join('')),
+    el('g', { class: 'wires' }, res.wires.map((w, i) => (ortho ? drawOrthoWire(w, i, res.nets[w.net]?.color ?? t.text, t, dim([w.net], [], i), routes[i].plan, !!routes[i].warning) : drawWire(w, i, res.nets[w.net]?.color ?? t.text, t, dim([w.net], [], i), sk, controls[i], res.board))).join('')),
     drawSupply(res, t, hl?.wire !== undefined ? () => undefined : dim),
     drawCallouts(callouts(res, hl)),
     wrap('l-glow', 'mix-blend-mode:screen', sk.glowLayer?.(ctx, t)),

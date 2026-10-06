@@ -18,6 +18,8 @@ export interface ProjectState {
   switches: Record<string, boolean>;
   highlight: Highlight | null;
   activeStep: number | null;
+  /** The part picked in the 3D editor; the flat board outlines the same one. */
+  selectedRef: string | null;
   done: Set<number>;
   panel: 'guide' | 'sim' | 'parts' | 'pinouts' | 'checks' | 'truth' | 'options';
   /** Whether the analog simulation loop is running. */
