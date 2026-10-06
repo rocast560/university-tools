@@ -7,6 +7,7 @@ import { ledSpec, type LedColour } from '../src/parts/led.ts';
 import type { ResistorKind } from '../src/parts/resistor.ts';
 import type { PartGroup } from '../src/render/index.ts';
 import { partIcon } from './part-icons.ts';
+import { showBar } from './showbar.ts';
 import type { AnalogState } from '../src/sim/analog/simulator.ts';
 import { runTest, switchesForTest, type SimTest } from '../src/sim/tests.ts';
 import { analog } from './analog.ts';
@@ -283,9 +284,8 @@ export function renderPanels(panels: HTMLElement, toolbar: HTMLElement, legend: 
     `<div class="tgroup"><a class="btn" href="/api/projects/${p.id}/board.svg" download="${esc(p.name)}-breadboard.svg">SVG</a><a class="btn" href="/api/projects/${p.id}/board.png" download="${esc(p.name)}-breadboard.png">PNG</a><a class="btn" href="/api/projects/${p.id}/schematic.svg" target="_blank" rel="noopener">Schematic</a></div>` +
     (p.activeStep !== null ? '<button type="button" class="btn ghost" data-action="clear-step">Clear highlight</button>' : '') +
     `<span class="statuschip"><b>${esc(p.doc.board.kind)} board</b><i class="dot"></i>${p.doc.wires.length} wires<i class="dot"></i><em class="errs ${errs ? 'is-bad' : 'is-ok'}">${errs} ${errs === 1 ? 'error' : 'errors'}</em></span>`;
-  const showBtn = (g: PartGroup | null, label: string) => `<button type="button" class="btn ${(p.partGroup ?? null) === g ? 'is-on' : ''}" data-show="${g ?? ''}" aria-pressed="${(p.partGroup ?? null) === g}">${label}</button>`;
   legend.innerHTML =
-    `<div class="showbar"><span class="muted">Show</span><div class="tgroup">${showBtn(null, 'All')}${showBtn('chips', 'Chips &amp; modules')}${showBtn('resistors', 'Resistors')}${showBtn('leds', 'LEDs')}</div></div>` +
+    showBar(p.partGroup ?? null) +
     flowOrder(p.doc)
     .map((net) => [net, p.doc.nets[net]] as const)
     .map(([net, info]) => `<span data-legend="${esc(net)}" title="click to recolour"><i style="background:${esc(info.color)}"></i><span>${esc(info.name)}</span></span>`)

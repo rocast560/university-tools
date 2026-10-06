@@ -15,6 +15,8 @@ import { store } from './state.ts';
 import { currentHighlight } from './board.ts';
 import { flowOrder } from './floworder.ts';
 import { esc } from './main.ts';
+import { showBar } from './showbar.ts';
+import type { PartGroup } from '../src/render/index.ts';
 
 let view: Board3D | null = null;
 let host: HTMLElement | null = null;
@@ -49,6 +51,7 @@ function pushBoard() {
     return;
   }
   if (legend) for (const chip of legend.querySelectorAll<HTMLElement>('[data-legend]')) chip.classList.toggle('is-on', p.highlight?.net === chip.dataset.legend);
+  if (legend) for (const b of legend.querySelectorAll<HTMLElement>('[data-show]')) b.classList.toggle('is-on', (b.dataset.show || null) === (p.partGroup ?? null));
   const s = simState(p.doc.sim.model, p.switches);
   view.setBoard(p.switches, s.leds, s.segments);
   view.setHighlight(currentHighlight(p));
@@ -85,7 +88,7 @@ export async function open3d(card: HTMLElement, doc: LayoutDoc) {
     '<span class="view3d-hint"></span>' +
     '<span class="view3d-net"></span>' +
     '</div><div class="view3d-canvas"></div>' +
-    `<div class="view3d-legend">${flowOrder(doc).map((net) => `<span data-legend="${esc(net)}" title="click to follow this net; the rest fades"><i style="background:${esc(doc.nets[net].color)}"></i><span>${esc(doc.nets[net].name)}</span></span>`).join('')}</div>`;
+    `<div class="view3d-legend">${showBar(store.get().project?.partGroup ?? null)}${flowOrder(doc).map((net) => `<span data-legend="${esc(net)}" title="click to follow this net; the rest fades"><i style="background:${esc(doc.nets[net].color)}"></i><span>${esc(doc.nets[net].name)}</span></span>`).join('')}</div>`;
   card.appendChild(host);
   // Opening 3D is a place the browser's Back button can leave: one history
   // entry on the same URL, so Back closes the 3D view instead of leaving the
@@ -109,6 +112,13 @@ export async function open3d(card: HTMLElement, doc: LayoutDoc) {
   // faded, click it again to release; hover lights it for a look.
   legend = host.querySelector<HTMLElement>('.view3d-legend')!;
   legend.addEventListener('click', (e) => {
+    const show = (e.target as HTMLElement).closest<HTMLElement>('[data-show]');
+    if (show) {
+      const p = store.get().project;
+      const group = (show.dataset.show || null) as PartGroup | null;
+      if (p) store.setProject({ partGroup: group === (p.partGroup ?? null) ? null : group });
+      return;
+    }
     const net = (e.target as HTMLElement).closest<HTMLElement>('[data-legend]')?.dataset.legend;
     const p = store.get().project;
     if (!net || !p) return;

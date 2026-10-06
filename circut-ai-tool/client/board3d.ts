@@ -19,7 +19,7 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import type { Hole } from '../src/layout/types.ts';
 import type { LayoutDoc } from '../src/pipeline.ts';
 import { liftCrossings, type Span } from '../src/render/altitude.ts';
-import type { Highlight } from '../src/render/index.ts';
+import { groupRefs, type Highlight, type PartGroup } from '../src/render/index.ts';
 import { P, ROWY, tierCols, tierCount, TIER_PITCH, tierShift, X0 } from '../src/render/geometry.ts';
 import { wireControls } from '../src/render/routing.ts';
 import { wirePolylines } from '../src/render/ortho.ts';
@@ -367,9 +367,12 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
   const pickable: THREE.Object3D[] = [];
   const collectPickable = (o: THREE.Object3D) => o.traverse((n) => { if (typeof n.userData.switchKey === 'string') pickable.push(n); });
 
+  /** ref -> the group holding that package or part, for the Show filter. */
+  const partObj = new Map<string, THREE.Object3D>();
   for (const pkg of doc.packages) {
     const built = buildPackage(kit, pkg, doc);
     root.add(built.object);
+    partObj.set(pkg.id, built.object);
     ways.push(...built.ways);
     if (built.display) displays.set(pkg.id, built.display);
     collectPickable(built.object);
@@ -382,6 +385,7 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
   for (const part of doc.parts) {
     const built = buildPart(kit, part, doc);
     root.add(built.object);
+    partObj.set(part.id, built.object);
     obstacles.push(built.obstacle);
     collectPickable(built.object);
     if (built.led) leds.set(part.id, built.led);
@@ -595,12 +599,14 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
     m.opacity = faded ? 0.14 : 1;
     m.depthWrite = !faded;
   };
+  /** The Show filter is on: every jumper turns to glass unless its net is lit. */
+  let wiresGlass = false;
   const paintNets = () => {
     const net = hovered ?? litNet;
     for (const [id, m] of netMat) {
       const base = netColour.get(id)!;
       const tin = tinMat.get(id);
-      const faded = !!net && id !== net;
+      const faded = net ? id !== net : wiresGlass;
       m.color.copy(base);
       // The lit net carries its own colour as emissive, so it reads as lit
       // rather than merely pale; everything else turns to glass: still there
@@ -628,7 +634,42 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
     for (const po of doc.pinouts) if (po.ref === ref) for (const pin of po.pins) if (pin.net) nets.add(pin.net);
     return nets;
   };
+  // ---------- the Show filter ----------
+  // Parts share their materials (every chip is the same epoxy), so a part is
+  // faded by swapping in a see-through copy of each of its materials and put
+  // back by swapping the original in again. Copies are made once per material.
+  const glassOf = new Map<THREE.Material, THREE.Material>();
+  const glass = (m: THREE.Material): THREE.Material => {
+    let g = glassOf.get(m);
+    if (!g) {
+      g = m.clone();
+      g.transparent = true;
+      g.opacity = 0.14;
+      g.depthWrite = false;
+      glassOf.set(m, g);
+    }
+    return g;
+  };
+  const fadePart = (obj: THREE.Object3D, faded: boolean) =>
+    obj.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.material) return;
+      if (faded && !o.userData.solid) {
+        o.userData.solid = mesh.material;
+        mesh.material = Array.isArray(mesh.material) ? mesh.material.map(glass) : glass(mesh.material);
+      } else if (!faded && o.userData.solid) {
+        mesh.material = o.userData.solid;
+        delete o.userData.solid;
+      }
+    });
+  const showGroup = (group: PartGroup | null) => {
+    const keep = group ? groupRefs(doc, group) : null;
+    for (const [ref, obj] of partObj) fadePart(obj, !!keep && !keep.has(ref));
+    wiresGlass = !!keep;
+  };
+
   const setHighlight = (hl: Highlight | null) => {
+    showGroup(hl?.group ?? null);
     const refNets = hl?.ref !== undefined ? netsOfRef(hl.ref) : null;
     const soft = !!hl?.soft && hl.net !== undefined;
     wireObjs.forEach((w, i) => {
@@ -787,6 +828,7 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
       fly.dispose();
       controls.dispose();
       envTarget.dispose();
+      for (const g of glassOf.values()) g.dispose();
       kit.dispose();
       renderer.dispose();
       renderer.domElement.remove();

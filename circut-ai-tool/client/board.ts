@@ -53,7 +53,7 @@ export function mountBoard(container: HTMLElement): () => void {
     // The boolean simulator still supplies switch and segment state; the
     // analog one supplies how brightly each LED is actually running.
     const sim = { ...simState(p.doc.sim.model, p.switches), ledBrightness: live?.brightness, ledOverdrive: live?.overdrive };
-    const highlight: Highlight | null = p.highlight ?? (p.activeStep !== null ? stepHighlight(p, p.activeStep) : null) ?? (p.partGroup ? { group: p.partGroup } : null);
+    const highlight = currentHighlight(p);
     // Deliberately excludes the analog frame: brightness is patched onto the
     // nodes below, never re-serialised. Re-rendering this string at 60 Hz is
     // the one thing that would make the whole run loop unaffordable.
@@ -231,8 +231,8 @@ export const stepHighlight = (p: NonNullable<AppState['project']>, n: number): H
   return null;
 };
 
-/** The highlight the board should show right now: a followed net, or the active build step. */
-export const currentHighlight = (p: NonNullable<AppState['project']>): Highlight | null => p.highlight ?? (p.activeStep !== null ? stepHighlight(p, p.activeStep) : null);
+/** The highlight the board should show right now: a followed net, the active build step, or else the Show filter's part group. */
+export const currentHighlight = (p: NonNullable<AppState['project']>): Highlight | null => p.highlight ?? (p.activeStep !== null ? stepHighlight(p, p.activeStep) : null) ?? (p.partGroup ? { group: p.partGroup } : null);
 
 export function fitView(container: HTMLElement) {
   const svg = container.querySelector('svg');

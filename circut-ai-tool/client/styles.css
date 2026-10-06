@@ -2556,3 +2556,11 @@ tr:hover td {
 .legend .showbar span:hover {
   background: none;
 }
+.view3d-legend .showbar {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
