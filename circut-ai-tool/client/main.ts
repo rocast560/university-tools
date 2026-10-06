@@ -2,6 +2,7 @@
 // panels are rendered by board.ts and panels.ts (Tasks 19 and 20).
 
 // Bundled, so the type never depends on a CDN (the app runs offline in Docker).
+import { mountFullscreenChrome } from './fschrome.ts';
 import '@fontsource-variable/geist';
 import '@fontsource-variable/geist-mono';
 import { normalizeSidecar } from '../src/layout/types.ts';
@@ -134,6 +135,7 @@ function renderProject(s: AppState) {
       <header class="appbar"><a href="#/" class="back">← Projects</a><h1>${esc(p.name)}</h1><span class="path" title="${esc(p.path)}">${esc(p.path)}</span><div class="spacer"></div><a class="btn ghost" href="#/connect">Connect</a><button type="button" id="theme">${s.theme === 'dark' ? 'Light' : 'Dark'}</button></header>
       <div class="layout ${localStorage.getItem('panelsCollapsed') === '1' ? 'collapsed' : ''}"><section class="boardcol"><div class="board-card"><div id="board"></div><div id="toolbar" class="toolbar"></div><div id="legend" class="legend"></div></div></section><aside id="panels" class="panels"></aside></div></main>`));
     boardUnmount = mountBoard(app.querySelector('#board')!);
+    mountFullscreenChrome(app.querySelector<HTMLElement>('.board-card')!);
     app.querySelector('#theme')!.addEventListener('click', () => {
       const theme = store.get().theme === 'dark' ? 'light' : 'dark';
       try {
