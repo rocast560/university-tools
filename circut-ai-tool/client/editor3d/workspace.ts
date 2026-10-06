@@ -20,6 +20,8 @@ import { attachCard } from './card.ts';
 import { attachManipulation, commitMove } from './manipulate.ts';
 import { _failNextMove, attachTray } from './tray.ts';
 import { attachWireEdit } from './wireEdit.ts';
+import { attachWireTool } from './wiretool.ts';
+import { jumperOutcome } from '../../src/edit/placement.ts';
 import { wireKey } from '../../src/render/route3d.ts';
 import { placeAt } from '../../src/render/geometry.ts';
 import type { Hole } from '../../src/layout/types.ts';
@@ -60,6 +62,7 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
     '<button type="button" class="ws-btn" data-ws="fly" title="Fly through (F with nothing selected)">Fly through</button>' +
     '<button type="button" class="ws-btn" data-ws="prev" title="previous build step">◀</button><span class="ws-step"></span><button type="button" class="ws-btn" data-ws="next" title="next build step">▶</button>' +
     '<button type="button" class="ws-btn" data-ws="wires" title="curved arcs or square-cornered runs">Wires: curved</button>' +
+    '<button type="button" class="ws-btn" data-ws="wire" title="Draw a jumper from one hole to another (W)">Wire</button>' +
     '<button type="button" class="ws-btn" data-ws="undo" title="Undo (Ctrl+Z)" disabled>Undo</button><button type="button" class="ws-btn" data-ws="redo" title="Redo (Ctrl+Shift+Z)" disabled>Redo</button>' +
     '<span class="ws-hint"></span></div>' +
     '<div class="ws-canvas"></div>' +
@@ -102,6 +105,7 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
   let detachManip = () => {};
   let detachCard = () => {};
   let detachTray = () => {};
+  let detachWireTool = () => {};
   let offDel = () => {};
   let offHistory = () => {};
   let detachWires = () => {};
@@ -114,6 +118,7 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
     offHistory();
     offDel();
     detachWires();
+    detachWireTool();
     detachTray();
     detachCard();
     detachManip();
@@ -177,6 +182,7 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
     detachManip = attachManipulation(ws);
     detachCard = attachCard(ws);
     detachTray = attachTray(ws);
+    detachWireTool = attachWireTool(ws);
     offDel = addKeyHandler((e) => {
       if (e.key !== 'Delete' && e.key !== 'Backspace') return false;
       const card = root.querySelector<HTMLElement>('.ws-card:not(.ws-wirecard):not([hidden])');
@@ -370,6 +376,13 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
           return a.visible ? { x: r.left + a.x, y: r.top + a.y } : null;
         },
         failNextMove: _failNextMove,
+        // The wire tool.
+        pinNet: (ref: string, pin: string) => store.get().project?.design.components.get(ref)?.pins.get(pin)?.net ?? null,
+        jumper(a: Hole, b: Hole) {
+          const q = store.get().project;
+          return q ? jumperOutcome(q.doc, q.design, a, b) : null;
+        },
+        doc: () => store.get().project?.doc ?? null,
       };
     }
     return ws;

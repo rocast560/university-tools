@@ -284,6 +284,26 @@ async function removeAdded(id: string, before: string[]) {
   for (const ref of refs) if (!before.includes(ref)) await tryPost(`/api/projects/${id}/edit/remove`, { ref });
 }
 
+/**
+ * Two free holes on screen, the canvas under both, for a jumper from a hole
+ * passing `from` (page code over `h`) to one whose jumper outcome passes `want`
+ * (page code over `o`). Rails are left out.
+ */
+async function jumperEnds(page: CDP, from: string, want: string) {
+  const ends = await page.eval<{ a: Hole; b: Hole; ax: number; ay: number; bx: number; by: number } | null>(
+    `(() => { const taken = new Set(); for (const pins of Object.values(__e3d.allHoles())) for (const h of Object.values(pins)) taken.add(h.row + h.col); const cols = __e3d.boardSpec().cols; const free = []; for (const row of 'abcdefghij') for (let col = 1; col <= cols; col++) { if (taken.has(row + col)) continue; const at = __e3d.holeScreen({ col, row }); if (!at || document.elementFromPoint(at.x, at.y)?.tagName !== 'CANVAS') continue; free.push({ h: { col, row }, at }); } const fromOk = (h) => ${from}; for (const a of free) { if (!fromOk(a.h)) continue; for (const b of free) { const o = __e3d.jumper(a.h, b.h); if (${want}) return { a: a.h, b: b.h, ax: a.at.x, ay: a.at.y, bx: b.at.x, by: b.at.y }; } } return null; })()`,
+  );
+  if (!ends) throw new Error('no pair of holes on screen gives that jumper');
+  return ends;
+}
+
+/** A click (press and release in place) at a screen point. */
+async function click(page: CDP, x: number, y: number) {
+  await page.mouse('mouseMoved', x, y);
+  await page.mouse('mousePressed', x, y);
+  await page.mouse('mouseReleased', x, y);
+}
+
 const SCENARIOS: Record<string, (page: CDP, id: string) => Promise<void>> = {
   async 'workspace opens full screen'(page) {
     await open3d(page);
@@ -891,6 +911,75 @@ const SCENARIOS: Record<string, (page: CDP, id: string) => Promise<void>> = {
     } finally {
       await removeAdded(id, before);
     }
+  },
+  async 'the wire tool joins an unconnected leg to a net'(page, id) {
+    await open3d(page);
+    const before = await page.eval<string[]>(`__e3d.components()`);
+    try {
+      // A resistor whose legs sit in empty strips, so both are unconnected.
+      await armTile(page, 'resistor');
+      const spot = await freeSpot(page, 4);
+      await click(page, spot.x, spot.y);
+      await page.until(`__e3d.components().length > ${before.length}`, 'the resistor to be added', 20000);
+      const ref = (await page.eval<string[]>(`__e3d.components()`)).find((r) => !before.includes(r))!;
+      await page.until(`(() => { const h = __e3d.holes(${JSON.stringify(ref)}); return h && Object.values(h).some((x) => x.row === ${JSON.stringify(spot.row)} && x.col === ${spot.col}); })()`, `${ref} on its spot`, 10000);
+      const pin = await page.eval<string>(`Object.entries(__e3d.holes(${JSON.stringify(ref)})).find(([, h]) => h.col === ${spot.col})[0]`);
+      const was = await page.eval<string>(`__e3d.pinNet(${JSON.stringify(ref)}, ${JSON.stringify(pin)})`);
+      if (!was.startsWith('unconnected-')) throw new Error(`${ref} pin ${pin} starts on ${was}, not unconnected`);
+      const half = /[a-e]/.test(spot.row) ? 'abcde' : 'fghij';
+      const ends = await jumperEnds(page, `h.col === ${spot.col} && ${JSON.stringify(half)}.includes(h.row)`, `o.kind === 'connect' && o.pins.some((p) => p.ref === ${JSON.stringify(ref)} && p.pin === ${JSON.stringify(pin)})`);
+      // The drop focuses the new part's value box; W typed there would be a value, not the tool.
+      await page.eval(`document.activeElement?.blur()`);
+      await page.key('w', 'KeyW');
+      await page.until(`document.querySelector('[data-ws=wire]').classList.contains('is-on') && document.querySelector('.ws-hint').textContent.startsWith('click a hole to start a jumper')`, 'the wire tool to turn on');
+      await click(page, ends.ax, ends.ay);
+      await page.mouse('mouseMoved', ends.bx, ends.by);
+      await page.until(`__e3d.ghostCount() > 0 && document.querySelector('.ws-hint').textContent.startsWith('joins')`, 'the jumper ghost and a "joins" hint');
+      await page.mouse('mousePressed', ends.bx, ends.by);
+      await page.mouse('mouseReleased', ends.bx, ends.by);
+      await page.until(`!__e3d.pinNet(${JSON.stringify(ref)}, ${JSON.stringify(pin)}).startsWith('unconnected-')`, `${ref} pin ${pin} to join a net`, 20000).catch(async (e) => {
+        throw new Error(`${(e as Error).message}; toast: ${await lastToast(page)}`);
+      });
+      await page.until(`(document.getElementById('toast')?.textContent ?? '').startsWith('joined')`, 'a "joined" toast', 5000);
+      if (!(await page.eval<boolean>(`document.querySelector('[data-ws=wire]').classList.contains('is-on')`))) throw new Error('the wire tool turned off after a jumper');
+      await page.key('Escape', 'Escape');
+      await page.until(`!document.querySelector('[data-ws=wire]').classList.contains('is-on')`, 'Esc to turn the tool off');
+      if (!(await page.eval<boolean>(`!!document.querySelector('.ws')`))) throw new Error('Esc with the wire tool on closed the editor');
+    } finally {
+      await removeAdded(id, before);
+    }
+  },
+  async 'the wire tool refuses to join two nets'(page) {
+    await open3d(page);
+    const ends = await jumperEnds(page, 'true', `o.kind === 'refuse' && o.reason.includes('Merge nets in the schematic')`);
+    await page.eval(`(document.querySelector('[data-ws=wire]').click(), window.__doc0 = __e3d.doc(), 0)`);
+    await page.until(`document.querySelector('[data-ws=wire]').classList.contains('is-on')`, 'the Wire button to turn the tool on');
+    await click(page, ends.ax, ends.ay);
+    await page.mouse('mouseMoved', ends.bx, ends.by);
+    await page.until(`__e3d.ghostCount() > 0 && document.querySelector('.ws-hint').textContent.includes('Merge nets')`, 'a refusing ghost and hint');
+    await page.mouse('mousePressed', ends.bx, ends.by);
+    await page.mouse('mouseReleased', ends.bx, ends.by);
+    await page.until(`(document.getElementById('toast')?.textContent ?? '').includes('Merge nets in the schematic')`, 'the refusal toast', 5000);
+    await sleep(1500);
+    if (!(await page.eval<boolean>(`__e3d.doc() === window.__doc0`))) throw new Error('a refused jumper changed the doc');
+    if (await page.eval<number>(`__e3d.ghostCount()`)) throw new Error('the ghost stayed after the refusal');
+    // Right-click drops a jumper in progress; the tool stays on.
+    await click(page, ends.ax, ends.ay);
+    await page.mouse('mouseMoved', ends.bx, ends.by);
+    await page.until(`__e3d.ghostCount() > 0`, 'the ghost again');
+    await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: ends.bx, y: ends.by, button: 'right', buttons: 2, clickCount: 1 });
+    await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: ends.bx, y: ends.by, button: 'right', buttons: 0, clickCount: 1 });
+    await page.until(`__e3d.ghostCount() === 0`, 'right-click to cancel the jumper', 3000);
+    if (!(await page.eval<boolean>(`document.querySelector('[data-ws=wire]').classList.contains('is-on')`))) throw new Error('right-click turned the tool off');
+  },
+  async 'the wire tool and the tray take turns'(page) {
+    await open3d(page);
+    await armTile(page, 'resistor');
+    await page.key('w', 'KeyW');
+    await page.until(`document.querySelector('[data-ws=wire]').classList.contains('is-on') && !document.querySelector('.ws-tile.is-armed')`, 'W to disarm the tray part');
+    await armTile(page, 'resistor');
+    await page.until(`!document.querySelector('[data-ws=wire]').classList.contains('is-on')`, 'arming a part to turn the wire tool off');
+    await page.key('Escape', 'Escape');
   },
 };
 

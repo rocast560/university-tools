@@ -15,6 +15,7 @@ import type { Footprint } from '../../src/parts/catalog.ts';
 import { api, type PartFootprint } from '../api.ts';
 import { loadProject, toast } from '../main.ts';
 import { store } from '../state.ts';
+import { claimTool, onToolClaimed } from './tool.ts';
 import { iconHtml, listParts, tileHtml, trayHtml, type Group } from './tray-tiles.ts';
 import { addKeyHandler, type Workspace } from './workspace.ts';
 
@@ -146,6 +147,7 @@ export function attachTray(ws: Workspace): () => void {
   // ---------- arming, cancelling, dropping ----------
   const arm = (alias: string, tile: HTMLElement) => {
     disarm();
+    claimTool('tray');
     armed = { alias, tile };
     tile.classList.add('is-armed');
     ws.hint(armedHint());
@@ -273,6 +275,7 @@ export function attachTray(ws: Workspace): () => void {
     if (!drag.moved) {
       drag.moved = true;
       disarm();
+      claimTool('tray');
       drag.ghost = document.createElement('div');
       drag.ghost.className = 'ws-drag-ghost';
       drag.ghost.innerHTML = drag.tile.querySelector('svg')?.outerHTML ?? '';
@@ -334,6 +337,8 @@ export function attachTray(ws: Workspace): () => void {
   };
   ws.root.addEventListener('pointerdown', otherTool);
 
+  // Another tool (the wire tool) taking the board drops whatever the tray had in hand.
+  const offTool = onToolClaimed((t) => void (t !== 'tray' && cancel()));
   const offKey = addKeyHandler((e) => {
     if (e.key === '/') {
       search.focus();
@@ -367,6 +372,7 @@ export function attachTray(ws: Workspace): () => void {
     disarm();
     clearPreview();
     offKey();
+    offTool();
     offStore();
     ws.root.removeEventListener('pointerdown', otherTool);
   };
