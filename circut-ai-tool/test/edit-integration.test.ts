@@ -81,6 +81,19 @@ describe.skipIf(!have)('edits verified through kicad-cli', () => {
     }
   }, 120000);
 
+  test('a pin of an unplaced gate joins a net: the gate is placed first (wire tool, tray, MCP connect)', async () => {
+    const { service, sch } = await realService();
+    const p = await service.open(sch);
+    expect(p.design.components.get('U1')!.pins.get('13')!.net).toBe('unconnected-(U1-Pad13)');
+    const out = await service.connect(p.info.id, 'U1', '13', 'A');
+    expect(out.project.design.components.get('U1')!.pins.get('13')!.net).toBe('/A');
+    expect(out.project.design.components.get('U1')!.pins.get('1')!.net).toBe(p.design.components.get('U1')!.pins.get('1')!.net);
+    const added = await service.addComponent(p.info.id, { libId: '74xx:74LS86', value: '74LS86', spare: false, connections: { '1': 'A', '13': 'B' } });
+    expect(added.ref).toBe('U4');
+    expect(added.project.design.components.get('U4')!.pins.get('1')!.net).toBe('/A');
+    expect(added.project.design.components.get('U4')!.pins.get('13')!.net).toBe('/B');
+  }, 60000);
+
   test('a stale file is refused', async () => {
     const { service, sch } = await realService();
     const p = await service.open(sch);

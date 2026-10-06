@@ -200,13 +200,16 @@ export function attachTray(ws: Workspace): () => void {
     tray.classList.add('is-busy');
     try {
       const connections = cur.holes ? legsToConnections(p.doc, p.design, cur.holes) : {};
-      let added: { ref: string };
+      let added: { ref: string; notes: string[] };
       try {
         added = await api.editAdd(p.id, { part: cur.alias, connections, spare: false });
       } catch (e) {
         toast(`Not added: ${(e as Error).message}`);
         return;
       }
+      // A leg the server could not join (its gate is already in use, or the pin is unknown) stays unconnected: say so. A refused move below says more and replaces this.
+      const skipped = added.notes.filter((n) => /not connected/.test(n));
+      if (skipped.length) toast(`${added.ref} added; ${skipped.join('; ')}`);
       if (cur.holes) {
         try {
           if (failNextMove) {

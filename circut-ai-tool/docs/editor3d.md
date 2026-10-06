@@ -80,7 +80,7 @@ There are two ways to place a part:
 
 Either way a ghost follows the pointer and shows where the legs would go. The strips under the legs are tinted with the same green and red as a move, and the hint line gives the reason when a spot is refused. A refused drop adds nothing. A chip has to straddle the centre channel, so its ghost is red anywhere but rows e and f.
 
-A drop adds a real component to the schematic: the server saves a backup of the `.kicad_sch`, adds the part, and then moves it onto the holes you chose. A leg dropped into a strip that already carries one net joins that net. A leg in an empty strip stays unconnected. A chip is always a new package, even when a chip of the same kind on the board has a spare gate. The new part is selected, and if it has a value, the value box in its card is focused so you can type one.
+A drop adds a real component to the schematic: the server saves a backup of the `.kicad_sch`, adds the part, and then moves it onto the holes you chose. A leg dropped into a strip that already carries one net joins that net. A leg in an empty strip stays unconnected. A chip is always a new package, even when a chip of the same kind on the board has a spare gate. Each chip leg that joins a net adds the gate it belongs to in the schematic. The new part is selected, and if it has a value, the value box in its card is focused so you can type one.
 
 Displays, modules and kinds the board cannot draw as plain legs are placed automatically. The ghost shows a single marker, and the hint says "placed automatically". If the move onto your holes is refused after the part was added, the part stays in the schematic where the board put it and a message says so.
 
@@ -100,6 +100,8 @@ What a jumper does depends on the nets in the two strips:
 | Either strip already joins two nets | Refused: "that strip already joins two nets" |
 | Both holes are in the same strip | Refused: "both ends are in the same strip" |
 | Neither strip has a net, or the empty one has no legs in it | Refused: "nothing to connect yet. Place a part first" |
+
+A chip leg whose gate the schematic does not use yet (U1 pin 13 when only gate A of a 74LS86 is drawn) can be joined too: the server adds that gate to the schematic first, then labels the pin. If a strip holds several loose legs and one cannot be joined, the message names the legs that were joined and the one that failed.
 
 Two different nets are refused because a jumper between them would short them, and a jumper cannot say which net should win. Joining them is a decision about the circuit, so it is made in the schematic.
 

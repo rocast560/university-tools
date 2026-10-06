@@ -235,3 +235,15 @@ describe('jumperOutcome', () => {
     expect(jumperOutcome(d, g, h(5, 'e'), h(40, 'b'))).toEqual({ kind: 'refuse', reason: 'that strip already joins two nets' });
   });
 });
+
+describe('jumperOutcome with a multi-unit chip', () => {
+  test('a pin of a gate the schematic does not place is offered as loose, to be joined', () => {
+    // PL1's U1 is a 74LS86 with only gate A placed: pin 13 (gate D) is unconnected-(U1-Pad13).
+    expect(design.components.get('U1')!.pins.get('13')!.net).toBe('unconnected-(U1-Pad13)');
+    const pin13 = doc.pinHoles.U1['13'];
+    const [aRef, aPin] = Object.entries(doc.pinHoles).flatMap(([ref, pins]) => Object.keys(pins).map((pin) => [ref, pin] as const)).find(([ref, pin]) => design.components.get(ref)?.pins.get(pin)?.net === '/A' && stripOf(doc.pinHoles[ref][pin]) !== stripOf(pin13))!;
+    const o = jumperOutcome(doc, design, pin13, doc.pinHoles[aRef][aPin]);
+    expect(o).toMatchObject({ kind: 'connect', net: '/A' });
+    expect((o as { pins: { ref: string; pin: string }[] }).pins).toContainEqual({ ref: 'U1', pin: '13' });
+  });
+});

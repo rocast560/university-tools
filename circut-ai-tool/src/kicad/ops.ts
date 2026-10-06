@@ -72,13 +72,37 @@ async function attach(sch: Schematic, ref: string, pin: string, target: NetTarge
   return { text: appendTopLevel(sch, node), uuid };
 }
 
+/** The unit of `ref` that has `pin` when that unit is not in the schematic yet (a spare gate); null otherwise. */
+function unplacedUnitOf(sch: Schematic, ref: string, pin: string): number | null {
+  const units = sch.symbols.filter((s) => s.ref === ref);
+  const lib = units.length ? sch.libSymbols.get(units[0].libId) : undefined;
+  if (!lib || lib.unitCount < 2) return null;
+  const used = new Set(units.map((s) => s.unit));
+  for (let u = 1; u <= lib.unitCount; u++) if (!used.has(u) && pinsOfUnit(lib, u).some((p) => p.number === pin)) return u;
+  return null;
+}
+
+/** Add unit `unit` of the existing multi-unit `ref` at a free spot, with the value its other units carry. */
+function placeUnit(sch: Schematic, ref: string, unit: number): string {
+  const first = sch.symbols.find((s) => s.ref === ref)!;
+  const lib = sch.libSymbols.get(first.libId)!;
+  const node = symbolNode({ libId: first.libId, at: freeSpot(sch, 0), unit, ref, value: first.value, pinNumbers: pinsOfUnit(lib, unit).map((p) => p.number), project: sch.project, rootUuid: sch.uuid });
+  return appendTopLevel(sch, node);
+}
+
 export async function connectPin(sch: Schematic, design: Design, ref: string, pin: string, net: string, libs: LibProvider): Promise<OpResult> {
   if (!sch.symbols.some((s) => s.ref === ref)) throw new OpError(`no component ${ref} in the schematic`);
-  if (!pinEnd(sch, ref, pin)) throw new OpError(`${ref} has no pin ${pin}`);
   const placed: OpResult['placed'] = {};
   const notes: string[] = [];
-  let target = netTarget(net, design);
   let cur = sch;
+  if (!pinEnd(cur, ref, pin)) {
+    // A pin of a gate the schematic does not use yet: place that gate, then label its pin.
+    const unit = unplacedUnitOf(cur, ref, pin);
+    if (unit === null) throw new OpError(`${ref} has no pin ${pin}`);
+    cur = parseSchematic(placeUnit(cur, ref, unit), sch.project);
+    notes.push(`placed unit ${unit} of ${ref} for pin ${pin}`);
+  }
+  let target = netTarget(net, design);
   if (target === 'auto') {
     const members = design.nets.get(net) ?? [];
     const anchor = members.find((m) => pinEnd(cur, m.ref, m.pin));
@@ -149,8 +173,10 @@ export async function addComponent(sch: Schematic, design: Design, a: { libId: s
   notes.push(`added ${ref} (${a.libId}${value !== lib.name ? `, ${value}` : ''})${addedUnits.length > 1 ? ` with units ${addedUnits.join(' and ')}` : lib.unitCount > 1 ? ` unit ${unit}` : ''}`);
   const available = new Set(addedUnits.flatMap(pinsFor));
   for (const [pin, net] of Object.entries(a.connections ?? {})) {
-    if (!available.has(pin)) {
-      notes.push(`pin ${pin} is not part of the placed unit${addedUnits.length > 1 ? 's' : ''} (${[...available].join(', ')}); connect it after adding the unit that has it`);
+    // A pin outside the units just added is joined only when its unit is not placed yet (connectPin
+    // places it); a unit already in use belongs to someone else's gate.
+    if (!available.has(pin) && unplacedUnitOf(cur, ref, pin) === null) {
+      notes.push(`pin ${pin} is not part of the placed unit${addedUnits.length > 1 ? 's' : ''} (${[...available].join(', ')}) nor of a unit still free on ${ref}; not connected`);
       continue;
     }
     const r = await connectPin(cur, design, ref, pin, net, libs);

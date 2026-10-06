@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { parse } from '../src/sexpr.ts';
-import { parseLibSymbol } from '../src/kicad/schematic.ts';
+import { parseLibSymbol, parseSchematic } from '../src/kicad/schematic.ts';
+import { readFixture } from './smoke.test.ts';
 import { classify } from '../src/parts/catalog.ts';
 import { componentFromSymbol, defaultHoles, holeNear } from '../src/edit/newpart.ts';
 import { placeAt } from '../src/render/geometry.ts';
@@ -18,6 +19,13 @@ describe('componentFromSymbol', () => {
     expect([...comp.pins.keys()].sort()).toEqual(['1', '2']);
     expect([...comp.pins.values()].every((p) => p.net === '')).toBe(true);
     expect(classify(comp)).toMatchObject({ kind: 'lead2', style: 'R' });
+  });
+  test('a multi-unit chip lists the pins of every unit, not only the placed ones', () => {
+    const lib = parseSchematic(readFixture('PL1_1.kicad_sch'), 'PL1_1').libSymbols.get('74xx:74LS86')!;
+    expect(lib.unitCount).toBe(5);
+    const comp = componentFromSymbol(lib, '74LS86');
+    expect([...comp.pins.keys()].map(Number).sort((x, y) => x - y)).toEqual(Array.from({ length: 14 }, (_, i) => i + 1));
+    expect(classify(comp)).toMatchObject({ kind: 'dip', pins: 14 });
   });
 });
 

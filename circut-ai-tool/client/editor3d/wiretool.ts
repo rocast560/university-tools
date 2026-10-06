@@ -94,23 +94,34 @@ export function attachWireTool(ws: Workspace): () => void {
     if (o.kind === 'refuse') return void toast(o.reason);
     if (o.kind === 'same') return void toast('already connected: the router lays that jumper');
     busy = true;
+    // The pins joined so far: a strip can hold several loose legs, and one that
+    // fails leaves the earlier ones joined, so a failure names both.
+    const joined: string[] = [];
+    let trying = '';
     try {
       // An automatically named net gets a label on the first connect, which
       // renames it; the rest then join it under its new name.
       const [first, ...rest] = o.pins;
+      trying = `${first.ref} pin ${first.pin}`;
       await api.editConnect(p.id, first.ref, first.pin, o.net);
+      joined.push(trying);
       let net = o.net;
       if (rest.length) {
         await loadProject(p.id);
         net = store.get().project?.design.components.get(first.ref)?.pins.get(first.pin)?.net ?? net;
-        for (const { ref, pin } of rest) await api.editConnect(p.id, ref, pin, net);
+        for (const { ref, pin } of rest) {
+          trying = `${ref} pin ${pin}`;
+          await api.editConnect(p.id, ref, pin, net);
+          joined.push(trying);
+        }
       }
       await loadProject(p.id);
       if (disposed) return;
       net = store.get().project?.design.components.get(first.ref)?.pins.get(first.pin)?.net ?? net;
       toast(`joined ${displayName(net)}`);
     } catch (e) {
-      toast(`Not joined: ${(e as Error).message}`);
+      const msg = (e as Error).message;
+      toast(joined.length ? `joined ${joined.join(', ')}; ${trying} failed: ${msg}` : `Not joined: ${msg}`);
       await loadProject(p.id).catch(() => {});
     } finally {
       busy = false;
