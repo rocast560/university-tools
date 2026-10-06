@@ -4,7 +4,7 @@
 import type { Sidecar } from '../src/layout/types.ts';
 import type { Design } from '../src/netlist.ts';
 import type { LayoutDoc } from '../src/pipeline.ts';
-import type { Highlight } from '../src/render/index.ts';
+import type { Highlight, PartGroup } from '../src/render/index.ts';
 
 export type Route = { name: 'home' } | { name: 'project'; id: string } | { name: 'connect' };
 
@@ -24,6 +24,8 @@ export interface ProjectState {
   running: boolean;
   /** The saved test last picked in the Simulate panel, if any. */
   simTest?: number | null;
+  /** The board's Show filter: one kind of part shown, the rest faded. Under a followed net or build step. */
+  partGroup?: PartGroup | null;
   /**
    * The live AnalogState never lives here. Every store.set() re-renders the
    * panels, which at 60 Hz would be far worse than anything the solver costs,

@@ -2538,3 +2538,21 @@ tr:hover td {
   flex-wrap: wrap;
   margin: 0 0 8px;
 }
+
+/* The Show filter above the net legend: one kind of part, the rest faded. */
+.legend .showbar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+  font-family: var(--font-sans, inherit);
+}
+.legend .showbar span {
+  padding: 0;
+  cursor: default;
+}
+.legend .showbar span:hover {
+  background: none;
+}

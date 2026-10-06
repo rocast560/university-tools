@@ -37,6 +37,19 @@ export interface Highlight {
   wire?: number;
   /** In 3D, fade everything else instead of hiding it (a net picked from the legend). */
   soft?: boolean;
+  /** Show one kind of part: everything else, and every jumper, fades. */
+  group?: PartGroup;
+}
+
+/** The kinds of part the board's Show filter picks out. */
+export type PartGroup = 'chips' | 'resistors' | 'leds';
+export const PART_GROUPS: readonly PartGroup[] = ['chips', 'resistors', 'leds'];
+
+/** The parts and packages in a group: chips, DIP switches and displays are packages; resistors and LEDs are two-lead parts. */
+export function groupRefs(res: Pick<EngineResult, 'parts' | 'packages'>, group: PartGroup): Set<string> {
+  if (group === 'chips') return new Set(res.packages.map((p) => p.id));
+  const style = group === 'resistors' ? 'R' : 'LED';
+  return new Set(res.parts.filter((p) => p.style === style).map((p) => p.id));
 }
 
 export interface RenderOptions {
@@ -407,8 +420,10 @@ export function renderSvg(res: EngineResult, opts: RenderOptions = {}): string {
   const sk = opts.skin ?? FLAT;
   const hl = opts.highlight ?? null;
   const sim = opts.sim ?? null;
+  const shown = hl?.group ? groupRefs(res, hl.group) : null;
   const dim = (nets: string[], refs: string[], wire?: number): number | undefined => {
     if (!hl) return undefined;
+    if (shown) return refs.some((r) => shown.has(r)) ? undefined : t.dim;
     if (hl.net !== undefined) return nets.includes(hl.net) ? undefined : t.dim;
     if (hl.ref !== undefined) return refs.includes(hl.ref) ? undefined : t.dim;
     if (hl.wire !== undefined) return wire === hl.wire ? undefined : t.dim;

@@ -35,6 +35,26 @@ describe('renderSvg', () => {
     const w = renderSvg(res, { highlight: { wire: 0 } });
     expect((w.match(/opacity="0\.18"/g) ?? []).length).toBe(res.wires.length - 1 + res.parts.length);
   });
+  test('a part group fades every other part, every package outside it and every wire', () => {
+    const opacity = (svg: string, ref: string) => new RegExp(`data-ref="${ref}"[^>]*opacity="0\\.18"`).test(svg);
+    const resistors = res.parts.filter((p) => p.style === 'R');
+    const leds = res.parts.filter((p) => p.style === 'LED');
+    expect(resistors.length && leds.length && res.packages.length).toBeTruthy();
+
+    const r = renderSvg(res, { highlight: { group: 'resistors' } });
+    for (const p of resistors) expect(opacity(r, p.id)).toBe(false);
+    for (const p of leds) expect(opacity(r, p.id)).toBe(true);
+    for (const p of res.packages) expect(opacity(r, p.id)).toBe(true);
+    expect((r.match(/class="wire"[^>]*opacity="0\.18"/g) ?? []).length).toBe(res.wires.length);
+
+    const c = renderSvg(res, { highlight: { group: 'chips' } });
+    for (const p of res.packages) expect(opacity(c, p.id)).toBe(false);
+    for (const p of res.parts) expect(opacity(c, p.id)).toBe(true);
+
+    const l = renderSvg(res, { highlight: { group: 'leds' } });
+    for (const p of leds) expect(opacity(l, p.id)).toBe(false);
+    for (const p of resistors) expect(opacity(l, p.id)).toBe(true);
+  });
   test('sim state lights LEDs', () => {
     const lit = renderSvg(res, { sim: { leds: { D1: true, D2: false }, segments: {}, switches: {} } });
     expect(lit).toContain('data-led="on"');
