@@ -190,6 +190,8 @@ export interface Board3D {
   nudge(ref: string, dx: number, dy: number): void;
   /** Tint the strips under the given legs; an empty list clears them. */
   setStripTint(tints: Tint[]): void;
+  /** A translucent stand-in for a part not on the board yet: the tray's drop preview. */
+  setGhost(g: { holes: Hole[]; footprint: 'lead2' | 'dip' | 'other'; ok: boolean } | null): void;
   /** Screen position (CSS px, relative to the canvas) of a part's top centre. */
   anchor(ref: string): { x: number; y: number; visible: boolean } | null;
   /** Glide the camera to frame one part. */
@@ -1070,9 +1072,49 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
     paintLeds();
   };
 
+  // ---------- drop ghost ----------
+  const ghostMat = {
+    ok: new THREE.MeshStandardMaterial({ color: '#4ade80', transparent: true, opacity: 0.45, depthWrite: false }),
+    bad: new THREE.MeshStandardMaterial({ color: '#f87171', transparent: true, opacity: 0.45, depthWrite: false }),
+  };
+  let ghost: THREE.Group | null = null;
+  const clearGhost = () => {
+    if (!ghost) return;
+    scene.remove(ghost);
+    ghost.traverse((o) => (o as THREE.Mesh).geometry?.dispose());
+    ghost = null;
+  };
+  function setGhost(g: { holes: Hole[]; footprint: 'lead2' | 'dip' | 'other'; ok: boolean } | null) {
+    clearGhost();
+    if (!g || !g.holes.length) return;
+    ghost = new THREE.Group();
+    const mat = g.ok ? ghostMat.ok : ghostMat.bad;
+    const pts = g.holes.map((h) => at(h, TOP + 6));
+    if (g.footprint === 'lead2' && pts.length === 2) {
+      const len = pts[0].distanceTo(pts[1]);
+      const body = new THREE.Mesh(new THREE.CapsuleGeometry(6, Math.max(1, len - 12), 4, 12), mat);
+      body.position.copy(pts[0]).add(pts[1]).multiplyScalar(0.5);
+      body.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), pts[1].clone().sub(pts[0]).normalize());
+      ghost.add(body);
+    } else if (g.footprint === 'dip') {
+      const box = new THREE.Box3().setFromPoints(pts);
+      const size = box.getSize(new THREE.Vector3());
+      const body = new THREE.Mesh(new THREE.BoxGeometry(size.x + 12, 10, size.z + 6), mat);
+      body.position.copy(box.getCenter(new THREE.Vector3())).setY(TOP + 8);
+      ghost.add(body);
+    } else
+      for (const p of pts) {
+        const s = new THREE.Mesh(new THREE.SphereGeometry(5, 12, 8), mat);
+        s.position.copy(p);
+        ghost.add(s);
+      }
+    scene.add(ghost);
+  }
+
   // ---------- rebuilding after an edit ----------
   const rebuild = (next: LayoutDoc, style?: 'arc' | 'orthogonal') => {
     if (style) wireStyle = style;
+    clearGhost();
     scene.remove(c.root);
     c.kit.dispose();
     c = build(next);
@@ -1172,6 +1214,7 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
     setHovered,
     nudge,
     setStripTint,
+    setGhost,
     anchor,
     focus,
     focusWire,
@@ -1233,6 +1276,9 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
       tintGeo.dispose();
       tintMat.dispose();
       tintMesh.dispose();
+      clearGhost();
+      ghostMat.ok.dispose();
+      ghostMat.bad.dispose();
       c.kit.dispose();
       renderer.dispose();
       renderer.domElement.remove();
