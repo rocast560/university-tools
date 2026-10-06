@@ -792,6 +792,7 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
   let held: Highlight | null = null;
   const setHighlight = (hl: Highlight | null) => {
     held = hl;
+    showGroup(hl?.group ?? null);
     const refNets = hl?.ref !== undefined ? netsOfRef(hl.ref) : null;
     const soft = !!hl?.soft;
     c.wireObjs.forEach((w, i) => {
