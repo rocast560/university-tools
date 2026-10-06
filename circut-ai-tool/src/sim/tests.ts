@@ -19,9 +19,14 @@ export interface TestOutcome {
   result: SimResult;
 }
 
-/** The model input a test names, by its shown name or its full net name. */
+/**
+ * The model input a test names, by its shown name, its full net name, or its
+ * switch position ("SW1:2"). The switch position still works once the
+ * schematic's net labels are gone and the nets fall back to KiCad's
+ * auto-generated names.
+ */
 function inputFor(model: SimModel, key: string) {
-  return model.inputs.find((i) => i.net === key || displayName(i.net) === key || i.name === key);
+  return model.inputs.find((i) => i.net === key || displayName(i.net) === key || i.name === key) ?? model.inputs.find((i) => i.key === key);
 }
 
 /** Net levels for a test, every input the test does not name left at its idle level. */

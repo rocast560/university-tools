@@ -28,6 +28,12 @@ describe('saved simulation tests', () => {
     expect(switchesForTest(model, { name: 'x', levels: { '/A': 0 } })).toEqual({ 'SW1:1': true });
   });
 
+  test('an input can be named by its switch position, so tests survive a schematic without net labels', () => {
+    const unlabeled: SimModel = { ...model, inputs: model.inputs.map((i) => ({ ...i, name: `Net-(U1-${i.name})`, net: `Net-(U1-${i.name})` })) };
+    expect(switchesForTest(unlabeled, { name: 'x', levels: { 'SW1:1': 1, 'SW1:2': 0 } })).toEqual({ 'SW1:1': false, 'SW1:2': true });
+    expect(runTest(unlabeled, { name: 'x', levels: { 'SW1:1': 1, 'SW1:2': 0 } }).failures).toEqual([]);
+  });
+
   test('a test passes when the LEDs and display match', () => {
     const o = runTest(model, t);
     expect(o.pass).toBe(true);

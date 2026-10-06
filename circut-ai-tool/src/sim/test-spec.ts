@@ -6,7 +6,7 @@ export interface SimTest {
   name: string;
   /** Heading the test is listed under, e.g. "Addition (M = 0)". */
   group?: string;
-  /** Input net (as shown, e.g. "A0", or the full "/A0") -> level. Inputs not named stay at their idle level. */
+  /** Input net (as shown, e.g. "A0", or the full "/A0") or switch position ("SW1:2") -> level. Inputs not named stay at their idle level. */
   levels: Record<string, 0 | 1>;
   expect?: {
     /** LED reference -> lit. */
