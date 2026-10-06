@@ -2658,3 +2658,12 @@ tr:hover td {
 .board-card:fullscreen[data-chrome='hidden'] .view3d-bar {
   display: none;
 }
+
+/* 3D in full screen: the view is the whole window, so the card must not scroll under it. */
+.board-card:fullscreen:has(.view3d) {
+  overflow: hidden;
+}
+/* Leave room on the 3D bar for the controls switcher in the corner. */
+.board-card:fullscreen .view3d-bar {
+  right: 300px;
+}

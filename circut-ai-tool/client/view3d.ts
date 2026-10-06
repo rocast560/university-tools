@@ -37,6 +37,7 @@ let onPop: (() => void) | null = null;
 let mountedStyle = '';
 const styleOf = (p: { sidecar: { options: { wireStyle: string; resistorKind: string } } }) => `${p.sidecar.options.wireStyle}|${p.sidecar.options.resistorKind}`;
 let legend: HTMLElement | null = null;
+let onFullscreen: (() => void) | null = null;
 
 /** Push the board's switch positions, LED state, and the followed step or net into 3D. */
 function pushBoard() {
@@ -87,6 +88,10 @@ export async function open3d(card: HTMLElement, doc: LayoutDoc) {
     '<button type="button" class="view3d-mode view3d-step" data-dir="1" title="next build step">▶</button>' +
     '<span class="view3d-hint"></span>' +
     '<span class="view3d-net"></span>' +
+    // The page toolbar sits under this view, so the 3D view carries its own
+    // way into full screen and back out of 3D.
+    '<button type="button" class="view3d-mode view3d-fs"></button>' +
+    '<button type="button" class="view3d-mode view3d-exit" title="back to the flat board">Exit 3D</button>' +
     '</div><div class="view3d-canvas"></div>' +
     `<div class="view3d-legend">${showBar(store.get().project?.partGroup ?? null)}${flowOrder(doc).map((net) => `<span data-legend="${esc(net)}" title="click to follow this net; the rest fades"><i style="background:${esc(doc.nets[net].color)}"></i><span>${esc(doc.nets[net].name)}</span></span>`).join('')}</div>`;
   card.appendChild(host);
@@ -108,6 +113,23 @@ export async function open3d(card: HTMLElement, doc: LayoutDoc) {
   netOut = host.querySelector<HTMLElement>('.view3d-net')!;
   stepText = host.querySelector<HTMLElement>('.view3d-steptext')!;
   for (const b of host.querySelectorAll<HTMLButtonElement>('.view3d-step')) b.addEventListener('click', () => stepBy(Number(b.dataset.dir) as -1 | 1));
+  const fsBtn = host.querySelector<HTMLButtonElement>('.view3d-fs')!;
+  const showFs = () => {
+    const on = document.fullscreenElement === card;
+    fsBtn.textContent = on ? 'Exit full screen' : 'Full screen';
+    fsBtn.classList.toggle('is-on', on);
+  };
+  showFs();
+  fsBtn.addEventListener('click', () => {
+    (document.fullscreenElement ? document.exitFullscreen() : card.requestFullscreen()).catch(() => undefined);
+  });
+  onFullscreen = showFs;
+  document.addEventListener('fullscreenchange', showFs);
+  host.querySelector<HTMLButtonElement>('.view3d-exit')!.addEventListener('click', () => {
+    close3d();
+    // Repaint the page toolbar so its button reads 3D again.
+    store.setProject({});
+  });
   // The legend under the 3D board: click a net to follow it with the rest
   // faded, click it again to release; hover lights it for a look.
   legend = host.querySelector<HTMLElement>('.view3d-legend')!;
@@ -194,6 +216,10 @@ export function close3d(viaHistory = true) {
   if (onPop) {
     removeEventListener('popstate', onPop);
     onPop = null;
+  }
+  if (onFullscreen) {
+    document.removeEventListener('fullscreenchange', onFullscreen);
+    onFullscreen = null;
   }
   if (viaHistory && (history.state as { view3d?: boolean } | null)?.view3d) history.back();
   unsub?.();
