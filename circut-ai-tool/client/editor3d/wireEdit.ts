@@ -50,7 +50,7 @@ const takenOf = (doc: LayoutDoc) => {
  * so what is accepted here saves, and what saves lays out as drawn.
  */
 function judge(w: Wire, plan: Point[], doc: LayoutDoc): { path: WirePath; why: null } | { path: null; why: string } {
-  const path = planToPath(w, plan);
+  const path = planToPath(w, plan, doc.board);
   if (!path) return { path: null, why: 'it leaves the lane grid' };
   const { why } = shapePlan(w, path, doc.packages, doc.board, takenOf(doc));
   return why ? { path: null, why } : { path, why: null };
@@ -160,7 +160,7 @@ export function attachWireEdit(ws: Workspace): WireEdit {
     const wire = p.doc.wires[index];
     const route = p.doc.routes?.[index] ?? null;
     // Drawn by the simple router: off the lane grid, so it has no handles to give.
-    const fallback = !!route && (!!route.warning || !planToPath(wire, route.plan));
+    const fallback = !!route && (!!route.warning || !planToPath(wire, route.plan, p.doc.board));
     return { p, index, wire, route, fallback, square: p.sidecar.options.wireStyle === 'orthogonal' };
   };
 

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { holeKey } from '../src/layout/board.ts';
 import type { WirePath } from '../src/layout/types.ts';
-import { pt } from '../src/render/geometry.ts';
+import { placeAt, pt, TIER_PITCH } from '../src/render/geometry.ts';
 import { wirePolylines } from '../src/render/ortho.ts';
 import { handles, moveSegment } from '../src/edit/wireshape.ts';
 import { checkPlan, GAPS, LANE, nodeKey, pathToPlan, planToPath, routeWires, shapePlan, takenNodes, wireKey, WIRE_D, type Point, type WireRoute } from '../src/render/route3d.ts';
@@ -266,14 +266,50 @@ describe('search cap', () => {
   });
 });
 
-describe('stacked and double boards', () => {
-  // The lattice router works on one board's rows; until it learns tiers, a
-  // stacked or double board takes the corridor router's square wires as they are.
-  test('routes come from the stacked-aware corridor router, with no warnings', () => {
-    const board = { cols: 126, kind: 'stacked' as const, splitCol: 63, railGapEvery: 6, tiers: 2 };
-    const wires = [{ net: '/A', a: { col: 5, row: 'a' as const }, b: { col: 70, row: 'j' as const }, role: 'signal' as const }];
-    const r = routeWires({ wires, packages: [], board, pinHoles: {} });
+describe('stacked boards', () => {
+  const board = { cols: 126, kind: 'stacked' as const, splitCol: 63, railGapEvery: 6, tiers: 2 };
+  const w = (a: string, b: string) => {
+    const h = (s: string) => ({ row: s.replace(/\d+$/, '') as never, col: Number(/\d+$/.exec(s)![0]) });
+    return { net: '/N', a: h(a), b: h(b), role: 'signal' as const };
+  };
+
+  test('a wire on the lower board is routed there by the lattice, square and on that board', () => {
+    const r = routeWires({ wires: [w('a70', 'a80')], packages: [], board, pinHoles: {} });
     expect(r.warnings).toEqual([]);
-    expect(r.routes.map((x) => x.plan)).toEqual(wirePolylines(wires, [], board));
+    const plan = r.routes[0].plan;
+    // Both ends where placeAt puts them: lower board, columns 7 and 17 of it.
+    expect(plan[0]).toEqual(placeAt(board, { col: 70, row: 'a' }));
+    expect(plan[plan.length - 1]).toEqual(placeAt(board, { col: 80, row: 'a' }));
+    expect(plan.every(([, y]) => y > TIER_PITCH - 30)).toBe(true);
+    expect(checkPlan(plan, [], board)).toBeNull();
+  });
+
+  test('a wire joining the two boards keeps the corridor plan', () => {
+    const wires = [w('a5', 'j70')];
+    const r = routeWires({ wires, packages: [], board, pinHoles: {} });
+    expect(r.routes[0].plan).toEqual(wirePolylines(wires, [], board)[0]);
+  });
+
+  test('a lower-board plan round-trips through planToPath with global columns', () => {
+    const wire = w('a70', 'a80');
+    const plan = routeWires({ wires: [wire], packages: [], board, pinHoles: {} }).routes[0].plan;
+    const path = planToPath(wire, plan, board)!;
+    expect(path).not.toBeNull();
+    for (const p of path.points) expect(p.col).toBeGreaterThan(63);
+    expect(pathToPlan(wire, path, board)).toEqual(plan);
+  });
+
+  test('a saved shape on the lower board is kept by the router', () => {
+    const wire = w('a70', 'a80');
+    const path = { points: [{ col: 70, gap: 'top', lane: 0 }, { col: 80, gap: 'top', lane: 0 }] };
+    const r = routeWires({ wires: [wire], packages: [], board, pinHoles: {} }, { [wireKey(wire)]: path });
+    expect(r.routes[0].locked).toBe(true);
+  });
+
+  test('legs on the lower board are taken nodes there, not on the upper board', () => {
+    const taken = takenNodes({ wires: [], pinHoles: { R1: { '1': { col: 70, row: 'c' } } }, board });
+    expect([...taken.values()]).toEqual(['a leg at c70']);
+    expect(taken.has(nodeKey(placeAt(board, { col: 70, row: 'c' }))!)).toBe(true);
+    expect(taken.has(nodeKey(pt({ col: 7, row: 'c' }))!)).toBe(false);
   });
 });

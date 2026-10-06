@@ -23,7 +23,7 @@
 
 import { holeKey } from '../layout/board.ts';
 import type { BoardSpec, Hole, Package, Row, Wire, WirePath, WirePoint } from '../layout/types.ts';
-import { HEIGHT, P, pt, ROWY, tierCount, X0 } from './geometry.ts';
+import { HEIGHT, P, placeAt, pt, ROWY, tierCols, tierCount, tierOf, TIER_PITCH, X0 } from './geometry.ts';
 import { packageRects, wirePolylines } from './ortho.ts';
 
 export type Point = [number, number];
@@ -229,23 +229,27 @@ export const planLength = (plan: Point[]) => plan.reduce((s, p, i) => (i ? s + M
  */
 export type Taken = Map<string, string>;
 
-/** A point's lattice node as "k,j" (half pitches from X0 and Y0), or null when it is off the lattice. */
+/** A point's lattice node as "k,j" (half pitches from X0 and Y0, on the top board) or "t:k,j" on stacked board t; null off the lattice. */
 export function nodeKey([x, y]: Point): string | null {
+  const t = Math.max(0, Math.floor((y + (TIER_PITCH - HEIGHT) / 2) / TIER_PITCH));
+  const yl = y - t * TIER_PITCH;
   const k = Math.round((x - X0) / LANE);
-  const j = Math.round((y - Y0) / LANE);
-  return Math.abs(X0 + k * LANE - x) < 0.01 && Math.abs(Y0 + j * LANE - y) < 0.01 ? `${k},${j}` : null;
+  const j = Math.round((yl - Y0) / LANE);
+  if (Math.abs(X0 + k * LANE - x) >= 0.01 || Math.abs(Y0 + j * LANE - yl) >= 0.01) return null;
+  return t ? `${t}:${k},${j}` : `${k},${j}`;
 }
 
 /** Every leg and every jumper end on the board, for checkPlan and shapePlan. */
-export function takenNodes(input: Pick<RouteInput, 'pinHoles' | 'wires'>): Taken {
+export function takenNodes(input: Pick<RouteInput, 'pinHoles' | 'wires'> & { board?: BoardSpec }): Taken {
   const out: Taken = new Map();
+  const at = (h: Hole) => (input.board ? placeAt(input.board, h) : pt(h));
   for (const w of input.wires) for (const h of [w.a, w.b]) {
-    const k = nodeKey(pt(h));
+    const k = nodeKey(at(h));
     if (k) out.set(k, `another jumper's end at ${holeKey(h)}`);
   }
   // Legs last, so a hole holding both is named for the leg.
   for (const pins of Object.values(input.pinHoles)) for (const h of Object.values(pins)) {
-    const k = nodeKey(pt(h));
+    const k = nodeKey(at(h));
     if (k) out.set(k, `a leg at ${holeKey(h)}`);
   }
   return out;
@@ -263,8 +267,9 @@ export function checkPlan(plan: Point[], packages: Package[], board: BoardSpec, 
   for (let i = 0; i + 1 < plan.length; i++) if (Math.abs(plan[i][0] - plan[i + 1][0]) > 0.01 && Math.abs(plan[i][1] - plan[i + 1][1]) > 0.01) return 'the path must turn square corners';
   const n = plan.length;
   if (Math.abs(plan[0][0] - plan[1][0]) > 0.01 || Math.abs(plan[n - 1][0] - plan[n - 2][0]) > 0.01) return 'a jumper has to leave each hole straight along its column';
-  const width = 2 * X0 + (board.cols - 1) * P;
-  if (plan.some(([x, y]) => x < WIRE_R || x > width - WIRE_R || y < WIRE_R || y > HEIGHT - WIRE_R)) return 'the path leaves the board';
+  const width = 2 * X0 + (tierCols(board) - 1) * P;
+  const height = HEIGHT + (tierCount(board) - 1) * TIER_PITCH;
+  if (plan.some(([x, y]) => x < WIRE_R || x > width - WIRE_R || y < WIRE_R || y > height - WIRE_R)) return 'the path leaves the board';
   const ends = [plan[0], plan[n - 1]];
   for (const r of chipRects(packages, board)) {
     if (ends.some((e) => inside(e, r))) continue;
@@ -288,8 +293,37 @@ export function checkPlan(plan: Point[], packages: Package[], board: BoardSpec, 
   return null;
 }
 
+/** The board both ends of `w` sit on, or null when it joins two stacked boards. */
+function tierOfWire(w: Wire, board: BoardSpec): number | null {
+  const t = tierOf(board, w.a.col);
+  return tierOf(board, w.b.col) === t ? t : null;
+}
+
+/** `w` as it reads on board `t` alone: columns from 1 on that board. */
+function localWire(w: Wire, board: BoardSpec, t: number): Wire {
+  const lo = t * tierCols(board);
+  return { ...w, a: { ...w.a, col: w.a.col - lo }, b: { ...w.b, col: w.b.col - lo } };
+}
+/**
+ * A saved shape moved by `dc` columns. Its bends run from the hole that sorts
+ * first, and renumbering columns can change which that is ("a70" before "a80",
+ * "a17" after "a7"), so they are turned round when the order differs.
+ */
+function shiftPath(path: WirePath, dc: number, w: Wire, board: BoardSpec, t: number): WirePath {
+  const points = path.points.map((p) => ({ ...p, col: p.col + dc }));
+  const lw = localWire(w, board, t);
+  return { points: holeKey(w.a) > holeKey(w.b) === holeKey(lw.a) > holeKey(lw.b) ? points : points.reverse() };
+}
+const shiftPlan = (plan: Point[], dy: number): Point[] => plan.map(([x, y]) => [x, y + dy]);
+
 /** A saved shape turned into a plan from `w.a` to `w.b`, or null when it names a corridor this board lacks. */
-export function pathToPlan(w: Wire, path: WirePath): Point[] | null {
+export function pathToPlan(w: Wire, path: WirePath, board?: BoardSpec): Point[] | null {
+  if (board && tierCount(board) > 1) {
+    const t = tierOfWire(w, board);
+    if (t === null) return null;
+    const plan = pathToPlan(localWire(w, board, t), shiftPath(path, -t * tierCols(board), w, board, t));
+    return plan && shiftPlan(plan, t * TIER_PITCH);
+  }
   const pts: Point[] = [];
   for (const p of path.points) {
     const g = GAP_INDEX.get(p.gap);
@@ -307,7 +341,7 @@ export function pathToPlan(w: Wire, path: WirePath): Point[] | null {
  * that lays out. `taken` is takenNodes() of the same doc.
  */
 export function shapePlan(w: Wire, path: WirePath, packages: Package[], board: BoardSpec, taken: Taken): { plan: Point[]; why: null } | { plan: null; why: string } {
-  const raw = pathToPlan(w, path);
+  const raw = pathToPlan(w, path, board);
   if (!raw) return { plan: null, why: 'it names a corridor this board does not have' };
   const plan = simplify(raw);
   const why = checkPlan(plan, packages, board, taken);
@@ -315,7 +349,13 @@ export function shapePlan(w: Wire, path: WirePath, packages: Package[], board: B
 }
 
 /** A plan's bends in grid units, from the hole that sorts first; null when a bend is off the half-pitch grid. */
-export function planToPath(w: Wire, plan: Point[]): WirePath | null {
+export function planToPath(w: Wire, plan: Point[], board?: BoardSpec): WirePath | null {
+  if (board && tierCount(board) > 1) {
+    const t = tierOfWire(w, board);
+    if (t === null) return null;
+    const path = planToPath(localWire(w, board, t), shiftPlan(plan, -t * TIER_PITCH));
+    return path && shiftPath(path, t * tierCols(board), w, board, t);
+  }
   const points: WirePoint[] = [];
   for (const [x, y] of plan.slice(1, -1)) {
     let g = 0;
@@ -810,9 +850,7 @@ function crossing(a: Point, b: Point, c: Point, d: Point): Point | null {
 
 /** Every wire's route, in the order of `input.wires`, and what went wrong on the way. Never throws. */
 export function routeWires(input: RouteInput, saved: Record<string, WirePath> = {}, opts: { maxExpand?: number } = {}): RouteResult {
-  // The lattice is one board's rows. A stacked or double board takes the
-  // corridor router's square wires, which know the tiers, until it learns them.
-  if (tierCount(input.board) > 1) return { routes: wirePolylines(input.wires, input.packages, input.board).map((plan) => ({ plan, lifts: [] })), warnings: [] };
+  if (tierCount(input.board) > 1) return routeStacked(input, saved, opts);
   const grid = new Grid(input);
   const cap = opts.maxExpand ?? MAX_EXPAND;
   const warnings: string[] = [];
@@ -908,5 +946,45 @@ export function routeWires(input: RouteInput, saved: Record<string, WirePath> = 
     }
   }
   for (const r of routes) r.lifts.sort((p, q) => p.at - q.at);
+  return { routes, warnings };
+}
+
+/**
+ * A stacked board: each board routed on its own by the lattice, in its own
+ * columns, then moved down to where it is drawn; a wire joining two boards
+ * keeps the corridor router's plan. Saved shapes are keyed and numbered
+ * globally, so they are translated on the way in.
+ */
+function routeStacked(input: RouteInput, saved: Record<string, WirePath>, opts: { maxExpand?: number }): RouteResult {
+  const board = input.board;
+  const cols = tierCols(board);
+  const fallback = wirePolylines(input.wires, input.packages, board);
+  const routes: WireRoute[] = fallback.map((plan) => ({ plan, lifts: [] }));
+  const warnings: string[] = [];
+  const single: BoardSpec = { cols, kind: 'full', splitCol: null, railGapEvery: board.railGapEvery };
+  for (let t = 0; t < tierCount(board); t++) {
+    const lo = t * cols;
+    const on = (h: Hole) => tierOf(board, h.col) === t;
+    const local = (h: Hole): Hole => ({ ...h, col: h.col - lo });
+    const idx = input.wires.map((w, i) => (on(w.a) && on(w.b) ? i : -1)).filter((i) => i >= 0);
+    if (!idx.length) continue;
+    const wires = idx.map((i) => localWire(input.wires[i], board, t));
+    const pinHoles: Record<string, Record<string, Hole>> = {};
+    for (const [ref, pins] of Object.entries(input.pinHoles)) {
+      const mine = Object.entries(pins).filter(([, h]) => on(h));
+      if (mine.length) pinHoles[ref] = Object.fromEntries(mine.map(([p, h]) => [p, local(h)]));
+    }
+    const packages = input.packages.filter((p) => tierOf(board, p.col0) === t).map((p) => ({ ...p, col0: p.col0 - lo }));
+    const localSaved: Record<string, WirePath> = {};
+    idx.forEach((i, n) => {
+      const path = saved[wireKey(input.wires[i])];
+      if (path) localSaved[wireKey(wires[n])] = shiftPath(path, -lo, input.wires[i], board, t);
+    });
+    const r = routeWires({ wires, packages, board: single, pinHoles }, localSaved, opts);
+    idx.forEach((i, n) => {
+      routes[i] = { ...r.routes[n], plan: shiftPlan(r.routes[n].plan, t * TIER_PITCH) };
+    });
+    warnings.push(...r.warnings);
+  }
   return { routes, warnings };
 }
