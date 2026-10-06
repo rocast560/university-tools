@@ -95,7 +95,7 @@ the schematic. Saving the schematic in KiCad reloads the board.
 
 ## 3D editor
 
-Press **3D** on a project to open the full-screen 3D editor. Click a part to select it, then drag it to new holes, turn it (R), flip a chip (Shift+R), edit its value or delete it from the card beside it, and press F to fly to it. With square wires, click a jumper to reshape it by its handles or recolour its net (keys 1 to 9). Ctrl+Z undoes layout changes. See [docs/editor3d.md](docs/editor3d.md). Agents working on the code should read [AGENTS.md](AGENTS.md).
+Press **3D** on a project to open the full-screen 3D editor. Click a part to select it, then drag it to new holes, turn it (R), flip a chip (Shift+R), edit its value or delete it from the card beside it, and press F to fly to it. With square wires, click a jumper to reshape it by its handles or recolour its net (keys 1 to 9). Ctrl+Z undoes layout changes. A parts tray (press / to search) adds parts: drag a tile onto a hole, or tap it and click one. The wire tool (W) draws a jumper that joins a loose leg to a net, and D duplicates the selected part. Tray drops, jumpers, duplicates and deletes edit the schematic after a backup and are not on Ctrl+Z. See [docs/editor3d.md](docs/editor3d.md). Agents working on the code should read [AGENTS.md](AGENTS.md).
 
 ## Run in Docker
 
