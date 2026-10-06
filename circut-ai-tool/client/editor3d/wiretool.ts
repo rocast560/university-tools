@@ -201,6 +201,8 @@ export function attachWireTool(ws: Workspace): () => void {
   button.addEventListener('click', onButton);
   const offTool = onToolClaimed((t) => t !== 'wire' && setOn(false));
   const offKey = addKeyHandler((e) => {
+    // Ctrl+W, Alt+W and the like are the browser's (Ctrl+W closes the tab).
+    if (e.ctrlKey || e.metaKey || e.altKey) return false;
     if (e.key === 'w' || e.key === 'W') {
       // W with a jumper half drawn only drops it; the next W turns the tool off.
       if (!drop() || !on) setOn(!on);

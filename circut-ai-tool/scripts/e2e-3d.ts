@@ -1039,6 +1039,20 @@ const SCENARIOS: Record<string, (page: CDP, id: string) => Promise<void>> = {
     await page.until(`__e3d.ghostCount() === 0`, 'right-click to cancel the jumper', 3000);
     if (!(await page.eval<boolean>(`document.querySelector('[data-ws=wire]').classList.contains('is-on')`))) throw new Error('right-click turned the tool off');
   },
+  async 'Ctrl+W and Alt+W are left to the browser, not the wire tool'(page) {
+    await open3d(page);
+    await page.eval(`document.activeElement?.blur()`);
+    for (const mod of ['ctrlKey', 'altKey', 'metaKey']) {
+      // A synthetic event: a real Ctrl+W would close the tab if it reached the browser.
+      const prevented = await page.eval<boolean>(`(() => { const e = new KeyboardEvent('keydown', { key: 'w', code: 'KeyW', ${mod}: true, bubbles: true, cancelable: true }); document.body.dispatchEvent(e); return e.defaultPrevented; })()`);
+      await sleep(100);
+      if (await page.eval<boolean>(`document.querySelector('[data-ws=wire]').classList.contains('is-on')`)) throw new Error(`${mod} + W turned the wire tool on`);
+      if (prevented) throw new Error(`${mod} + W was preventDefault-ed`);
+    }
+    await page.key('w', 'KeyW');
+    await page.until(`document.querySelector('[data-ws=wire]').classList.contains('is-on')`, 'plain W to turn the tool on');
+    await page.key('Escape', 'Escape');
+  },
   async 'the wire tool and the tray take turns'(page) {
     await open3d(page);
     await armTile(page, 'resistor');
