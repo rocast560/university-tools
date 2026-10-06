@@ -262,7 +262,7 @@ async function armTile(page: CDP, alias: string) {
  * canvas under them, preferring strips no leg is in yet; with the screen
  * point of the first.
  */
-async function freeSpot(page: CDP, span: number) {
+async function freeSpot(page: CDP, span: number, avoid: number[] = []) {
   // The camera can still be gliding into place just after the editor opens; a hole's screen point is only good once it stops.
   for (let last = '', i = 0; i < 40; i++) {
     const now = await page.eval<string>(`JSON.stringify(__e3d.holeScreen({ col: 1, row: 'a' }))`);
@@ -271,7 +271,7 @@ async function freeSpot(page: CDP, span: number) {
     await sleep(150);
   }
   const spot = await page.eval<{ col: number; row: string; x: number; y: number } | null>(
-    `(() => { const used = new Set(); const taken = new Set(); for (const pins of Object.values(__e3d.allHoles())) for (const h of Object.values(pins)) { used.add(h.col + (/[a-e]/.test(h.row) ? 'top' : 'bot')); taken.add(h.row + h.col); } const cols = __e3d.boardSpec().cols; for (const strict of [true, false]) for (const row of ['c', 'h', 'b', 'i']) { const half = /[a-e]/.test(row) ? 'top' : 'bot'; for (let col = 2; col + ${span} <= cols - 1; col++) { if (taken.has(row + col) || taken.has(row + (col + ${span}))) continue; if (strict && (used.has(col + half) || used.has(col + ${span} + half))) continue; const a = __e3d.holeScreen({ col, row }); const b = __e3d.holeScreen({ col: col + ${span}, row }); if (!a || !b) continue; if (document.elementFromPoint(a.x, a.y)?.tagName !== 'CANVAS' || document.elementFromPoint(b.x, b.y)?.tagName !== 'CANVAS') continue; return { col, row, x: a.x, y: a.y }; } } return null; })()`,
+    `(() => { const used = new Set(); const taken = new Set(); for (const pins of Object.values(__e3d.allHoles())) for (const h of Object.values(pins)) { used.add(h.col + (/[a-e]/.test(h.row) ? 'top' : 'bot')); taken.add(h.row + h.col); } const cols = __e3d.boardSpec().cols; for (const strict of [true, false]) for (const row of ['c', 'h', 'b', 'i']) { const half = /[a-e]/.test(row) ? 'top' : 'bot'; for (let col = 2; col + ${span} <= cols - 1; col++) { if (${JSON.stringify(avoid)}.includes(col)) continue; if (taken.has(row + col) || taken.has(row + (col + ${span}))) continue; if (strict && (used.has(col + half) || used.has(col + ${span} + half))) continue; const a = __e3d.holeScreen({ col, row }); const b = __e3d.holeScreen({ col: col + ${span}, row }); if (!a || !b) continue; if (document.elementFromPoint(a.x, a.y)?.tagName !== 'CANVAS' || document.elementFromPoint(b.x, b.y)?.tagName !== 'CANVAS') continue; return { col, row, x: a.x, y: a.y }; } } return null; })()`,
   );
   if (!spot) throw new Error('no free spot on screen for a new part');
   return spot;
@@ -816,6 +816,34 @@ const SCENARIOS: Record<string, (page: CDP, id: string) => Promise<void>> = {
       await removeAdded(id, before);
     }
   },
+  async 'D duplicates the selected resistor to the right'(page, id) {
+    await open3d(page);
+    const before = await page.eval<string[]>(`__e3d.components()`);
+    try {
+      const ref = (await page.eval<string[]>(`__e3d.lead2()`)).find((r) => /^R\d+$/.test(r))!;
+      await page.eval(`__e3d.select(${JSON.stringify(ref)})`);
+      await page.until(`document.querySelector('.ws-card:not([hidden]) input[name=value]')`, 'the card');
+      const value = await page.eval<string>(`document.querySelector('.ws-card:not([hidden]) input[name=value]').value`);
+      const orig = await page.eval<Record<string, { col: number; row: string }>>(`__e3d.holes(${JSON.stringify(ref)})`);
+      await page.eval(`document.activeElement.blur()`);
+      await page.key('d', 'KeyD');
+      await page.until(`__e3d.components().length > ${before.length}`, 'the copy to be added', 20000);
+      const copy = (await page.eval<string[]>(`__e3d.components()`)).find((r) => !before.includes(r))!;
+      if (!/^R\d+$/.test(copy)) throw new Error(`the copy is ${copy}, not a resistor`);
+      await page.until(`__e3d.selected() === ${JSON.stringify(copy)}`, `${copy} to be selected`);
+      await page.until(`(() => { const h = __e3d.holes(${JSON.stringify(copy)}); return !!h && Object.keys(h).length === 2; })()`, `${copy} pinned`, 10000);
+      const got = await page.eval<Record<string, { col: number; row: string }>>(`__e3d.holes(${JSON.stringify(copy)})`);
+      const pins = Object.keys(orig);
+      const k = got[pins[0]].col - orig[pins[0]].col;
+      if (k < 1 || k > 20) throw new Error(`the copy is shifted ${k} columns`);
+      for (const pin of pins) if (got[pin]?.row !== orig[pin].row || got[pin].col - orig[pin].col !== k) throw new Error(`legs are not ${ref}'s shifted by ${k}: ${JSON.stringify(got)} vs ${JSON.stringify(orig)}`);
+      await page.until(`document.querySelector('.ws-card:not([hidden]) input[name=value]')?.value === ${JSON.stringify(value)}`, `the copy's value to be ${value}`);
+      const orig2 = await page.eval<string>(`JSON.stringify(__e3d.holes(${JSON.stringify(ref)}))`);
+      if (orig2 !== JSON.stringify(orig)) throw new Error(`${ref} moved`);
+    } finally {
+      await removeAdded(id, before);
+    }
+  },
   async 'Esc disarms and clears the ghost'(page) {
     await open3d(page);
     await armTile(page, 'resistor');
@@ -916,35 +944,54 @@ const SCENARIOS: Record<string, (page: CDP, id: string) => Promise<void>> = {
     await open3d(page);
     const before = await page.eval<string[]>(`__e3d.components()`);
     try {
-      // A resistor whose legs sit in empty strips, so both are unconnected.
-      await armTile(page, 'resistor');
-      const spot = await freeSpot(page, 4);
-      await click(page, spot.x, spot.y);
-      await page.until(`__e3d.components().length > ${before.length}`, 'the resistor to be added', 20000);
-      const ref = (await page.eval<string[]>(`__e3d.components()`)).find((r) => !before.includes(r))!;
-      await page.until(`(() => { const h = __e3d.holes(${JSON.stringify(ref)}); return h && Object.values(h).some((x) => x.row === ${JSON.stringify(spot.row)} && x.col === ${spot.col}); })()`, `${ref} on its spot`, 10000);
-      const pin = await page.eval<string>(`Object.entries(__e3d.holes(${JSON.stringify(ref)})).find(([, h]) => h.col === ${spot.col})[0]`);
-      const was = await page.eval<string>(`__e3d.pinNet(${JSON.stringify(ref)}, ${JSON.stringify(pin)})`);
-      if (!was.startsWith('unconnected-')) throw new Error(`${ref} pin ${pin} starts on ${was}, not unconnected`);
-      const half = /[a-e]/.test(spot.row) ? 'abcde' : 'fghij';
-      const ends = await jumperEnds(page, `h.col === ${spot.col} && ${JSON.stringify(half)}.includes(h.row)`, `o.kind === 'connect' && o.pins.some((p) => p.ref === ${JSON.stringify(ref)} && p.pin === ${JSON.stringify(pin)})`);
-      // The drop focuses the new part's value box; W typed there would be a value, not the tool.
-      await page.eval(`document.activeElement?.blur()`);
-      await page.key('w', 'KeyW');
-      await page.until(`document.querySelector('[data-ws=wire]').classList.contains('is-on') && document.querySelector('.ws-hint').textContent.startsWith('click a hole to start a jumper')`, 'the wire tool to turn on');
-      await click(page, ends.ax, ends.ay);
-      await page.mouse('mouseMoved', ends.bx, ends.by);
-      await page.until(`__e3d.ghostCount() > 0 && document.querySelector('.ws-hint').textContent.startsWith('joins')`, 'the jumper ghost and a "joins" hint');
-      await page.mouse('mousePressed', ends.bx, ends.by);
-      await page.mouse('mouseReleased', ends.bx, ends.by);
-      await page.until(`!__e3d.pinNet(${JSON.stringify(ref)}, ${JSON.stringify(pin)}).startsWith('unconnected-')`, `${ref} pin ${pin} to join a net`, 20000).catch(async (e) => {
-        throw new Error(`${(e as Error).message}; toast: ${await lastToast(page)}`);
-      });
-      await page.until(`(document.getElementById('toast')?.textContent ?? '').startsWith('joined')`, 'a "joined" toast', 5000);
-      if (!(await page.eval<boolean>(`document.querySelector('[data-ws=wire]').classList.contains('is-on')`))) throw new Error('the wire tool turned off after a jumper');
-      await page.key('Escape', 'Escape');
-      await page.until(`!document.querySelector('[data-ws=wire]').classList.contains('is-on')`, 'Esc to turn the tool off');
-      if (!(await page.eval<boolean>(`!!document.querySelector('.ws')`))) throw new Error('Esc with the wire tool on closed the editor');
+      await page.eval(`__e3d.select(null)`);
+      // A resistor whose legs sit in empty strips, so both are unconnected. The fixture can be too full for
+      // that, and a strip with only a jumper on it or a chip pin the schematic lacks is only found out by
+      // trying: a spot that does not work is cleared and the next column is tried.
+      const avoid: number[] = [];
+      for (;;) {
+        await armTile(page, 'resistor');
+        const spot = await freeSpot(page, 4, avoid);
+        const have = before.length;
+        await click(page, spot.x, spot.y);
+        await page.until(`__e3d.components().length > ${have}`, 'the resistor to be added', 20000);
+        const ref = (await page.eval<string[]>(`__e3d.components()`)).find((r) => !before.includes(r))!;
+        await page.until(`(() => { const h = __e3d.holes(${JSON.stringify(ref)}); return h && Object.values(h).some((x) => x.row === ${JSON.stringify(spot.row)} && x.col === ${spot.col}); })()`, `${ref} on its spot`, 10000);
+        const pin = await page.eval<string>(`Object.entries(__e3d.holes(${JSON.stringify(ref)})).find(([, h]) => h.col === ${spot.col})[0]`);
+        const was = await page.eval<string>(`__e3d.pinNet(${JSON.stringify(ref)}, ${JSON.stringify(pin)})`);
+        let refused = '';
+        if (!was.startsWith('unconnected-')) refused = `${ref} pin ${pin} starts on ${was}, not unconnected`;
+        else {
+          const half = /[a-e]/.test(spot.row) ? 'abcde' : 'fghij';
+          const ends = await jumperEnds(page, `h.col === ${spot.col} && ${JSON.stringify(half)}.includes(h.row)`, `o.kind === 'connect' && o.pins.some((p) => p.ref === ${JSON.stringify(ref)} && p.pin === ${JSON.stringify(pin)})`);
+          // The drop focuses the new part's value box; W typed there would be a value, not the tool.
+          await page.eval(`document.activeElement?.blur()`);
+          await page.key('w', 'KeyW');
+          await page.until(`document.querySelector('[data-ws=wire]').classList.contains('is-on') && document.querySelector('.ws-hint').textContent.startsWith('click a hole to start a jumper')`, 'the wire tool to turn on');
+          await click(page, ends.ax, ends.ay);
+          await page.mouse('mouseMoved', ends.bx, ends.by);
+          await page.until(`__e3d.ghostCount() > 0 && document.querySelector('.ws-hint').textContent.startsWith('joins')`, 'the jumper ghost and a "joins" hint');
+          await page.mouse('mousePressed', ends.bx, ends.by);
+          await page.mouse('mouseReleased', ends.bx, ends.by);
+          await page.until(`(document.getElementById('toast')?.textContent ?? '') !== ''`, 'a toast after the jumper', 20000);
+          const said = await lastToast(page);
+          if (said.startsWith('joined')) {
+            if ((await page.eval<string>(`__e3d.pinNet(${JSON.stringify(ref)}, ${JSON.stringify(pin)})`)).startsWith('unconnected-')) throw new Error(`${ref} pin ${pin} did not join a net`);
+            if (!(await page.eval<boolean>(`document.querySelector('[data-ws=wire]').classList.contains('is-on')`))) throw new Error('the wire tool turned off after a jumper');
+            await page.key('Escape', 'Escape');
+            await page.until(`!document.querySelector('[data-ws=wire]').classList.contains('is-on')`, 'Esc to turn the tool off');
+            if (!(await page.eval<boolean>(`!!document.querySelector('.ws')`))) throw new Error('Esc with the wire tool on closed the editor');
+            return;
+          }
+          refused = said;
+          await page.key('Escape', 'Escape');
+          await page.until(`!document.querySelector('[data-ws=wire]').classList.contains('is-on')`, 'Esc to turn the tool off');
+        }
+        if (avoid.length >= 8) throw new Error(refused);
+        avoid.push(spot.col);
+        await removeAdded(id, before);
+        await page.until(`__e3d.components().length === ${before.length}`, 'the stray resistor to go', 20000);
+      }
     } finally {
       await removeAdded(id, before);
     }

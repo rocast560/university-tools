@@ -10,6 +10,7 @@ import { flipDip, rotateLead2, validatePlacement } from '../../src/edit/placemen
 import { api } from '../api.ts';
 import { esc, loadProject, toast } from '../main.ts';
 import { store } from '../state.ts';
+import { duplicatePart } from './duplicate.ts';
 import { history } from './history.ts';
 import { moveCommand } from './manipulate.ts';
 import type { Workspace } from './workspace.ts';
@@ -54,6 +55,7 @@ export function attachCard(ws: Workspace): () => void {
       (part?.kind === 'lead2' ? '<button type="button" data-card="rotate" title="R">Rotate</button>' : '') +
       (pkg?.kind === 'dip' ? '<button type="button" data-card="flip" title="Shift+R">Flip</button>' : '') +
       '<button type="button" data-card="focus" title="F">Focus</button>' +
+      '<button type="button" data-card="duplicate" title="D">Duplicate</button>' +
       '<button type="button" data-card="delete" class="danger" title="Delete">Delete</button>' +
       '</footer><div class="ws-card-confirm" hidden>Remove ' + esc(ref) + ' from the schematic? A backup is kept. <button type="button" data-card="confirm" class="danger">Remove</button><button type="button" data-card="cancel">Keep</button></div>';
     last = '';
@@ -119,6 +121,7 @@ export function attachCard(ws: Workspace): () => void {
     const confirm = card.querySelector<HTMLElement>('.ws-card-confirm')!;
     if (what === 'close') store.setProject({ selectedRef: null });
     if (what === 'focus') ws.board.focus(ref);
+    if (what === 'duplicate') void duplicatePart(ref);
     if (what === 'delete') confirm.hidden = false;
     if (what === 'cancel') confirm.hidden = true;
     if (what === 'confirm') void busy(() => api.editRemove(p.id, ref)).then((ok) => ok && store.get().project?.id === p.id && store.setProject({ selectedRef: null }));

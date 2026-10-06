@@ -17,6 +17,7 @@ import { simState } from '../simstate.ts';
 import { store } from '../state.ts';
 import { history as editHistory } from './history.ts';
 import { attachCard } from './card.ts';
+import { attachDuplicate } from './duplicate.ts';
 import { attachManipulation, commitMove } from './manipulate.ts';
 import { _failNextMove, attachTray } from './tray.ts';
 import { attachWireEdit } from './wireEdit.ts';
@@ -106,6 +107,7 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
   let detachCard = () => {};
   let detachTray = () => {};
   let detachWireTool = () => {};
+  let detachDuplicate = () => {};
   let offDel = () => {};
   let offHistory = () => {};
   let detachWires = () => {};
@@ -118,6 +120,7 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
     offHistory();
     offDel();
     detachWires();
+    detachDuplicate();
     detachWireTool();
     detachTray();
     detachCard();
@@ -183,6 +186,7 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
     detachCard = attachCard(ws);
     detachTray = attachTray(ws);
     detachWireTool = attachWireTool(ws);
+    detachDuplicate = attachDuplicate(ws);
     offDel = addKeyHandler((e) => {
       if (e.key !== 'Delete' && e.key !== 'Backspace') return false;
       const card = root.querySelector<HTMLElement>('.ws-card:not(.ws-wirecard):not([hidden])');
