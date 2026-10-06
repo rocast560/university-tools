@@ -42,7 +42,7 @@ editor still opens when a model cannot be loaded.
   `DIP-16_W7.62mm`, `Button_Switch_THT.3dshapes/SW_DIP_SPSTx07_Slide_9.78x19.96mm_W7.62mm_P2.54mm`,
   `LED_THT.3dshapes/LED_D5.0mm`,
   `Resistor_THT.3dshapes/R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal`,
-  and `Display_7Segment.3dshapes/CA56-12EWA` (a 0.56" common-anode single digit,
+  and `Display_7Segment.3dshapes/7SegmentLED_LTS6760_LTS6780` (a 0.56" single digit,
   the closest match to the 5161BS).
 - `kicad-cli pcb export glb --no-board-body` turns a board holding one
   footprint into a GLB. A probe on DIP-14 took 0.6 s and produced 166 KB in
@@ -60,9 +60,9 @@ editor still opens when a model cannot be loaded.
 
 ```
 scripts/build-models.ts  (run by hand: `bun run models`)
-   kicad-cli → raw GLB → strip legs → merge/weld → meshopt → client/models/<key>.glb
-                                                           → client/models/manifest.json
-client/models/LICENSE-KiCad-3D.md
+   kicad-cli → raw GLB → strip legs → merge/weld → meshopt → public/models/<key>.glb
+                                                           → public/models/manifest.json
+public/models/LICENSE-KiCad-3D.md
 
 client/models.ts          load manifest + GLBs once, cache, expose ModelSet
 client/board3d-parts.ts   buildPart/buildPackage take an optional ModelSet;
@@ -144,7 +144,7 @@ Each kit part is the model body plus the pieces that must stay live:
     band and lead colours); manifest schema validation; pin-1 offset maths;
   - for every kit part kind, the code-drawn leg ends lie on the hole
     positions `at(hole)` gives, with and without a model body;
-  - the committed `client/models/manifest.json` validates and every listed
+  - the committed `public/models/manifest.json` validates and every listed
     file exists (so a bad re-export fails the suite).
 - e2e (`scripts/e2e-3d.ts`):
   - the editor opens with models loaded (a hook reports loaded keys);
@@ -160,5 +160,5 @@ Each kit part is the model body plus the pieces that must stay live:
 - `docs/editor3d.md`: a "Part models" section (what is modelled, the Detail
   toggle, how to add a part to the pipeline, the license note).
 - `README.md`: `bun run models` and that KiCad is only needed to re-export.
-- `client/models/LICENSE-KiCad-3D.md`: attribution and CC-BY-SA 4.0 for the
+- `public/models/LICENSE-KiCad-3D.md`: attribution and CC-BY-SA 4.0 for the
   model files.
