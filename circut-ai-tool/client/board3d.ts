@@ -264,7 +264,7 @@ interface Content {
   doc: LayoutDoc;
 }
 
-export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOptions = {}): Board3D & { /** internal, e2e only */ _tintCount(): number; _wireTop(): number; _loseContext(): void; _handles(): { kind: 'segment' | 'bend'; index: number; x: number; y: number }[] } {
+export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOptions = {}): Board3D & { /** internal, e2e only */ _tintCount(): number; _ghostCount(): number; _wireTop(): number; _loseContext(): void; _handles(): { kind: 'segment' | 'bend'; index: number; x: number; y: number }[] } {
   /** One board's depth; stacked boards sit one TIER_PITCH apart. */
   const boardDepth = 350;
   const depthOf = (d: LayoutDoc) => boardDepth + (tierCount(d.board) - 1) * TIER_PITCH;
@@ -1229,6 +1229,8 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
     wireAnchor,
     // Internal, for the e2e hook: how many strip tints are showing.
     _tintCount: () => tintMesh.count,
+    // Internal, for the e2e hook: how many meshes the drop ghost is made of.
+    _ghostCount: () => ghost?.children.length ?? 0,
     // Internal, for the e2e hook: the highest point of any square jumper's jacket.
     _wireTop: () =>
       c.shapes.reduce((top, s) => {

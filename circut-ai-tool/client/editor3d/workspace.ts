@@ -18,8 +18,11 @@ import { store } from '../state.ts';
 import { history as editHistory } from './history.ts';
 import { attachCard } from './card.ts';
 import { attachManipulation, commitMove } from './manipulate.ts';
+import { _failNextMove, attachTray } from './tray.ts';
 import { attachWireEdit } from './wireEdit.ts';
 import { wireKey } from '../../src/render/route3d.ts';
+import { placeAt } from '../../src/render/geometry.ts';
+import type { Hole } from '../../src/layout/types.ts';
 
 export interface Workspace {
   board: Board3D;
@@ -51,7 +54,7 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
   const root = document.createElement('div');
   root.className = 'ws';
   root.innerHTML =
-    '<div class="ws-tray" aria-label="Parts tray"><span class="ws-tray-soon">Parts tray: coming in phase 3</span></div>' +
+    '<div class="ws-tray" aria-label="Parts tray"></div>' +
     '<div class="ws-bar">' +
     '<button type="button" class="ws-btn" data-ws="exit" title="Close the 3D editor (Esc)">← Exit</button>' +
     '<button type="button" class="ws-btn" data-ws="fly" title="Fly through (F with nothing selected)">Fly through</button>' +
@@ -98,6 +101,7 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
   let offKey = () => {};
   let detachManip = () => {};
   let detachCard = () => {};
+  let detachTray = () => {};
   let offDel = () => {};
   let offHistory = () => {};
   let detachWires = () => {};
@@ -110,6 +114,7 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
     offHistory();
     offDel();
     detachWires();
+    detachTray();
     detachCard();
     detachManip();
     disposeBoard();
@@ -171,6 +176,7 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
     detachWires = () => wires.detach();
     detachManip = attachManipulation(ws);
     detachCard = attachCard(ws);
+    detachTray = attachTray(ws);
     offDel = addKeyHandler((e) => {
       if (e.key !== 'Delete' && e.key !== 'Backspace') return false;
       const card = root.querySelector<HTMLElement>('.ws-card:not(.ws-wirecard):not([hidden])');
@@ -350,6 +356,20 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
         netColor: (net: string) => store.get().project?.doc.nets[net]?.color ?? null,
         wireTop: () => (board as unknown as { _wireTop(): number })._wireTop(),
         loseContext: () => (board as unknown as { _loseContext(): void })._loseContext(),
+        // The parts tray (phase 3).
+        ghostCount: () => (board as unknown as { _ghostCount(): number })._ghostCount(),
+        components: () => [...(store.get().project?.design.components.keys() ?? [])],
+        allHoles: () => store.get().project?.doc.pinHoles ?? {},
+        boardSpec: () => store.get().project?.doc.board ?? null,
+        holeScreen(h: Hole) {
+          const q = store.get().project;
+          if (!q) return null;
+          const [x, y] = placeAt(q.doc.board, h);
+          const a = board.project(x, 0, y);
+          const r = canvasHost.getBoundingClientRect();
+          return a.visible ? { x: r.left + a.x, y: r.top + a.y } : null;
+        },
+        failNextMove: _failNextMove,
       };
     }
     return ws;

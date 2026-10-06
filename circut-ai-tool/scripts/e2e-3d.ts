@@ -242,6 +242,48 @@ async function pickableWire(page: CDP, run = false, skip: string[] = []) {
   return hit;
 }
 
+/**
+ * Arm a part from the tray with a real tap on its tile, showing every part
+ * first when it is not in the group on screen.
+ */
+async function armTile(page: CDP, alias: string) {
+  const sel = `.ws-tile[data-alias=${JSON.stringify(alias)}]`;
+  await page.until(`document.querySelector('.ws-tile')`, 'the tray tiles');
+  if (!(await page.eval<boolean>(`!!document.querySelector(${JSON.stringify(sel)})`))) await page.eval(`document.querySelector('.ws-chip[data-group=All]').click()`);
+  await page.until(`document.querySelector(${JSON.stringify(sel)})`, `the ${alias} tile`);
+  const at = await page.eval<{ x: number; y: number }>(`(() => { const t = document.querySelector(${JSON.stringify(sel)}); t.scrollIntoView({ inline: 'center' }); const r = t.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  await page.mouse('mousePressed', at.x, at.y);
+  await page.mouse('mouseReleased', at.x, at.y);
+  await page.until(`document.querySelector(${JSON.stringify(sel + '.is-armed')})`, `${alias} to be armed`);
+}
+
+/**
+ * Two free holes `span` columns apart on one row, both on screen with the
+ * canvas under them, preferring strips no leg is in yet; with the screen
+ * point of the first.
+ */
+async function freeSpot(page: CDP, span: number) {
+  // The camera can still be gliding into place just after the editor opens; a hole's screen point is only good once it stops.
+  for (let last = '', i = 0; i < 40; i++) {
+    const now = await page.eval<string>(`JSON.stringify(__e3d.holeScreen({ col: 1, row: 'a' }))`);
+    if (now === last) break;
+    last = now;
+    await sleep(150);
+  }
+  const spot = await page.eval<{ col: number; row: string; x: number; y: number } | null>(
+    `(() => { const used = new Set(); const taken = new Set(); for (const pins of Object.values(__e3d.allHoles())) for (const h of Object.values(pins)) { used.add(h.col + (/[a-e]/.test(h.row) ? 'top' : 'bot')); taken.add(h.row + h.col); } const cols = __e3d.boardSpec().cols; for (const strict of [true, false]) for (const row of ['c', 'h', 'b', 'i']) { const half = /[a-e]/.test(row) ? 'top' : 'bot'; for (let col = 2; col + ${span} <= cols - 1; col++) { if (taken.has(row + col) || taken.has(row + (col + ${span}))) continue; if (strict && (used.has(col + half) || used.has(col + ${span} + half))) continue; const a = __e3d.holeScreen({ col, row }); const b = __e3d.holeScreen({ col: col + ${span}, row }); if (!a || !b) continue; if (document.elementFromPoint(a.x, a.y)?.tagName !== 'CANVAS' || document.elementFromPoint(b.x, b.y)?.tagName !== 'CANVAS') continue; return { col, row, x: a.x, y: a.y }; } } return null; })()`,
+  );
+  if (!spot) throw new Error('no free spot on screen for a new part');
+  return spot;
+}
+
+/** Take out parts a scenario added, so the next scenario sees the fixture as it was. */
+async function removeAdded(id: string, before: string[]) {
+  const now = await get<LayoutDoc>(`/api/projects/${id}/layout`);
+  const refs = new Set([...Object.keys(now.pinHoles), ...now.parts.map((x) => x.id), ...now.packages.map((x) => x.id), ...now.unplaced.map((x) => x.ref)]);
+  for (const ref of refs) if (!before.includes(ref)) await tryPost(`/api/projects/${id}/edit/remove`, { ref });
+}
+
 const SCENARIOS: Record<string, (page: CDP, id: string) => Promise<void>> = {
   async 'workspace opens full screen'(page) {
     await open3d(page);
@@ -727,6 +769,103 @@ const SCENARIOS: Record<string, (page: CDP, id: string) => Promise<void>> = {
     } finally {
       if (moved) await tryPost(`/api/projects/${id}/layout/move`, moved);
       await arcWires(id);
+    }
+  },
+  async 'dropping a resistor from the tray adds it to the schematic on those holes'(page, id) {
+    await open3d(page);
+    const before = await page.eval<string[]>(`__e3d.components()`);
+    try {
+      await armTile(page, 'resistor');
+      const spot = await freeSpot(page, 4);
+      await page.mouse('mouseMoved', spot.x, spot.y);
+      await page.until(`__e3d.ghostCount() > 0`, 'the drop ghost');
+      await page.mouse('mousePressed', spot.x, spot.y);
+      await page.mouse('mouseReleased', spot.x, spot.y);
+      await page.until(`__e3d.components().length > ${before.length}`, 'the resistor to be added', 20000);
+      const ref = (await page.eval<string[]>(`__e3d.components()`)).find((r) => !before.includes(r))!;
+      // A refused move toasts before the reload that adds the part, so it is on screen now.
+      const said = await lastToast(page);
+      if (!/^R\d+$/.test(ref)) throw new Error(`the new part is ${ref}, not a resistor`);
+      const want = JSON.stringify([`${spot.row}${spot.col}`, `${spot.row}${spot.col + 4}`].sort());
+      await page.until(`(() => { const h = __e3d.holes(${JSON.stringify(ref)}); return h && JSON.stringify(Object.values(h).map((x) => x.row + x.col).sort()) === ${JSON.stringify(want)}; })()`, `${ref} on ${want}`, 10000).catch(async (e) => {
+        throw new Error(`${(e as Error).message}; it is on ${JSON.stringify(await page.eval(`__e3d.holes(${JSON.stringify(ref)})`))}; toast: ${said}`);
+      });
+      await page.until(`__e3d.selected() === ${JSON.stringify(ref)}`, `${ref} to be selected`);
+      if (await page.eval<boolean>(`!!document.querySelector('.ws-tile.is-armed')`)) throw new Error('the tile stayed armed after the drop');
+    } finally {
+      await removeAdded(id, before);
+    }
+  },
+  async 'Esc disarms and clears the ghost'(page) {
+    await open3d(page);
+    await armTile(page, 'resistor');
+    const spot = await freeSpot(page, 4);
+    await page.mouse('mouseMoved', spot.x, spot.y);
+    await page.until(`__e3d.ghostCount() > 0`, 'the drop ghost');
+    await page.key('Escape', 'Escape');
+    await page.until(`__e3d.ghostCount() === 0 && !document.querySelector('.ws-tile.is-armed')`, 'Esc to disarm and clear the ghost', 3000);
+    if (await page.eval<number>(`__e3d.tintCount()`)) throw new Error('strip tints left behind');
+    if (!(await page.eval<boolean>(`!!document.querySelector('.ws')`))) throw new Error('Esc while armed closed the editor');
+  },
+  async 'a refused move after add still leaves the part placed'(page, id) {
+    await open3d(page);
+    const before = await page.eval<string[]>(`__e3d.components()`);
+    try {
+      // A chip pointed at row b: it has no default holes there, so nothing is added.
+      await armTile(page, '74LS00');
+      const spot = await freeSpot(page, 7);
+      const b = await page.eval<{ x: number; y: number }>(`__e3d.holeScreen({ col: ${spot.col}, row: 'b' })`);
+      await page.mouse('mouseMoved', b.x, b.y);
+      await page.until(`__e3d.ghostCount() > 0`, 'a refusing ghost on row b');
+      await page.mouse('mousePressed', b.x, b.y);
+      await page.mouse('mouseReleased', b.x, b.y);
+      await page.until(`document.querySelector('.ws-hint').textContent.startsWith("can't go here")`, 'the hint to say why');
+      await sleep(1200);
+      if ((await page.eval<string[]>(`__e3d.components()`)).length !== before.length) throw new Error('a chip was added from row b');
+      // A chip whose first leg lands on another chip's leg: the verdict refuses it before any add.
+      const chip = (await page.eval<string[]>(`__e3d.chips()`))[0];
+      const leg = await page.eval<{ col: number; row: string }>(`Object.values(__e3d.holes(${JSON.stringify(chip)})).filter((h) => h.row === 'f').sort((p, q) => p.col - q.col)[0]`);
+      const f = await page.eval<{ x: number; y: number }>(`__e3d.holeScreen(${JSON.stringify(leg)})`);
+      if ((await page.eval<string>(`document.elementFromPoint(${f.x}, ${f.y})?.tagName`)) !== 'CANVAS') throw new Error(`${chip}'s leg is not on the canvas`);
+      await page.mouse('mouseMoved', f.x, f.y);
+      await page.until(`document.querySelector('.ws-hint').textContent.includes('taken')`, 'the hint to say the hole is taken');
+      await page.mouse('mousePressed', f.x, f.y);
+      await page.mouse('mouseReleased', f.x, f.y);
+      await sleep(1200);
+      if ((await page.eval<string[]>(`__e3d.components()`)).length !== before.length) throw new Error('a chip was added over another chip');
+      await page.key('Escape', 'Escape');
+      await page.until(`!document.querySelector('.ws-tile.is-armed')`, 'the chip to disarm');
+      // The server refusing the move after the add: the part stays, placed by the board.
+      await armTile(page, 'resistor');
+      const free = await freeSpot(page, 4);
+      await page.eval(`__e3d.failNextMove()`);
+      await page.mouse('mouseMoved', free.x, free.y);
+      await page.mouse('mousePressed', free.x, free.y);
+      await page.mouse('mouseReleased', free.x, free.y);
+      await page.until(`__e3d.components().length > ${before.length}`, 'the resistor to be added', 20000);
+      await page.until(`(document.getElementById('toast')?.textContent ?? '').includes('not at that spot')`, 'the toast to say it went elsewhere', 5000);
+    } finally {
+      await removeAdded(id, before);
+    }
+  },
+  async 'dragging a tile onto the board adds the part where it is let go'(page, id) {
+    await open3d(page);
+    const before = await page.eval<string[]>(`__e3d.components()`);
+    try {
+      await page.until(`document.querySelector('.ws-tile[data-alias=resistor]')`, 'the resistor tile');
+      const tile = await page.eval<{ x: number; y: number }>(`(() => { const r = document.querySelector('.ws-tile[data-alias=resistor]').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+      const spot = await freeSpot(page, 4);
+      await page.mouse('mousePressed', tile.x, tile.y);
+      for (let k = 1; k <= 8; k++) await page.mouse('mouseMoved', tile.x + ((spot.x - tile.x) * k) / 8, tile.y + ((spot.y - tile.y) * k) / 8);
+      await page.until(`__e3d.ghostCount() > 0 && document.querySelector('.ws-drag-ghost')?.hidden`, 'the board ghost in place of the dragged icon');
+      await page.mouse('mouseReleased', spot.x, spot.y);
+      await page.until(`__e3d.components().length > ${before.length}`, 'the resistor to be added', 20000);
+      const ref = (await page.eval<string[]>(`__e3d.components()`)).find((r) => !before.includes(r))!;
+      const want = JSON.stringify([`${spot.row}${spot.col}`, `${spot.row}${spot.col + 4}`].sort());
+      await page.until(`(() => { const h = __e3d.holes(${JSON.stringify(ref)}); return h && JSON.stringify(Object.values(h).map((x) => x.row + x.col).sort()) === ${JSON.stringify(want)}; })()`, `${ref} on ${want}`, 10000);
+      if (await page.eval<boolean>(`!!document.querySelector('.ws-drag-ghost')`)) throw new Error('the dragged icon was left on screen');
+    } finally {
+      await removeAdded(id, before);
     }
   },
 };

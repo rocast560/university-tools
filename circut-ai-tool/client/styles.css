@@ -2511,6 +2511,8 @@ body.ws-open { overflow: hidden; }
   z-index: 50;
   display: grid;
   grid-template-rows: auto auto 1fr;
+  /* One column no wider than the screen: a long hint or a full tray must never widen the canvas. */
+  grid-template-columns: minmax(0, 1fr);
   /* Matches the renderer's clear colour, so a resize never flashes. */
   background: #070910;
   color: #e8ecf4;
@@ -2519,13 +2521,29 @@ body.ws-open { overflow: hidden; }
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 44px;
+  /* A fixed height, scrollbar included: tiles loading in, or a scrollbar
+     appearing, must never move the canvas (and every point on it) down. */
+  box-sizing: border-box;
+  height: 84px;
   padding: 6px 12px;
   overflow-x: auto;
+  overflow-y: hidden;
   border-bottom: 1px solid rgba(255, 255, 255, .08);
   background: rgba(16, 19, 26, .92);
 }
-.ws-tray-soon { opacity: .5; font-size: 12px; }
+.ws-tray.is-busy { opacity: .6; pointer-events: none; }
+.ws-tray input[type=search] { flex: 0 0 170px; padding: 4px 8px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, .2); background: rgba(0, 0, 0, .3); color: inherit; font: inherit; font-size: 12px; }
+.ws-chips { display: flex; gap: 4px; flex: none; }
+.ws-chip { height: auto; box-shadow: none; padding: 3px 9px; border-radius: 10px; border: 0; background: rgba(255, 255, 255, .06); color: inherit; font: inherit; font-size: 12px; cursor: pointer; }
+.ws-chip:hover { background: rgba(255, 255, 255, .12); }
+.ws-chip.is-on { color: #fff; background: rgba(255, 255, 255, .22); outline: 1px solid rgba(255, 255, 255, .5); }
+.ws-tiles { display: flex; gap: 6px; flex: none; }
+.ws-tray-empty { opacity: .5; font-size: 12px; }
+.ws-tile { height: auto; box-shadow: none; font: inherit; display: flex; flex-direction: column; align-items: center; gap: 2px; width: 72px; flex: none; padding: 4px 2px 3px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, .08); background: rgba(255, 255, 255, .04); color: inherit; cursor: grab; touch-action: none; transition: transform .12s, background .12s; }
+.ws-tile:hover { transform: translateY(-2px); background: rgba(255, 255, 255, .1); }
+.ws-tile span { font-size: 11px; line-height: 1.15; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-tile.is-armed { outline: 2px solid #4da3ff; background: rgba(77, 163, 255, .16); }
+.ws-drag-ghost { position: fixed; left: 0; top: 0; z-index: 70; pointer-events: none; opacity: .85; }
 .ws-bar {
   display: flex;
   align-items: center;
