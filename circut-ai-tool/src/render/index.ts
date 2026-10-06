@@ -2,6 +2,7 @@
 // no DOM, no dependencies. Elements carry data-ref / data-net / data-wire so
 // the client can attach hover, drag and click handlers.
 
+import { callouts } from './callouts.ts';
 import { isRail } from '../layout/board.ts';
 import { moduleRect, P, placeAt, pt, ROWY, svgSize, tierCols, tierCount, TIER_PITCH, tierShift, X0 } from './geometry.ts';
 import { wireControls, type Control } from './routing.ts';
@@ -415,6 +416,30 @@ function ledState(ref: string, sim: SimState | null): SkinLedState {
   return { brightness: b !== undefined ? b : sim?.leds[ref] ? 1 : 0, overdrive: sim?.ledOverdrive?.[ref] ?? 0 };
 }
 
+const CALLOUT = '#ff2d2d';
+
+/**
+ * Red rings round every highlighted part or wire, and one arrow per cluster
+ * with a count where several sit together. The page's CSS pulses the rings
+ * and bobs the arrows; a static export just shows them still.
+ */
+function drawCallouts(c: ReturnType<typeof callouts>): string {
+  if (!c.rings.length) return '';
+  const rings = c.rings.map(({ box: b }) =>
+    el('rect', { class: 'callout-ring', x: n(b.x1), y: n(b.y1), width: n(b.x2 - b.x1), height: n(b.y2 - b.y1), rx: 6, fill: 'none', stroke: CALLOUT, 'stroke-width': 2.4 }),
+  );
+  const arrows = c.clusters.map(({ box: b, count, kind }) => {
+    // Point down from above, unless that would leave the board's top edge.
+    const up = b.y1 < 46;
+    const x = (b.x1 + b.x2) / 2;
+    const y = up ? b.y2 + 4 : b.y1 - 4;
+    const head = 'M 0 0 L -9 -14 L -3.5 -14 L -3.5 -30 L 3.5 -30 L 3.5 -14 L 9 -14 Z';
+    const badge = count > 1 ? el('g', { class: 'callout-badge', transform: up ? 'rotate(180) translate(0 42)' : 'translate(0 -42)' }, el('rect', { x: -15, y: -10, width: 30, height: 20, rx: 10, fill: CALLOUT, stroke: '#fff', 'stroke-width': 1.2 }) + text(0, 4, `×${count}`, { fill: '#fff', 'font-size': 11, 'font-weight': 700, 'text-anchor': 'middle' })) : '';
+    return el('g', { class: 'callout-arrow', 'data-kind': kind, 'data-count': count, transform: `translate(${n(x)} ${n(y)})${up ? ' rotate(180)' : ''}` }, el('g', { class: 'callout-bob' }, el('path', { d: head, fill: CALLOUT, stroke: '#fff', 'stroke-width': 1.2 }) + badge));
+  });
+  return el('g', { class: 'callouts', 'pointer-events': 'none' }, rings.join('') + arrows.join(''));
+}
+
 export function renderSvg(res: EngineResult, opts: RenderOptions = {}): string {
   const t = opts.theme ?? LIGHT;
   const sk = opts.skin ?? FLAT;
@@ -447,6 +472,7 @@ export function renderSvg(res: EngineResult, opts: RenderOptions = {}): string {
     el('g', { class: 'parts' }, res.parts.map((p) => drawPart(p, res, t, sim, dimPart, sk)).join('')),
     el('g', { class: 'wires' }, res.wires.map((w, i) => (ortho ? drawOrthoWire(w, i, res.nets[w.net]?.color ?? t.text, t, dim([w.net], [], i), polylines[i]) : drawWire(w, i, res.nets[w.net]?.color ?? t.text, t, dim([w.net], [], i), sk, controls[i], res.board))).join('')),
     drawSupply(res, t, hl?.wire !== undefined ? () => undefined : dim),
+    drawCallouts(callouts(res, hl)),
     wrap('l-glow', 'mix-blend-mode:screen', sk.glowLayer?.(ctx, t)),
   ];
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${size.viewBox}" width="${size.width}" height="${size.height}" font-family="ui-monospace, Consolas, monospace">${layers.join('')}</svg>`;

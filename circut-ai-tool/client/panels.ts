@@ -5,7 +5,7 @@
 import { displayName } from '../src/netlist.ts';
 import { ledSpec, type LedColour } from '../src/parts/led.ts';
 import type { ResistorKind } from '../src/parts/resistor.ts';
-import type { PartGroup } from '../src/render/index.ts';
+import type { Highlight, PartGroup } from '../src/render/index.ts';
 import { partIcon } from './part-icons.ts';
 import { showBar } from './showbar.ts';
 import type { AnalogState } from '../src/sim/analog/simulator.ts';
@@ -452,10 +452,19 @@ export function renderPanels(panels: HTMLElement, toolbar: HTMLElement, legend: 
     input.click();
   };
   legend.onmouseover = (e) => {
+    // Hovering a Show button previews that group: rings and arrows on every part in it.
+    const show = (e.target as HTMLElement).closest<HTMLElement>('[data-show]')?.dataset.show;
+    // The legend is rebuilt on every change, so the pointer is "over" a fresh
+    // element after each one: only a real change of highlight may set state,
+    // or hovering would re-render forever.
+    const set = (hl: Highlight | null) => {
+      if (p.activeStep === null && JSON.stringify(hl) !== JSON.stringify(p.highlight ?? null)) store.setProject({ highlight: hl });
+    };
+    if (show !== undefined) return set(show ? { group: show as PartGroup } : null);
     const net = (e.target as HTMLElement).closest<HTMLElement>('[data-legend]')?.dataset.legend;
-    if (net && p.activeStep === null) store.setProject({ highlight: { net } });
+    if (net) set({ net });
   };
   legend.onmouseleave = () => {
-    if (p.activeStep === null) store.setProject({ highlight: null });
+    if (p.activeStep === null && p.highlight) store.setProject({ highlight: null });
   };
 }
