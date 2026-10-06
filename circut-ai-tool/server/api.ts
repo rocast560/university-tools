@@ -152,10 +152,10 @@ export function createApi(service: Service, events: Events<ProjectEvent>, tunnel
   api.post('/projects/:id/erc', async (c) => c.json(await service.erc(c.req.param('id'))));
   const editResult = (out: Awaited<ReturnType<Service['setValue']>>) => ({ ok: true, ref: out.ref, unit: out.unit, backup: out.backup, notes: out.notes, checks: out.project.doc.checks, summary: summaryOf(out.project) });
   api.post('/projects/:id/edit/add', async (c) => {
-    const b = (await objectBody(c)) as { part?: string; libId?: string; value?: string; ref?: string; connections?: Record<string, string> };
+    const b = (await objectBody(c)) as { part?: string; libId?: string; value?: string; ref?: string; connections?: Record<string, string>; spare?: boolean };
     const libId = b.libId ?? (b.part ? resolveAlias(b.part)?.libId : undefined) ?? (b.part?.includes(':') ? b.part : undefined);
     if (!libId) throw new ServiceError(`unknown part "${b.part ?? ''}"; use a name from list_supported_parts (GET /api/parts) or a KiCad lib_id like Device:R`);
-    return c.json(editResult(await service.addComponent(c.req.param('id'), { libId, value: b.value ?? resolveAlias(b.part ?? '')?.defaultValue, ref: b.ref, connections: b.connections })));
+    return c.json(editResult(await service.addComponent(c.req.param('id'), { libId, value: b.value ?? resolveAlias(b.part ?? '')?.defaultValue, ref: b.ref, connections: b.connections, spare: b.spare === false ? false : undefined })));
   });
   api.post('/projects/:id/edit/connect', async (c) => {
     const b = (await objectBody(c)) as { ref?: string; pin?: string; net?: string };

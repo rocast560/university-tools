@@ -102,7 +102,7 @@ export const api = {
   layout: (id: string) => call<LayoutDoc>(`/api/projects/${id}/layout`),
   parts: () => call<PartAlias[]>('/api/parts'),
   footprint: (part: string) => call<PartFootprint>(`/api/parts/footprint?part=${encodeURIComponent(part)}`),
-  editAdd: (id: string, body: { part: string; value?: string; connections?: Record<string, string> }) =>
+  editAdd: (id: string, body: { part: string; value?: string; connections?: Record<string, string>; spare?: boolean }) =>
     post<{ ok: true; ref: string; backup: string; notes: string[] }>(`/api/projects/${id}/edit/add`, body),
   editConnect: (id: string, ref: string, pin: string, net: string) => post<unknown>(`/api/projects/${id}/edit/connect`, { ref, pin, net }),
   netlist: async (id: string) => {

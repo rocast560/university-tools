@@ -844,6 +844,26 @@ const SCENARIOS: Record<string, (page: CDP, id: string) => Promise<void>> = {
       await removeAdded(id, before);
     }
   },
+  async 'D on a 74LS chip adds a new chip, not a spare gate of it'(page, id) {
+    // U1 is a 74LS86 with gate A placed and gates B-D spare: a copy must be a new package.
+    await open3d(page);
+    const before = await page.eval<string[]>(`__e3d.components()`);
+    try {
+      const orig = await page.eval<string>(`JSON.stringify(__e3d.holes('U1'))`);
+      await page.eval(`__e3d.select('U1')`);
+      await page.until(`__e3d.selected() === 'U1'`, 'U1 to be selected');
+      await page.eval(`document.activeElement?.blur()`);
+      await page.key('d', 'KeyD');
+      await page.until(`__e3d.components().length > ${before.length}`, 'the copy to be added', 20000);
+      const copy = (await page.eval<string[]>(`__e3d.components()`)).find((r) => !before.includes(r))!;
+      if (!/^U\d+$/.test(copy)) throw new Error(`the copy is ${copy}, not a chip`);
+      await page.until(`__e3d.selected() === ${JSON.stringify(copy)}`, `${copy} to be selected`);
+      const now = await page.eval<string>(`JSON.stringify(__e3d.holes('U1'))`);
+      if (now !== orig) throw new Error(`U1 moved: ${now} vs ${orig}`);
+    } finally {
+      await removeAdded(id, before);
+    }
+  },
   async 'Esc disarms and clears the ghost'(page) {
     await open3d(page);
     await armTile(page, 'resistor');

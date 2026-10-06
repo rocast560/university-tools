@@ -289,7 +289,7 @@ export class Service {
     }
   }
 
-  addComponent(id: string, a: { libId: string; value?: string; ref?: string; connections?: Record<string, string> }) {
+  addComponent(id: string, a: { libId: string; value?: string; ref?: string; connections?: Record<string, string>; spare?: boolean }) {
     return this.edit(id, (p) => addComponent(p.schematic, p.design, a, this.deps.libs.symbolText).catch(rethrow));
   }
   connect(id: string, ref: string, pin: string, net: string) {

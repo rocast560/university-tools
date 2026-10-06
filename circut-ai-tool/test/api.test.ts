@@ -209,3 +209,28 @@ describe.skipIf(!existsSync(path.join(KICAD_SYMBOL_DIR, 'Device.kicad_sym')))('p
     expect(await bad.json()).toHaveProperty('error');
   });
 });
+
+describe.skipIf(!existsSync(path.join(KICAD_SYMBOL_DIR, '74xx.kicad_sym')))('edit/add spare', () => {
+  // The fake kicad keeps returning PL1's netlist, so only the ref and notes are checked here.
+  const addApp = async () => {
+    const { service, sch } = await makeService();
+    (service as unknown as { deps: { libs: unknown } }).deps.libs = createLibraryLookup({ symbolDir: KICAD_SYMBOL_DIR });
+    const app = createApp({ service, events: new Events<ProjectEvent>(), mcp: () => new McpServer({ name: 'stub', version: '0' }) });
+    const json = (p: string, body: unknown) => app.request(p, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const { id } = await (await json('/api/projects/open', { path: sch })).json();
+    return { json, id };
+  };
+  test('spare: false adds a new 74LS86 instead of filling a spare gate of U1', async () => {
+    const { json, id } = await addApp();
+    const res = await json(`/api/projects/${id}/edit/add`, { part: '74LS86', spare: false });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ref).toBe('U4');
+    expect(body.notes.join(' ')).not.toMatch(/spare gate/);
+  });
+  test('without spare the default still reuses a spare gate', async () => {
+    const { json, id } = await addApp();
+    const body = await (await json(`/api/projects/${id}/edit/add`, { part: '74LS86' })).json();
+    expect(body.ref).toBe('U1');
+  });
+});

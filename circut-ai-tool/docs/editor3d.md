@@ -80,7 +80,7 @@ There are two ways to place a part:
 
 Either way a ghost follows the pointer and shows where the legs would go. The strips under the legs are tinted with the same green and red as a move, and the hint line gives the reason when a spot is refused. A refused drop adds nothing. A chip has to straddle the centre channel, so its ghost is red anywhere but rows e and f.
 
-A drop adds a real component to the schematic: the server saves a backup of the `.kicad_sch`, adds the part, and then moves it onto the holes you chose. A leg dropped into a strip that already carries one net joins that net. A leg in an empty strip stays unconnected. The new part is selected, and if it has a value, the value box in its card is focused so you can type one.
+A drop adds a real component to the schematic: the server saves a backup of the `.kicad_sch`, adds the part, and then moves it onto the holes you chose. A leg dropped into a strip that already carries one net joins that net. A leg in an empty strip stays unconnected. A chip is always a new package, even when a chip of the same kind on the board has a spare gate. The new part is selected, and if it has a value, the value box in its card is focused so you can type one.
 
 Displays, modules and kinds the board cannot draw as plain legs are placed automatically. The ghost shows a single marker, and the hint says "placed automatically". If the move onto your holes is refused after the part was added, the part stays in the schematic where the board put it and a message says so.
 
@@ -111,7 +111,7 @@ The tray and the wire tool exclude each other: starting one stops the other.
 
 ## Duplicate and delete
 
-**D**, or **Duplicate** in the part card, adds another part of the same kind and value as the selected one. It connects to nothing. The copy goes to the nearest free spot to the right of the original, up to 20 columns away. If none is free, the board places it and a message says "placed automatically". The copy is selected.
+**D**, or **Duplicate** in the part card, adds another part of the same kind and value as the selected one. It connects to nothing. A chip's copy is a new package, never a spare gate of the original. The copy goes to the nearest free spot to the right of the original, up to 20 columns away. If none is free, the board places it and a message says "placed automatically". The copy is selected.
 
 Part kinds that are not in the tray cannot be duplicated, and a message says so.
 

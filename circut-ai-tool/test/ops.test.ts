@@ -72,6 +72,15 @@ describe('addComponent', () => {
     expect(s.symbols.some((x) => x.ref === r.ref && x.libId === '74xx:74LS86' && x.value === '74HC86')).toBe(true);
   });
 
+  test('spare: false adds a new chip even when a same-valued chip has a spare gate (tray drop, Duplicate)', async () => {
+    const r = await addComponent(sch, design, { libId: '74xx:74LS86', value: '74LS86', spare: false }, libs);
+    expect(r.ref).toBe('U4');
+    expect(r.notes.join(' ')).not.toMatch(/spare gate/);
+    const s = parseSchematic(r.text, 'PL1_1');
+    expect(s.symbols.filter((x) => x.ref === 'U1').map((x) => x.unit).sort()).toEqual([1, 5]);
+    expect(s.symbols.filter((x) => x.ref === 'U4').map((x) => x.unit).sort()).toEqual([1, 5]);
+  });
+
   test('explicit ref and unknown lib', async () => {
     const r = await addComponent(sch, design, { libId: 'Device:R', ref: 'R9', value: '1k' }, libs);
     expect(r.ref).toBe('R9');

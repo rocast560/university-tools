@@ -29,7 +29,7 @@ export async function duplicatePart(ref: string): Promise<string | null> {
   }
   working = true;
   try {
-    const added = await api.editAdd(p.id, { part: alias.alias, value: comp.value, connections: {} });
+    const added = await api.editAdd(p.id, { part: alias.alias, value: comp.value, connections: {}, spare: false });
     const orig = p.doc.pinHoles[ref];
     let spot: ReturnType<typeof shiftHoles> = null;
     if (orig) {

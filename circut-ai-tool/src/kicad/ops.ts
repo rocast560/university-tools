@@ -96,7 +96,7 @@ export async function connectPin(sch: Schematic, design: Design, ref: string, pi
   return { text: r.text, placed, notes };
 }
 
-export async function addComponent(sch: Schematic, design: Design, a: { libId: string; value?: string; ref?: string; connections?: Record<string, string> }, libs: LibProvider): Promise<OpResult> {
+export async function addComponent(sch: Schematic, design: Design, a: { libId: string; value?: string; ref?: string; connections?: Record<string, string>; spare?: boolean }, libs: LibProvider): Promise<OpResult> {
   const notes: string[] = [];
   const placed: OpResult['placed'] = {};
   const libText = await libs(a.libId);
@@ -115,7 +115,8 @@ export async function addComponent(sch: Schematic, design: Design, a: { libId: s
   let spot = 0;
   const nodes: string[] = [];
   const pinsFor = (u: number) => pinsOfUnit(lib, u).map((p) => p.number);
-  if (!a.ref && lib.unitCount > 1 && !lib.power) {
+  // spare: false asks for a new chip: the 3D editor's tray and Duplicate place a whole package.
+  if (!a.ref && a.spare !== false && lib.unitCount > 1 && !lib.power) {
     const byRef = new Map<string, Set<number>>();
     // Reuse a spare unit only of a chip that already carries the value being requested (or any
     // value, if the caller didn't ask for a specific one) -- otherwise a request for a
