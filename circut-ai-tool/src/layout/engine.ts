@@ -6,6 +6,7 @@
 // to strip, rail bridges. Every hole has one owner. Problems never throw out
 // of layout(): they land in `error`, `unplaced` and `warnings`.
 
+import type { ResistorKind } from '../parts/resistor.ts';
 import type { Component, Design, DesignPin } from '../netlist.ts';
 import { displayName, isUnconnected } from '../netlist.ts';
 import { classify, powerKind, type Footprint, type PowerKind } from '../parts/catalog.ts';
@@ -38,6 +39,8 @@ export interface EngineResult {
   power: { plus: string[]; minus: string[]; gnd: string[]; plusName: string; gndName: string; secondName: string | null };
   /** LED reference -> the colour chosen on the board, when one was. */
   ledColors: Record<string, LedColour>;
+  /** Tan carbon film or blue metal film. Optional so results saved before it existed still load. */
+  resistorKind?: ResistorKind;
   error: string | null;
 }
 
@@ -814,6 +817,7 @@ class Engine {
       values: Object.fromEntries(this.values),
       power: { plus: this.plus, minus: this.minus, gnd: this.gnd, plusName: this.plusName, gndName: this.gndName, secondName: this.secondName },
       ledColors: { ...this.sidecar.ledColors },
+      resistorKind: this.sidecar.options.resistorKind,
       error,
     };
   }

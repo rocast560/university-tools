@@ -31,17 +31,18 @@ export const is3dOpen = () => !!view && !!host?.isConnected;
 let stepText: HTMLElement | null = null;
 let netOut: HTMLElement | null = null;
 let onPop: (() => void) | null = null;
-/** The wire style the mounted scene was built with; a change means a rebuild. */
-let mountedStyle: 'arc' | 'orthogonal' = 'arc';
+/** The wire style and resistor type the mounted scene was built with; a change of either means a rebuild. */
+let mountedStyle = '';
+const styleOf = (p: { sidecar: { options: { wireStyle: string; resistorKind: string } } }) => `${p.sidecar.options.wireStyle}|${p.sidecar.options.resistorKind}`;
 let legend: HTMLElement | null = null;
 
 /** Push the board's switch positions, LED state, and the followed step or net into 3D. */
 function pushBoard() {
   const p = store.get().project;
   if (!p || !view) return;
-  // The square and curved jumpers are different geometry, so a change of
-  // style rebuilds the scene where it stands.
-  if (p.sidecar.options.wireStyle !== mountedStyle && host?.parentElement) {
+  // The square and curved jumpers are different geometry, and so are the two
+  // resistor bodies, so a change of either rebuilds the scene where it stands.
+  if (styleOf(p) !== mountedStyle && host?.parentElement) {
     const card = host.parentElement;
     close3d(false);
     void open3d(card, p.doc);
@@ -135,9 +136,10 @@ export async function open3d(card: HTMLElement, doc: LayoutDoc) {
   const { mount3d } = await import('./board3d.ts');
   // The user may have closed it again while three was still downloading.
   if (!host.isConnected) return;
-  mountedStyle = store.get().project?.sidecar.options.wireStyle ?? 'arc';
+  const mounted = store.get().project;
+  mountedStyle = mounted ? styleOf(mounted) : '';
   view = mount3d(canvasHost, doc, {
-    wireStyle: mountedStyle,
+    wireStyle: mounted?.sidecar.options.wireStyle ?? 'arc',
     onToggle(key) {
       const p = store.get().project;
       if (!p) return;

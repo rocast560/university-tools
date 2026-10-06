@@ -2,6 +2,7 @@
 
 import { LED_COLOURS, type LedColour } from '../parts/led.ts';
 import { normalizeTests, type SimTest } from '../sim/test-spec.ts';
+import { RESISTOR_KINDS, type ResistorKind } from '../parts/resistor.ts';
 
 export type Row = 'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g' | 'h' | 'i' | 'j' | 'T+' | 'T-' | 'B+' | 'B-';
 
@@ -18,6 +19,8 @@ export interface Options {
   substitutions: Record<string, string>;
   /** How the flat board draws jumpers: bowed arcs, or square-cornered runs along the corridors between rows. */
   wireStyle: 'arc' | 'orthogonal';
+  /** Tan carbon-film resistors (four bands) or blue metal-film ones (five bands). */
+  resistorKind: ResistorKind;
 }
 
 export interface Sidecar {
@@ -39,7 +42,7 @@ export interface Sidecar {
   tests: SimTest[];
 }
 
-export const defaultOptions = (): Options => ({ board: 'auto', railSplit: null, dipSwitchPositions: 0, packageOrder: [], substitutions: {}, wireStyle: 'arc' });
+export const defaultOptions = (): Options => ({ board: 'auto', railSplit: null, dipSwitchPositions: 0, packageOrder: [], substitutions: {}, wireStyle: 'arc', resistorKind: 'carbon' });
 
 export const emptySidecar = (): Sidecar => ({ version: 1, options: defaultOptions(), pinned: {}, colors: {}, placed: {}, ledColors: {}, tests: [] });
 
@@ -60,6 +63,7 @@ export function normalizeSidecar(x: unknown): Sidecar {
   if (Number.isInteger(opt.dipSwitchPositions) && (opt.dipSwitchPositions as number) >= 0) s.options.dipSwitchPositions = opt.dipSwitchPositions as number;
   if (Array.isArray(opt.packageOrder)) s.options.packageOrder = opt.packageOrder.filter((r) => typeof r === 'string');
   if (opt.wireStyle === 'arc' || opt.wireStyle === 'orthogonal') s.options.wireStyle = opt.wireStyle;
+  if ((RESISTOR_KINDS as readonly unknown[]).includes(opt.resistorKind)) s.options.resistorKind = opt.resistorKind as ResistorKind;
   if (opt.substitutions && typeof opt.substitutions === 'object') for (const [k, v] of Object.entries(opt.substitutions)) if (typeof v === 'string') s.options.substitutions[k] = v;
   if (o.pinned && typeof o.pinned === 'object') {
     for (const [ref, pins] of Object.entries(o.pinned)) {

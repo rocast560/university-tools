@@ -4,6 +4,8 @@
 
 import { displayName } from '../src/netlist.ts';
 import { ledSpec, type LedColour } from '../src/parts/led.ts';
+import type { ResistorKind } from '../src/parts/resistor.ts';
+import { partIcon } from './part-icons.ts';
 import type { AnalogState } from '../src/sim/analog/simulator.ts';
 import { runTest, switchesForTest, type SimTest } from '../src/sim/tests.ts';
 import { analog } from './analog.ts';
@@ -168,7 +170,12 @@ function guide(p: ProjectState): string {
 
 function parts(p: ProjectState): string {
   const unplaced = p.doc.unplaced.length ? `<h2>Not placed</h2><ul>${p.doc.unplaced.map((u) => `<li><b>${esc(u.ref)}</b>: ${esc(u.reason)}</li>`).join('')}</ul>` : '';
-  return `<div class="panel"><h2>Parts list</h2><ul>${p.doc.partsList.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>${unplaced}</div>`;
+  const kind = p.sidecar.options.resistorKind;
+  const hasResistors = p.doc.partsList.some((l) => l.icon.kind === 'resistor');
+  const kindBtn = (k: ResistorKind, label: string) => `<button type="button" class="btn ${kind === k ? 'is-on' : ''}" data-action="resistor-kind" data-kind="${k}" aria-pressed="${kind === k}">${label}</button>`;
+  const toggle = hasResistors ? `<div class="resistor-kind"><span class="muted">Resistors</span><div class="tgroup">${kindBtn('carbon', 'Tan carbon film')}${kindBtn('metal', 'Blue metal film')}</div></div>` : '';
+  const rows = p.doc.partsList.map((l) => `<li>${partIcon(l.icon, kind, (ref) => ledColourOf(p, ref))}<span>${esc(l.text)}</span></li>`).join('');
+  return `<div class="panel"><h2>Parts list</h2>${toggle}<ul class="partslist">${rows}</ul>${unplaced}</div>`;
 }
 
 function pinouts(p: ProjectState): string {
@@ -286,6 +293,18 @@ export function renderPanels(panels: HTMLElement, toolbar: HTMLElement, legend: 
 
   panels.onclick = async (e) => {
     const t = e.target as HTMLElement;
+    const kindBtn = t.closest<HTMLElement>('[data-action="resistor-kind"]');
+    if (kindBtn) {
+      const resistorKind = kindBtn.dataset.kind as ResistorKind;
+      if (resistorKind === p.sidecar.options.resistorKind) return;
+      try {
+        const doc = await api.options(p.id, { resistorKind });
+        store.setProject({ doc, sidecar: { ...p.sidecar, options: { ...p.sidecar.options, resistorKind } } });
+      } catch (err) {
+        toast((err as Error).message);
+      }
+      return;
+    }
     if (t.closest('[data-collapse]')) {
       // The board column takes the room; the choice sticks across projects.
       const layout = panels.closest<HTMLElement>('.layout');

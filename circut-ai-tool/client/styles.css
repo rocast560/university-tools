@@ -2507,3 +2507,34 @@ tr:hover td {
 .home h1 .brand-mate {
   color: var(--accent);
 }
+
+/* Parts list: a small picture of each part beside its line. */
+.partslist {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.partslist li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+.partslist li:last-child {
+  border-bottom: 0;
+}
+.partslist .part-icon {
+  flex: none;
+  background: var(--sunken);
+  border-radius: 6px;
+  padding: 2px;
+}
+.resistor-kind {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0 0 8px;
+}

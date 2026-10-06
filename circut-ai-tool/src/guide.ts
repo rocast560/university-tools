@@ -165,14 +165,30 @@ export function buildPinouts(design: Design, res: EngineResult): Pinout[] {
   return out;
 }
 
-export function buildPartsList(res: EngineResult): string[] {
-  const items: string[] = [];
+/** The little picture beside a parts-list row. */
+export type PartIcon =
+  | { kind: 'chip'; pins: number; label: string }
+  | { kind: 'dipswitch'; positions: number }
+  | { kind: 'sevenseg' }
+  | { kind: 'resistor'; value: string }
+  | { kind: 'led'; ref: string }
+  | { kind: 'wire' }
+  | { kind: 'part'; style: string };
+
+export interface PartsItem {
+  text: string;
+  icon: PartIcon;
+}
+
+export function buildPartsList(res: EngineResult): PartsItem[] {
+  const items: PartsItem[] = [];
   for (const pkg of res.packages) {
     if (pkg.kind === 'dip') {
       const info = icInfo(pkg.name, pkg.pins);
-      items.push(`1 × ${pkg.name} ${info?.spec?.description ?? `${pkg.pins}-pin DIP`} (${pkg.id})`);
-    } else if (pkg.kind === 'sevenseg') items.push(`1 × ${pkg.name} 7-segment display, common ${pkg.common} (${pkg.id})`);
-    else items.push(`1 × ${pkg.name}${pkg.map ? ` (positions ${Object.keys(pkg.map).join(', ')} used)` : ''}`);
+      items.push({ text: `1 × ${pkg.name} ${info?.spec?.description ?? `${pkg.pins}-pin DIP`} (${pkg.id})`, icon: { kind: 'chip', pins: pkg.pins, label: pkg.name } });
+    } else if (pkg.kind === 'sevenseg') items.push({ text: `1 × ${pkg.name} 7-segment display, common ${pkg.common} (${pkg.id})`, icon: { kind: 'sevenseg' } });
+    else if (pkg.kind === 'dipswitch') items.push({ text: `1 × ${pkg.name}${pkg.map ? ` (positions ${Object.keys(pkg.map).join(', ')} used)` : ''}`, icon: { kind: 'dipswitch', positions: pkg.positions ?? pkg.pins / 2 } });
+    else items.push({ text: `1 × ${pkg.name}`, icon: { kind: 'chip', pins: pkg.pins, label: pkg.name } });
   }
   const groups = new Map<string, string[]>();
   for (const p of res.parts) {
@@ -182,8 +198,10 @@ export function buildPartsList(res: EngineResult): string[] {
   for (const [k, refs] of [...groups.entries()].sort()) {
     const [style, value] = k.split(' ');
     const name = STYLE_NAMES[style] ?? (style.length === 3 ? 'transistor' : 'part');
-    items.push(`${refs.length} × ${value} ${name} (${refs.sort(compareRefs).join(', ')})`);
+    refs.sort(compareRefs);
+    const icon: PartIcon = style === 'R' ? { kind: 'resistor', value } : style === 'LED' ? { kind: 'led', ref: refs[0] } : { kind: 'part', style };
+    items.push({ text: `${refs.length} × ${value} ${name} (${refs.join(', ')})`, icon });
   }
-  items.push(`About ${res.wires.length} jumper wires, ${res.supply ? res.supply.leads.map((l) => displayName(l.net)).join(' and ') + ' supply' : 'no supply'}, a ${res.board.kind}-size breadboard`);
+  items.push({ text: `About ${res.wires.length} jumper wires, ${res.supply ? res.supply.leads.map((l) => displayName(l.net)).join(' and ') + ' supply' : 'no supply'}, a ${res.board.kind}-size breadboard`, icon: { kind: 'wire' } });
   return items;
 }

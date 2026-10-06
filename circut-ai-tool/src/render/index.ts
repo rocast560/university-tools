@@ -10,7 +10,7 @@ import type { EngineResult } from '../layout/engine.ts';
 import type { BoardSpec, Hole, Package, PlacedPart, Row, Wire } from '../layout/types.ts';
 import { displayName } from '../netlist.ts';
 import type { LedColour } from '../parts/led.ts';
-import { colourBands } from '../parts/resistor.ts';
+import { RESISTOR_BODY, resistorBands, type ResistorKind } from '../parts/resistor.ts';
 import { L3_BOARD, L3_SILK } from '../parts/lab3.ts';
 import { FLAT, type BoardGeom, type Skin, type SkinContext, type SkinLedState } from './skin.ts';
 import { LIGHT, type Theme } from './theme.ts';
@@ -274,7 +274,7 @@ function drawModule(pkg: Package): string {
 
 // ---------- parts ----------
 
-function body2(part: PlacedPart, t: Theme, sim: SimState | null, sk: Skin, colours: Record<string, LedColour>): string {
+function body2(part: PlacedPart, t: Theme, sim: SimState | null, sk: Skin, colours: Record<string, LedColour>, resistorKind: ResistorKind): string {
   // Drawn horizontally, centred at the origin; the caller rotates it along the leg axis.
   const value = part.value;
   switch (part.style) {
@@ -282,9 +282,11 @@ function body2(part: PlacedPart, t: Theme, sim: SimState | null, sk: Skin, colou
       // The bands are read off the value, so a resistor never shows a code for
       // some other part. Three grouped at one end, tolerance alone at the far
       // end, the way they are painted.
-      const bands = colourBands(value);
-      const xs = [-7.5, -4.5, -1.5, 5.5];
-      return el('rect', { x: -11, y: -4.5, width: 22, height: 9, rx: 2, fill: t.body, stroke: t.bodyStroke }) + (bands ?? []).map((b, i) => el('rect', { x: xs[i], y: -4.5, width: 2, height: 9, fill: b.hex })).join('');
+      // Blue metal film carries five bands and a tan carbon one four.
+      const bands = resistorBands(value, resistorKind);
+      const xs = bands?.length === 5 ? [-8, -5.5, -3, -0.5, 6] : [-7.5, -4.5, -1.5, 5.5];
+      const fill = resistorKind === 'metal' ? RESISTOR_BODY.metal : { fill: t.body, stroke: t.bodyStroke };
+      return el('rect', { x: -11, y: -4.5, width: 22, height: 9, rx: 2, fill: fill.fill, stroke: fill.stroke }) + (bands ?? []).map((b, i) => el('rect', { x: xs[i], y: -4.5, width: 2, height: 9, fill: b.hex })).join('');
     }
     case 'C':
       return el('rect', { x: -3.5, y: -6, width: 2.2, height: 12, fill: '#2F6FBF' }) + el('rect', { x: 1.3, y: -6, width: 2.2, height: 12, fill: '#2F6FBF' });
@@ -329,7 +331,7 @@ function drawPart(part: PlacedPart, res: EngineResult, t: Theme, sim: SimState |
     if (shadow) inner.push(shadow);
     const leads = part.style === 'LED' ? sk.ledLeads?.(part, [ax, ay], [bx, by]) : undefined;
     inner.push(leads ?? el('line', { x1: ax, y1: ay, x2: bx, y2: by, stroke: t.lead, 'stroke-width': 1.8 }));
-    inner.push(el('g', { transform: `translate(${n(mx)} ${n(my)}) rotate(${n(deg)})` }, body2(part, t, sim, sk, res.ledColors ?? {})));
+    inner.push(el('g', { transform: `translate(${n(mx)} ${n(my)}) rotate(${n(deg)})` }, body2(part, t, sim, sk, res.ledColors ?? {}, res.resistorKind ?? 'carbon')));
     for (const [x, y] of pts) inner.push(el('circle', { cx: x, cy: y, r: 2.2, fill: t.lead }));
     const perp = Math.abs(deg) < 45 || Math.abs(deg) > 135 ? [0, -10] : [12, 3];
     inner.push(text(mx + perp[0], my + perp[1], part.style === 'LED' ? part.id : `${part.id} ${part.value}`, { fill: t.text, 'font-size': 7.5, 'text-anchor': perp[0] ? 'start' : 'middle' }));

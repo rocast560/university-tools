@@ -15,6 +15,7 @@ import { footprintPins } from '../src/layout/engine.ts';
 import { normalizeTests } from '../src/sim/test-spec.ts';
 import { classify } from '../src/parts/catalog.ts';
 import { LED_COLOURS, type LedColour } from '../src/parts/led.ts';
+import { RESISTOR_KINDS } from '../src/parts/resistor.ts';
 import { simulate, type SimResult } from '../src/sim/index.ts';
 import type { KicadCli } from './kicad-cli.ts';
 import type { LibraryLookup } from './libraries.ts';
@@ -301,6 +302,10 @@ export class Service {
     if (patch.wireStyle !== undefined) {
       if (patch.wireStyle !== 'arc' && patch.wireStyle !== 'orthogonal') throw new ServiceError('wireStyle must be arc or orthogonal');
       o.wireStyle = patch.wireStyle;
+    }
+    if (patch.resistorKind !== undefined) {
+      if (!(RESISTOR_KINDS as readonly string[]).includes(patch.resistorKind)) throw new ServiceError('resistorKind must be carbon or metal');
+      o.resistorKind = patch.resistorKind;
     }
     if (patch.substitutions !== undefined) o.substitutions = { ...o.substitutions, ...patch.substitutions };
     return this.rebuild(p);
