@@ -187,6 +187,9 @@ async function pickable(page: CDP) {
 }
 
 /** Poll until `expression` holds or `ms` passes; true when it held. */
+/** The toast on screen, if any, for a failure message. */
+const lastToast = (page: CDP) => page.eval<string>(`document.getElementById('toast')?.textContent || 'none'`);
+
 async function settles(page: CDP, expression: string, ms: number) {
   return page.until(expression, '', ms).then(() => true, () => false);
 }
@@ -231,9 +234,9 @@ async function arcWires(id: string) {
  * With `run`, only one with a run across the board longer than two pitches,
  * which has a segment handle to drag up and down the screen; `seg` is that run.
  */
-async function pickableWire(page: CDP, run = false) {
+async function pickableWire(page: CDP, run = false, skip: string[] = []) {
   const hit = await page.eval<{ key: string; index: number; net: string; x: number; y: number; seg: number } | null>(
-    `(() => { const plans = __e3d.routes(); const keys = __e3d.wires(); for (let i = 0; i < keys.length; i++) { const p = plans?.[i]; const seg = p ? p.findIndex((q, k) => k + 1 < p.length && q[1] === p[k + 1][1] && Math.abs(q[0] - p[k + 1][0]) > 36) : -1; if (${run} && seg < 0) continue; const at = __e3d.wireScreen(i); const hit = at && __e3d.pickAt(at.x, at.y); if (hit && hit.kind === 'wire' && hit.index === i) return { key: keys[i], index: i, net: hit.net, x: at.x, y: at.y, seg }; } return null; })()`,
+    `(() => { const plans = __e3d.routes(); const keys = __e3d.wires(); const skip = ${JSON.stringify(skip)}; for (let i = 0; i < keys.length; i++) { if (skip.includes(keys[i])) continue; const p = plans?.[i]; const seg = p ? p.findIndex((q, k) => k + 1 < p.length && q[1] === p[k + 1][1] && Math.abs(q[0] - p[k + 1][0]) > 36) : -1; if (${run} && seg < 0) continue; const at = __e3d.wireScreen(i); const hit = at && __e3d.pickAt(at.x, at.y); if (hit && hit.kind === 'wire' && hit.index === i) return { key: keys[i], index: i, net: hit.net, x: at.x, y: at.y, seg }; } return null; })()`,
   );
   if (!hit) throw new Error('no jumper could be picked at its middle');
   return hit;
@@ -549,23 +552,33 @@ const SCENARIOS: Record<string, (page: CDP, id: string) => Promise<void>> = {
     await squareWires(page, id);
     try {
       await open3d(page);
-      const hit = await pickableWire(page, true);
-      await page.eval(`__e3d.selectWire(${JSON.stringify(hit.key)})`);
-      await page.until(`__e3d.handles().some((h) => h.kind === 'segment' && h.index === ${hit.seg})`, 'the segment handle');
-      const before = await page.eval<string>(`JSON.stringify(__e3d.routes()[${hit.index}])`);
+      // Up or down the screen moves a run that lies across the board. Some lanes are refused (a run
+      // pulled too far stretches the stub out of its hole over a leg further down the strip, or into a
+      // chip), and a short run hemmed in by legs and a chip may have no other lane at all, so the short
+      // drags come first and a wire with nowhere to go gives way to the next.
+      let hit = await pickableWire(page, true);
+      let before = '';
       let shaped = false;
-      // Up or down the screen moves a run that lies across the board; some lanes may be refused.
-      for (const dy of [70, -70, 110, -110]) {
-        const h = await page.eval<{ x: number; y: number }>(`__e3d.handles().find((h) => h.kind === 'segment' && h.index === ${hit.seg})`);
-        await page.mouse('mousePressed', h.x, h.y);
-        for (let k = 1; k <= 6; k++) await page.mouse('mouseMoved', h.x, h.y + (dy * k) / 6);
-        await page.mouse('mouseReleased', h.x, h.y + dy);
-        if (await settles(page, `__e3d.wirePath(${JSON.stringify(hit.key)}) !== null`, 3000)) {
-          shaped = true;
-          break;
+      const tries: string[] = [];
+      for (const tried: string[] = []; !shaped && tried.length < 4; ) {
+        if (tried.length) hit = await pickableWire(page, true, tried);
+        tried.push(hit.key);
+        await page.eval(`__e3d.selectWire(${JSON.stringify(hit.key)})`);
+        await page.until(`__e3d.handles().some((h) => h.kind === 'segment' && h.index === ${hit.seg})`, 'the segment handle');
+        before = await page.eval<string>(`JSON.stringify(__e3d.routes()[${hit.index}])`);
+        for (const dy of [35, -35, 70, -70, 110, -110]) {
+          const h = await page.eval<{ x: number; y: number }>(`__e3d.handles().find((h) => h.kind === 'segment' && h.index === ${hit.seg})`);
+          await page.mouse('mousePressed', h.x, h.y);
+          for (let k = 1; k <= 6; k++) await page.mouse('mouseMoved', h.x, h.y + (dy * k) / 6);
+          await page.mouse('mouseReleased', h.x, h.y + dy);
+          if (await settles(page, `__e3d.wirePath(${JSON.stringify(hit.key)}) !== null`, 3000)) {
+            shaped = true;
+            break;
+          }
+          tries.push(`${hit.key} ${dy}: ${await lastToast(page)}`);
         }
       }
-      if (!shaped) throw new Error('no drag of the segment handle kept a shape');
+      if (!shaped) throw new Error(`no drag of a segment handle kept a shape (${tries.join('; ')})`);
       const after = await page.eval<string>(`JSON.stringify(__e3d.routes()[${hit.index}])`);
       if (after === before) throw new Error('the shape was saved but the wire did not change');
       await page.until(`!document.querySelector('[data-ws=undo]').disabled`, 'Undo to enable');
@@ -585,27 +598,52 @@ const SCENARIOS: Record<string, (page: CDP, id: string) => Promise<void>> = {
     await squareWires(page, id);
     try {
       await open3d(page);
-      const hit = await pickableWire(page, true);
-      await page.eval(`__e3d.selectWire(${JSON.stringify(hit.key)})`);
-      await page.until(`__e3d.handles().length > 0`, 'the handles');
-      const start = await page.eval<number>(`__e3d.routes()[${hit.index}].length - 2`);
-      // Double-click the wire itself, halfway along it.
-      const at = await page.eval<{ x: number; y: number }>(`__e3d.wireScreen(${hit.index})`);
-      await page.mouse('mousePressed', at.x, at.y);
-      await page.mouse('mouseReleased', at.x, at.y);
-      await page.mouse('mousePressed', at.x, at.y, 2);
-      await page.mouse('mouseReleased', at.x, at.y, 2);
-      await page.until(`__e3d.routes()[${hit.index}].length - 2 === ${start + 2}`, 'a bend pair to be added', 6000);
-      // Pick one of the new corners (not one under the wire card, which floats over the canvas) and press Delete.
-      const corner = await page.eval<{ x: number; y: number } | null>(
-        `(() => { const plan = __e3d.routes()[${hit.index}]; const hs = __e3d.handles().filter((h) => h.kind === 'bend'); return hs.find((h) => h.index > 1 && h.index < plan.length - 2 && document.elementFromPoint(h.x, h.y)?.tagName === 'CANVAS') ?? null; })()`,
+      // Double-click a wire itself, halfway along it. A Z there can be refused (a short run hemmed in
+      // by legs has no lane to jog to), with a "Can't bend it there" toast; then try the next wire.
+      let hit = await pickableWire(page, true);
+      let start = 0;
+      let added = false;
+      const tries: string[] = [];
+      for (const tried: string[] = []; !added && tried.length < 4; ) {
+        if (tried.length) hit = await pickableWire(page, true, tried);
+        tried.push(hit.key);
+        await page.eval(`__e3d.selectWire(${JSON.stringify(hit.key)})`);
+        await page.until(`__e3d.handles().length > 0`, 'the handles');
+        start = await page.eval<number>(`__e3d.routes()[${hit.index}].length - 2`);
+        const at = await page.eval<{ x: number; y: number }>(`__e3d.wireScreen(${hit.index})`);
+        await page.mouse('mousePressed', at.x, at.y);
+        await page.mouse('mouseReleased', at.x, at.y);
+        await page.mouse('mousePressed', at.x, at.y, 2);
+        await page.mouse('mouseReleased', at.x, at.y, 2);
+        await page.until(`__e3d.routes()[${hit.index}].length - 2 === ${start + 2} || (document.getElementById('toast')?.textContent ?? '').startsWith("Can't bend")`, 'a bend pair to be added, or refused', 6000);
+        added = await page.eval<boolean>(`__e3d.routes()[${hit.index}].length - 2 === ${start + 2}`);
+        if (added) break;
+        tries.push(`${hit.key}: ${await lastToast(page)}`);
+        // So the next wire's refusal is its own toast, not this one still showing.
+        await page.until(`!document.getElementById('toast')`, 'the toast to fade', 8000);
+      }
+      if (!added) throw new Error(`no double-click added a bend pair (${tries.join('; ')})`);
+      // Pick one of the new corners (not one under the wire card, which floats over the canvas) and press
+      // Delete. Taking out one corner of a Z slides a run to the other one's lane, which can be refused
+      // (the stub out of a hole would then lie over a leg), so each inner corner is tried in turn.
+      const corners = await page.eval<{ index: number; x: number; y: number }[]>(
+        `(() => { const plan = __e3d.routes()[${hit.index}]; return __e3d.handles().filter((h) => h.kind === 'bend' && h.index > 1 && h.index < plan.length - 2 && document.elementFromPoint(h.x, h.y)?.tagName === 'CANVAS'); })()`,
       );
-      if (!corner) throw new Error('no inner bend handle to pick');
-      await page.mouse('mousePressed', corner.x, corner.y);
-      await page.mouse('mouseReleased', corner.x, corner.y);
-      await sleep(300);
-      await page.key('Delete', 'Delete');
-      await page.until(`__e3d.routes()[${hit.index}].length - 2 === ${start}`, 'Delete to take the pair out', 6000);
+      if (!corners.length) throw new Error('no inner bend handle to pick');
+      const refused: string[] = [];
+      for (const { index } of corners) {
+        // Handles move when the board is redrawn, so find this one again.
+        const corner = await page.eval<{ x: number; y: number } | null>(`__e3d.handles().find((h) => h.kind === 'bend' && h.index === ${index}) ?? null`);
+        if (!corner) continue;
+        await page.mouse('mousePressed', corner.x, corner.y);
+        await page.mouse('mouseReleased', corner.x, corner.y);
+        await sleep(300);
+        await page.key('Delete', 'Delete');
+        if (await settles(page, `__e3d.routes()[${hit.index}].length - 2 === ${start}`, 4000)) break;
+        refused.push(`bend ${index}: ${await lastToast(page)}`);
+        await page.until(`!document.getElementById('toast')`, 'the toast to fade', 8000);
+      }
+      if (!(await page.eval<boolean>(`__e3d.routes()[${hit.index}].length - 2 === ${start}`))) throw new Error(`Delete did not take the pair out of ${hit.key} (${refused.join('; ')})`);
     } finally {
       await arcWires(id);
     }
