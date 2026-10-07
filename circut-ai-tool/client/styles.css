@@ -703,12 +703,39 @@ header .back:hover {
 /* ---------- legend ---------- */
 
 .legend {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
   gap: 2px 4px;
   margin-top: 10px;
   font-family: var(--font-mono);
   font-size: 12px;
+}
+
+.legend > * {
+  flex: none;
+}
+
+.legend .legend-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px 0 2px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.legend .legend-label .i {
+  width: 14px;
+  height: 14px;
+}
+
+.legend > span[data-legend] {
+  max-width: 14ch;
+  box-sizing: content-box;
 }
 
 .legend span {

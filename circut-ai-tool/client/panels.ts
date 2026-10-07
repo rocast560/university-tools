@@ -8,6 +8,8 @@ import type { ResistorKind } from '../src/parts/resistor.ts';
 import type { Highlight, PartGroup } from '../src/render/index.ts';
 import { partIcon } from './part-icons.ts';
 import { showBar } from './showbar.ts';
+import { icon } from './icons.ts';
+import { shortNet } from '../src/ui/netname.ts';
 import type { AnalogState } from '../src/sim/analog/simulator.ts';
 import { runTest, switchesForTest, type SimTest } from '../src/sim/tests.ts';
 import { analog } from './analog.ts';
@@ -286,10 +288,14 @@ export function renderPanels(panels: HTMLElement, toolbar: HTMLElement, legend: 
     `<span class="statuschip"><b>${esc(p.doc.board.kind)} board</b><i class="dot"></i>${p.doc.wires.length} wires<i class="dot"></i><em class="errs ${errs ? 'is-bad' : 'is-ok'}">${errs} ${errs === 1 ? 'error' : 'errors'}</em></span>`;
   legend.innerHTML =
     showBar(p.partGroup ?? null) +
-    flowOrder(p.doc)
-    .map((net) => [net, p.doc.nets[net]] as const)
-    .map(([net, info]) => `<span data-legend="${esc(net)}" title="click to recolour"><i style="background:${esc(info.color)}"></i><span>${esc(info.name)}</span></span>`)
-    .join('');
+    `<b class="legend-label">${icon('chevron')}Nets</b>` +
+    (() => {
+      const order = flowOrder(p.doc);
+      return order
+        .map((net) => [net, p.doc.nets[net]] as const)
+        .map(([net, info]) => `<span data-legend="${esc(net)}" title="${esc(info.name)} (click to recolour)"><i style="background:${esc(info.color)}"></i><span>${esc(shortNet(net, order))}</span></span>`)
+        .join('');
+    })();
   watchFullscreen(() => {
     fitView(document.getElementById('board')!);
     renderPanels(panels, toolbar, legend, store.get());
