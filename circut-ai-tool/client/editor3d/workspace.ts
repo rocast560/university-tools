@@ -17,6 +17,7 @@ import { currentHighlight } from '../board.ts';
 import { showBar } from '../showbar.ts';
 import type { PartGroup } from '../../src/render/index.ts';
 import { flowOrder } from '../floworder.ts';
+import { shortNet } from '../../src/ui/netname.ts';
 import { esc, toast } from '../main.ts';
 import { icon, type IconName } from '../icons.ts';
 import { simState } from '../simstate.ts';
@@ -102,7 +103,11 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
     `<button type="button" class="ws-btn icon-only" data-ws="undo" title="Undo (Ctrl+Z)" aria-label="Undo" disabled>${icon('undo')}</button><button type="button" class="ws-btn icon-only" data-ws="redo" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled>${icon('redo')}</button>` +
     '<span class="ws-hint"></span></div>' +
     '<div class="ws-canvas"></div>' +
-    `<div class="ws-legend">${showBar(p.partGroup ?? null)}${flowOrder(p.doc).map((net) => `<span data-legend="${esc(net)}" title="click to follow this net"><i style="background:${esc(p.doc.nets[net].color)}"></i><span>${esc(p.doc.nets[net].name)}</span></span>`).join('')}</div>`;
+    // One row: the Show filter, then the nets with short names (full name in the tooltip) scrolling sideways.
+    `<div class="ws-legend">${showBar(p.partGroup ?? null)}<div class="ws-nets">${(() => {
+      const order = flowOrder(p.doc);
+      return order.map((net) => `<span data-legend="${esc(net)}" title="${esc(p.doc.nets[net].name)} (click to follow this net)"><i style="background:${esc(p.doc.nets[net].color)}"></i><span>${esc(shortNet(net, order))}</span></span>`).join('');
+    })()}</div></div>`;
   document.body.appendChild(root);
   document.body.classList.add('ws-open');
   const canvasHost = root.querySelector<HTMLElement>('.ws-canvas')!;
@@ -345,6 +350,17 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
     });
     legend.addEventListener('mouseover', (e) => board.setHover((e.target as HTMLElement).closest<HTMLElement>('[data-legend]')?.dataset.legend ?? null));
     legend.addEventListener('mouseleave', () => board.setHover(null));
+    // A plain mouse wheel over the net row scrolls it sideways.
+    const nets = legend.querySelector<HTMLElement>('.ws-nets')!;
+    nets.addEventListener(
+      'wheel',
+      (e) => {
+        if (Math.abs(e.deltaY) <= Math.abs(e.deltaX) || nets.scrollWidth <= nets.clientWidth) return;
+        nets.scrollLeft += e.deltaY;
+        e.preventDefault();
+      },
+      { passive: false },
+    );
 
     // Keys: later tasks register handlers; these are the shell's own, tried last.
     const onKey = (e: KeyboardEvent) => {

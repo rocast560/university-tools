@@ -1154,7 +1154,7 @@ const SCENARIOS: Record<string, (page: CDP, id: string) => Promise<void>> = {
       await page.until(`document.fullscreenElement`, 'full screen');
       await page.eval(`document.querySelector('[data-fs-size=compact]').click()`);
       await page.until(`document.querySelector('.board-card').dataset.chrome === 'compact'`, 'compact controls');
-      await page.until(`(() => { const t = document.getElementById('toolbar'); const r = t.getBoundingClientRect(); return t.scrollWidth > t.clientWidth + 20 && r.top > innerHeight / 2 && r.bottom <= innerHeight; })()`, 'a one-line toolbar wider than the screen, under the board');
+      await page.until(`(() => { const t = document.getElementById('toolbar'); const r = t.getBoundingClientRect(); return t.scrollWidth > t.clientWidth + 20 && r.top >= 0 && r.bottom <= innerHeight; })()`, 'a one-line toolbar wider than the screen');
       await page.eval(`(() => { const t = document.getElementById('toolbar'); t.scrollLeft = t.scrollWidth; })()`);
       await sleep(300);
       const scrolled = await page.eval<number>(`document.getElementById('toolbar').scrollLeft`);

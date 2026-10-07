@@ -1,5 +1,5 @@
 // Right-hand panels (guide, parts, pinouts, checks, truth table, options),
-// the toolbar under the board and the net legend. Pure "state to HTML" with
+// the toolbar above the board and the net legend below it. Pure "state to HTML" with
 // delegated event handlers.
 
 import { displayName } from '../src/netlist.ts';

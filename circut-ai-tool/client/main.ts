@@ -180,7 +180,7 @@ function renderProject(s: AppState) {
     close3d();
     app.replaceChildren(h(`<main class="project" data-id="${p.id}">
       <header class="appbar"><a href="#/" class="brand" title="All projects" aria-label="BenchMate, all projects">${icon('brand')}<span>Bench<span class="brand-mate">Mate</span></span></a><h1 class="proj-name" title="${esc(p.path)}">${esc(p.name)}</h1><div class="spacer"></div><a class="btn" href="#/connect">${icon('connect')}Connect</a>${themeButton(s.theme)}</header>
-      <div class="layout ${localStorage.getItem('panelsCollapsed') === '1' ? 'collapsed' : ''}"><section class="boardcol"><div class="board-card"><div class="board-stage"><div id="board"></div><div id="boardfloat" class="board-float" role="group" aria-label="Show"></div></div><div id="toolbar" class="toolbar"></div><div id="legend" class="legend"></div></div></section><aside id="panels" class="panels"></aside></div></main>`));
+      <div class="layout ${localStorage.getItem('panelsCollapsed') === '1' ? 'collapsed' : ''}"><section class="boardcol"><div class="board-card"><div id="toolbar" class="toolbar"></div><div class="board-stage"><div id="board"></div><div id="boardfloat" class="board-float" role="group" aria-label="Show"></div></div><div id="legend" class="legend"></div></div></section><aside id="panels" class="panels"></aside></div></main>`));
     boardUnmount = mountBoard(app.querySelector('#board')!);
     mountFullscreenChrome(app.querySelector<HTMLElement>('.board-card')!);
     // The button is swapped on each render (its icon follows the theme), so the click is delegated.

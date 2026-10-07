@@ -1,7 +1,8 @@
-// Full screen gives the window to the breadboard. Everything under the board
-// (toolbar, Show row, net legend) can be full size, compact (one line each,
-// the legend scrolled sideways) or hidden, from a small switcher floating in
-// the board's corner or with H. The choice is remembered.
+// Full screen gives the window to the breadboard. The controls around it
+// (toolbar above, Show row, net legend below) can be full size, compact (one
+// line each, the legend scrolled sideways) or hidden, from a small switcher
+// floating in the board's bottom-right corner or with H. The choice is
+// remembered.
 
 import { icon } from './icons.ts';
 
@@ -42,10 +43,11 @@ export function mountFullscreenChrome(card: HTMLElement): void {
   const bar = document.createElement('div');
   bar.className = 'fs-chrome';
   bar.setAttribute('role', 'group');
-  bar.setAttribute('aria-label', 'Controls under the board');
-  bar.title = 'Controls under the board · H hides or shows them';
+  bar.setAttribute('aria-label', 'Controls around the board');
+  bar.title = 'Controls around the board · H hides or shows them';
   bar.innerHTML = `<span>${icon('options')}Controls</span>${LABELS.map(([s, label]) => `<button type="button" data-fs-size="${s}">${label}</button>`).join('')}`;
-  card.appendChild(bar);
+  // In the board's stage, so it sits in the well's bottom strip opposite the Show filter, clear of the toolbar above.
+  (card.querySelector('.board-stage') ?? card).appendChild(bar);
 
   const apply = (next: ChromeSize) => {
     size = next;

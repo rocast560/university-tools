@@ -557,7 +557,7 @@ header .back:hover {
   padding: 12px;
 }
 
-/* Full screen: the board fills the height, with the toolbar and legend still beneath it. */
+/* Full screen: the board fills the height, with the toolbar still above it and the legend beneath. */
 .board-card:fullscreen {
   display: flex;
   flex-direction: column;
@@ -2644,19 +2644,36 @@ body.ws-open { overflow: hidden; }
 .ws-step { max-width: 34ch; padding: 0 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font-size: 12px; }
 .ws-hint { margin-left: auto; color: var(--ink-2); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .ws-canvas { position: relative; min-height: 0; }
+/* One row along the bottom edge: the Show filter, then the nets scrolling
+   sideways, the same treatment as the flat board's net strip. */
 .ws-legend {
   position: fixed;
   left: 12px;
   bottom: 12px;
   z-index: 51;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  align-items: center;
   gap: 4px;
-  max-width: min(60vw, 720px);
+  max-width: calc(100vw - 24px);
   font-family: var(--font-mono);
   font-size: 12px;
 }
-.ws-legend span[data-legend] { display: inline-flex; align-items: center; gap: 5px; padding: 2px 7px; border-radius: var(--r-md); border: 1px solid var(--line); background: color-mix(in srgb, var(--card) 88%, transparent); cursor: pointer; }
+.ws-legend .showbar { flex: none; }
+.ws-nets {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  padding: 2px 0;
+}
+.ws-nets > * { flex: none; }
+.ws-legend span[data-legend] { display: inline-flex; align-items: center; gap: 5px; max-width: 18ch; box-sizing: content-box; padding: 2px 7px; border-radius: var(--r-md); border: 1px solid var(--line); background: color-mix(in srgb, var(--card) 88%, transparent); cursor: pointer; }
+.ws-legend span[data-legend] > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-legend span[data-legend]:hover { background: var(--card); border-color: var(--quiet); }
 .ws-legend span[data-legend].is-on { background: var(--accent-soft); border-color: var(--quiet); color: var(--ok); }
 .ws-legend i { width: 14px; height: 5px; border-radius: 3px; display: inline-block; flex: none; box-shadow: 0 0 0 1px var(--line); }
@@ -2751,8 +2768,8 @@ body.ws-open { overflow: hidden; }
 }
 .board-card:fullscreen .fs-chrome {
   position: absolute;
-  top: 10px;
-  right: 12px;
+  bottom: 10px;
+  right: 10px;
   z-index: 6;
   display: flex;
   align-items: center;
@@ -2804,7 +2821,7 @@ body.ws-open { overflow: hidden; }
 .board-card:fullscreen[data-chrome='compact'] #toolbar {
   flex-wrap: nowrap;
   overflow-x: auto;
-  margin-top: 6px;
+  margin: 0 0 6px;
   scrollbar-width: thin;
 }
 .board-card:fullscreen[data-chrome='compact'] #toolbar > * {
@@ -2926,11 +2943,11 @@ header.appbar .btn {
   opacity: 0.7;
 }
 
-/* One row of grouped controls; groups are divided by a hairline, not boxed. */
+/* One row of grouped controls above the board; groups are divided by a hairline, not boxed. */
 .toolbar {
   flex-wrap: wrap;
   gap: 4px;
-  margin-top: 8px;
+  margin: 0 0 8px;
   padding: 0;
 }
 .toolbar .tgroup {
@@ -3056,16 +3073,14 @@ header.appbar .btn {
   background: var(--sunken);
 }
 
-/* The Show filter floats over the board's bottom-left corner. The well gets a
-   strip of its own below the board for it, so it never covers holes or parts. */
+/* The Show filter floats over the board's bottom-left corner (and, in full
+   screen, the Controls switcher over the bottom-right). The well gets a strip
+   of its own below the board for them, so they never cover holes or parts. */
 .board-stage {
   position: relative;
 }
 .board-stage #board {
   padding-bottom: 48px;
-}
-.board-card:fullscreen[data-chrome='hidden'] .board-stage #board {
-  padding-bottom: 6px;
 }
 .board-card:fullscreen .board-stage {
   flex: 1;
