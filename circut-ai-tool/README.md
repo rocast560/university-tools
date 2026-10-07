@@ -102,6 +102,42 @@ the schematic. Saving the schematic in KiCad reloads the board.
 
 Press **3D** on a project to open the full-screen 3D editor. Click a part to select it, then drag it to new holes, turn it (R), flip a chip (Shift+R), edit its value or delete it from the card beside it, and press F to fly to it. The **Detail** button switches between real KiCad part bodies and simple shapes. With square wires, click a jumper to reshape it by its handles or recolour its net (keys 1 to 9). Ctrl+Z undoes layout changes. A parts tray (press / to search) adds parts: drag a tile onto a hole, or tap it and click one. The wire tool (W) draws a jumper that joins a loose leg to a net, and D duplicates the selected part. Tray drops, jumpers, duplicates and deletes edit the schematic after a backup and are not on Ctrl+Z. See [docs/editor3d.md](docs/editor3d.md). Agents working on the code should read [AGENTS.md](AGENTS.md).
 
+## Look and feel
+
+The interface uses flat surfaces on a neutral dark gray (`#18191B` page,
+`#1F2022` cards), 1px borders and one accent colour. The palette:
+
+| Colour | Hex | Used for |
+|---|---|---|
+| teal | `#39AEA9` | primary buttons, the selected tab, focus rings, progress |
+| mint | `#A2D5AB` | success text, "on" states, 0 errors |
+| slate | `#557B83` | outlines of toggled-on buttons, secondary marks |
+| cream | `#E5EFC1` | rare emphasis, such as notices |
+
+Light mode (the moon/sun button in the app bar) uses the same layout on an
+off-white page with white cards. Teal and mint are darkened there
+(`#1F7C78`, `#2E7D53`) so text on them stays readable. Printing always uses
+a white page. The 3D editor stays dark in both modes.
+
+- Colour tokens live in `client/styles.css`: the `:root` block (light), the
+  `:root[data-theme="dark"]` block, and a copy of the dark values on `.ws`
+  for the 3D editor.
+- Icons are inline line SVGs in `client/icons.ts`.
+- Wire, LED and board colours, and the dark well behind the board, are left
+  out of the theme on purpose: they carry meaning or are tuned so a lit LED
+  reads as lit.
+- `test/ui-contrast.test.ts` checks the WCAG contrast of the main token pairs
+  in both modes (4.5:1 for text, 3:1 for UI marks) and that the `.ws` and
+  `prefers-color-scheme` blocks match the dark theme.
+
+Screenshots (lab 6 test fixture) are in [docs/img/ui](docs/img/ui):
+
+| | |
+|---|---|
+| ![Home](docs/img/ui/home.png) | ![Lab 6, dark](docs/img/ui/lab6-2d-dark.png) |
+| ![Lab 6, light](docs/img/ui/lab6-2d-light.png) | ![Lab 6 in the 3D editor](docs/img/ui/lab6-3d-editor.png) |
+| ![Full screen, compact controls](docs/img/ui/fullscreen-compact.png) | ![Print preview](docs/img/ui/print.png) |
+
 ## Run in Docker
 
     docker compose up --build -d      # http://localhost:8765, restarts with Docker Desktop
