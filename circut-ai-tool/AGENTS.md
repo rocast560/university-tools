@@ -14,11 +14,17 @@ Guidance for AI coding agents working in this directory. People should start wit
 - `src/edit/placement.ts`: pure placement rules (validity, shorts, rotate, flip). Shared by the 3D editor and future tools.
 - `server/`: Hono API (`server/api.ts`), `Service` (`server/service.ts`), MCP server (`server/mcp.ts`).
 - `client/`: vanilla TS SPA. `board.ts` is the flat board; `board3d.ts` and `board3d-parts.ts` are the three.js scene.
-- `src/render/route3d.ts`: pure router for square wires: A* over a half-pitch lattice, lane packing, rip-up rounds, humps at crossings (each one diameter over the lower wire's own height there; `rise` and `riseBreaks` are the hump shape, shared with the tube), saved shapes (`pathToPlan`, `planToPath`, `shapePlan`, `simplify`). `ortho.ts` is only its fallback.
+- `src/render/route3d.ts`: pure router for square wires: A* over a half-pitch lattice, lane packing, rip-up rounds, humps wherever two wires meet, crossing, at a shared corner or along a shared stretch (`hopHeight`: one diameter plus `AIR_Z` clear of the lower wire all round, its own humps included; `rise` and `riseBreaks` are the hump shape, shared with the tube), stacked boards (each board's own wires on that board, then the joining wires shortest first on one lattice of the whole stack, a lane clear of the rest, hopping over what they cross), saved shapes (`pathToPlan`, `planToPath`, `shapePlan`, `simplify`). `ortho.ts` is only its fallback.
+- `src/render/centreline.ts`: the 3D centre line of a flat jumper (up out of the hole, the humps, filleted corners, down into the other hole). The tube and the clearance check both draw from it.
+- `src/render/clearance.ts`: `clipPairs` and `centreLines`, which measure every pair of jumpers capsule to capsule; tests hold the router to it on whole boards.
+- `src/models/manifest.ts`: pure maths for the KiCad part models: the manifest type and its check, `modelKeyFor`, the frame fit, and `bodyPlacement` (centre on all the pins, turn by pins 1 to 2, squeeze across the rows to the drawn gap).
+- `scripts/build-models.ts`: `bun run models`, which turns the KiCad 3D models into leg-free GLBs and `public/models/manifest.json`. Needs a local KiCad 9; the output is committed.
 - `src/edit/wireshape.ts`: pure hand edits to a wire plan (handles, snap, move a run or a bend, add or remove a bend pair).
 - `client/wiretube-math.ts` (pure) and `client/wiretube.ts` (three.js): the flat jumper tube. Frames are computed on the full line, bends are filleted in 15 degree steps (ramp corners under 45 degrees are left sharp), jacket 10 sides, tin 8.
+- `client/models.ts`: loads the GLBs in `manifest.json` once (never rejects; a failed model is left out with a warning). `board3d-parts.ts` mounts them, falling back to the simple shapes.
 - `client/editor3d/`: the 3D editor.
-  - `workspace.ts`: the shell and key routing.
+  - `workspace.ts`: the shell, key routing and the Detail toggle.
+  - `modelcache.ts`: the one shared model load; a failed load is no models and is not kept.
   - `manipulate.ts`: select, drag, rotate and flip.
   - `card.ts`: the part card.
   - `wireEdit.ts`: wire selection, handles, the wire card, reshape and recolour commands.

@@ -27,6 +27,7 @@ import { P, ROWY, tierCols, tierCount, TIER_PITCH, tierShift, X0 } from '../src/
 import { wireControls } from '../src/render/routing.ts';
 import { routeWires, WIRE_R, type Point as PlanPoint, type WireRoute } from '../src/render/route3d.ts';
 import type { AnalogState } from '../src/sim/analog/simulator.ts';
+import type { ModelSet } from './models.ts';
 import { at, BOARD_THICK, buildPackage, buildPart, grainMap, holeX, holeZ, Kit, MM, routeWire, seededRandom, setHoleBoard, TOP, tube, WIRE_CLEARANCE, WIRE_END_Y, type LedLamp, type Obstacle, type SevenSegLamp, type Way } from './board3d-parts.ts';
 import { easeOutCubic, frameBox } from './editor3d/focus-math.ts';
 import { flyControls } from './fly.ts';
@@ -179,6 +180,8 @@ export interface Board3D {
   readonly flying: boolean;
   /** Swap every part, package and wire for those of `doc` (and the jumper style, when given); renderer, lights and camera stay. */
   rebuild(doc: LayoutDoc, wireStyle?: 'arc' | 'orthogonal'): void;
+  /** Swap the loaded part models and rebuild in place, keeping selection, hover and the held highlight. */
+  setModels(models: ModelSet | null): void;
   /** What is under a pointer event: a switch, a part or a jacket, in that order. */
   pick(e: { clientX: number; clientY: number }): Pick;
   /** The pointer projected onto the board's top surface, in plan (SVG) units [x, y]. */
@@ -223,6 +226,8 @@ export interface Board3D {
 }
 
 export interface Board3DOptions {
+  /** Loaded KiCad part bodies, when available. */
+  models?: ModelSet | null;
   /** Called when a switch on the board is clicked, with its board-wide key. */
   onToggle?(key: string): void;
   /** The net under the pointer, or null when the pointer leaves the wires. */
@@ -416,6 +421,7 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
   // `build` reads the jumper style from this, not from opts, so a style
   // change is a rebuild rather than a remount.
   let wireStyle = opts.wireStyle ?? 'arc';
+  let models: ModelSet | null = opts.models ?? null;
   function build(doc: LayoutDoc): Content {
     const kit = new Kit();
     const M = kit.M;
@@ -484,7 +490,7 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
     };
 
     for (const pkg of doc.packages) {
-      const built = buildPackage(kit, pkg, doc);
+      const built = buildPackage(kit, pkg, doc, models);
       root.add(built.object);
       tag(built.object, pkg.id);
       ways.push(...built.ways);
@@ -497,7 +503,7 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
 
     const leds = new Map<string, LedLamp>();
     for (const part of doc.parts) {
-      const built = buildPart(kit, part, doc);
+      const built = buildPart(kit, part, doc, models);
       root.add(built.object);
       tag(built.object, part.id);
       obstacles.push(built.obstacle);
@@ -1248,6 +1254,10 @@ export function mount3d(container: HTMLElement, doc: LayoutDoc, opts: Board3DOpt
       paintBoard();
     },
     rebuild,
+    setModels(next) {
+      models = next;
+      rebuild(c.doc);
+    },
     pick,
     boardPoint,
     setSelected,

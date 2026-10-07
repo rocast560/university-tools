@@ -23,6 +23,8 @@ import { archY, MAX_ARCH, WIRE_END_Y } from '../src/render/altitude.ts';
 import { P, placeAt, ROWY, tierShift } from '../src/render/geometry.ts';
 import type { BoardSpec } from '../src/layout/types.ts';
 import { positionKey } from '../src/render/index.ts';
+import type { ModelSet } from './models.ts';
+import { bodyPlacement, modelKeyFor, type ModelInfo, type ModelKey, type Placement } from '../src/models/manifest.ts';
 
 /** 1 mm in board units: one 0.1 inch pitch is 18 units. */
 export const MM = P / 2.54;
@@ -281,6 +283,118 @@ function spanMatrix(m: THREE.Matrix4, a: THREE.Vector3, b: THREE.Vector3, w: num
   return m.compose(a.clone().add(b).multiplyScalar(0.5), q, v3(w, len, t));
 }
 
+/** One run of instanced legs, a box per segment of each path, in the kit's leg metal. */
+function legRuns(kit: Kit, paths: [number, number, number][][]): THREE.InstancedMesh {
+  const count = paths.reduce((n, p) => n + p.length - 1, 0);
+  const legs = kit.keep(new THREE.InstancedMesh(kit.keep(new THREE.BoxGeometry(1, 1, 1)), kit.M.leg, count));
+  legs.castShadow = true;
+  const m4 = new THREE.Matrix4();
+  let i = 0;
+  for (const path of paths) for (let k = 0; k + 1 < path.length; k++) legs.setMatrixAt(i++, spanMatrix(m4, v3(...path[k]), v3(...path[k + 1]), 3.4, 2));
+  legs.instanceMatrix.needsUpdate = true;
+  return legs;
+}
+
+/**
+ * A DIP leg: out of the body side facing its hole, angled down to a knee over
+ * the hole, then straight into the socket. Pure, so it can be tested.
+ */
+export function dipLegPath(hole: { x: number; z: number }, cz: number, halfZ: number, yBottom: number, bodyH: number): [number, number, number][] {
+  const side = Math.sign(hole.z - cz) || 1;
+  return [
+    [hole.x, yBottom + bodyH * 0.42, cz + side * halfZ],
+    [hole.x, yBottom + bodyH * 0.08, hole.z],
+    [hole.x, TOP - 5, hole.z],
+  ];
+}
+
+// ---------- KiCad model bodies ----------
+
+/** A model box after placement, in board units: what it covers and how tall it stands. */
+export interface PlacedBox {
+  x0: number;
+  x1: number;
+  y0: number;
+  y1: number;
+  z0: number;
+  z1: number;
+}
+
+/**
+ * Where a model's box (millimetres, model frame) lands on the board once the
+ * model is scaled by `mm` (and squeezed by `sx`/`sz` across its rows), turned
+ * by `rotationY` and moved to (x, y, z), y being TOP unless the part stands
+ * off the board. Pure, so the body extents never rest on a guess about the model's axes.
+ */
+export function placedBox(info: ModelInfo, p: { x: number; z: number; rotationY: number; sx?: number; sz?: number; y?: number }, mm: number, box: ModelInfo['box'] = info.box): PlacedBox {
+  const c = Math.cos(p.rotationY);
+  const s = Math.sin(p.rotationY);
+  const sx = p.sx ?? 1;
+  const sz = p.sz ?? 1;
+  const y = p.y ?? TOP;
+  const xs: number[] = [];
+  const zs: number[] = [];
+  for (const x0 of [box.min[0], box.max[0]])
+    for (const z0 of [box.min[2], box.max[2]]) {
+      const x = x0 * sx;
+      const z = z0 * sz;
+      xs.push(p.x + (x * c + z * s) * mm);
+      zs.push(p.z + (-x * s + z * c) * mm);
+    }
+  return { x0: Math.min(...xs), x1: Math.max(...xs), y0: y + box.min[1] * mm, y1: y + box.max[1] * mm, z0: Math.min(...zs), z1: Math.max(...zs) };
+}
+
+/** A model body placed on its holes, with each mesh's own box (model frame, mm) for picking out its parts. */
+interface Mounted {
+  object: THREE.Object3D;
+  info: ModelInfo;
+  place: Placement & { y: number };
+  box: PlacedBox;
+  meshes: { mesh: THREE.Mesh; box: THREE.Box3 }[];
+}
+
+/**
+ * Clone the model for `key` and stand it on the two holes given for its pads
+ * `padA` and `padB`, or, given every pin's hole in `holes`, centred on them all
+ * and squeezed across its rows to fit them (see bodyPlacement). `lift` stands
+ * it off the board. Null when there is no model, so the caller draws today's shape.
+ *
+ * The clone shares its geometry and materials with every other clone, so
+ * nothing of the model's goes into the kit (a rebuild would free it under the
+ * others) and its materials are only ever replaced, never edited.
+ */
+function mountModel(models: ModelSet | null | undefined, key: ModelKey | null, holeA: [number, number] | undefined, holeB: [number, number] | undefined, holes?: Record<string, [number, number]>, lift = 0, padA = '1', padB = '2'): Mounted | null {
+  if (!models || !key || !holeA || !holeB) return null;
+  const m = models.body(key);
+  if (!m || !m.info.pads[padA] || !m.info.pads[padB]) return null;
+  const place = { ...bodyPlacement(m.info, padA, padB, holeA, holeB, MM, holes), y: TOP + lift };
+  m.object.updateMatrixWorld(true);
+  const meshes: Mounted['meshes'] = [];
+  m.object.traverse((o) => {
+    if (!(o instanceof THREE.Mesh)) return;
+    o.castShadow = true;
+    o.receiveShadow = true;
+    meshes.push({ mesh: o, box: new THREE.Box3().setFromObject(o) });
+  });
+  m.object.scale.set(MM * place.sx, MM, MM * place.sz);
+  m.object.rotation.y = place.rotationY;
+  m.object.position.set(place.x, place.y, place.z);
+  return { object: m.object, info: m.info, place, box: placedBox(m.info, place, MM), meshes };
+}
+
+/** The meshes standing on top of a model (a display's segments, a switch's sliders): their bottom is in its top quarter. */
+const isTopPiece = (m: Mounted, box: THREE.Box3) => box.min.y > m.info.box.max[1] * 0.75;
+
+/** A Box3 of model-frame millimetres as a manifest box. */
+const asBox = (b: THREE.Box3): ModelInfo['box'] => ({ min: [b.min.x, b.min.y, b.min.z], max: [b.max.x, b.max.y, b.max.z] });
+
+/** The holes of a package's pins 1 and 2, then of every pin, as [x, z]. */
+function pinHolesXZ(doc: LayoutDoc, id: string): [[number, number] | undefined, [number, number] | undefined, Record<string, [number, number]>] {
+  const h = doc.pinHoles[id] ?? {};
+  const all = Object.fromEntries(Object.entries(h).map(([pin, hole]) => [pin, [holeX(hole), holeZ(hole)]])) as Record<string, [number, number]>;
+  return [all['1'], all['2'], all];
+}
+
 /** A cylinder running from a to b: leads, wire cores, resistor bands. */
 export function tube(kit: Kit, a: THREE.Vector3, b: THREE.Vector3, r: number, m: THREE.Material, seg = 10): THREE.Mesh {
   const len = a.distanceTo(b) || 0.01;
@@ -379,9 +493,9 @@ export interface BuiltPackage {
  * rather than from a formula, so a pin can only be drawn where the flat board
  * and the build guide already say it is.
  */
-export function buildPackage(kit: Kit, pkg: Package, doc: LayoutDoc): BuiltPackage {
+export function buildPackage(kit: Kit, pkg: Package, doc: LayoutDoc, models?: ModelSet | null): BuiltPackage {
   if (pkg.kind === 'module') return buildModule(kit, pkg, doc);
-  if (pkg.kind === 'sevenseg') return buildSevenSeg(kit, pkg, doc);
+  if (pkg.kind === 'sevenseg') return buildSevenSeg(kit, pkg, doc, models);
   const group = new THREE.Group();
   const pins = Object.entries(doc.pinHoles[pkg.id] ?? {});
   if (!pins.length) return { object: group, ways: [], top: TOP };
@@ -389,6 +503,8 @@ export function buildPackage(kit: Kit, pkg: Package, doc: LayoutDoc): BuiltPacka
   const x0 = Math.min(...xs);
   const x1 = Math.max(...xs);
   const dip = pkg.kind === 'dipswitch';
+  const model = mountModel(models, modelKeyFor(pkg.kind, undefined, pkg.pins, pkg.positions), ...pinHolesXZ(doc, pkg.id));
+  if (model) return packageFromModel(kit, pkg, doc, model, pins, x0, x1, dip);
   // A DIP switch case is wider than its pin rows (9.8 mm over 7.62) and runs
   // about 2.3 mm past the end ways; a chip's epoxy sits inside its rows.
   const halfZ = dip ? DIP_SWITCH_HALF_Z : BODY_HALF_Z;
@@ -407,21 +523,59 @@ export function buildPackage(kit: Kit, pkg: Package, doc: LayoutDoc): BuiltPacka
   else group.add(markingPlane(kit, chipMarking(kit, pkg, doc, length), length, BODY_HALF_Z * 2, cx, yTop + 0.15, cz));
 
   // Legs: out of the body side, angled down, then straight into the socket.
-  const legs = kit.keep(new THREE.InstancedMesh(kit.keep(new THREE.BoxGeometry(1, 1, 1)), kit.M.leg, pins.length * 2));
-  legs.castShadow = true;
-  const m4 = new THREE.Matrix4();
-  pins.forEach(([, hole], i) => {
-    const x = holeX(hole);
-    const z = holeZ(hole);
-    const side = Math.sign(z - cz) || 1;
-    const shoulder = v3(x, yBottom + BODY_H * 0.42, cz + side * halfZ);
-    const knee = v3(x, yBottom + BODY_H * 0.08, z);
-    legs.setMatrixAt(i * 2, spanMatrix(m4, shoulder, knee, 3.4, 2));
-    legs.setMatrixAt(i * 2 + 1, spanMatrix(m4, knee, v3(x, TOP - 5, z), 3.4, 2));
-  });
-  legs.instanceMatrix.needsUpdate = true;
-  group.add(legs);
+  group.add(legRuns(kit, pins.map(([, hole]) => dipLegPath({ x: holeX(hole), z: holeZ(hole) }, cz, halfZ, yBottom, BODY_H))));
   return { object: group, ways, top: yTop + (dip ? 3 : 0.5) };
+}
+
+/**
+ * A chip or DIP switch on its KiCad body. The body is the model's; the print,
+ * the switch's sliders and the legs are still drawn here, sized from the
+ * model's own box so they sit on it and run from its sides.
+ */
+function packageFromModel(kit: Kit, pkg: Package, doc: LayoutDoc, model: Mounted, pins: [string, Hole][], x0: number, x1: number, dip: boolean): BuiltPackage {
+  const group = new THREE.Group();
+  const b = model.box;
+  let yTop = b.y1;
+  for (const { mesh, box } of model.meshes) {
+    if (dip && isTopPiece(model, box)) {
+      // The model's own sliders are frozen in one position; the code's flick.
+      mesh.visible = false;
+      continue;
+    }
+    mesh.material = dip ? kit.M.dipCase : kit.M.epoxy;
+  }
+  if (dip) {
+    const kept = model.meshes.filter((m) => m.mesh.visible).map((m) => m.box.max.y);
+    if (kept.length) yTop = TOP + Math.max(...kept) * MM;
+  }
+  group.add(model.object);
+  const cx = (b.x0 + b.x1) / 2;
+  const cz = (b.z0 + b.z1) / 2;
+  const halfZ = (b.z1 - b.z0) / 2;
+  const length = b.x1 - b.x0;
+  const yBottom = b.y0;
+  const bodyH = yTop - yBottom;
+
+  const ways: Way[] = [];
+  if (dip) for (const o of dipSwitchTop(kit, pkg, x0, x1, cz, yTop, ways)) group.add(o);
+  // The print keeps today's size: the model's top face is narrower than its box, which counts the moulding draft.
+  else group.add(markingPlane(kit, chipMarking(kit, pkg, doc, length), length, BODY_HALF_Z * 2, cx, yTop + 0.15, cz));
+
+  // A leg whose hole is under the body (a DIP switch's case is wider than its
+  // rows) drops straight from it; the rest leave the side facing their hole.
+  group.add(
+    legRuns(
+      kit,
+      pins.map(([, hole]): [number, number, number][] => {
+        const x = holeX(hole);
+        const z = holeZ(hole);
+        if (Math.abs(z - cz) < halfZ) return [[x, yBottom + bodyH * 0.3, z], [x, TOP - 5, z]];
+        return dipLegPath({ x, z }, cz, halfZ, yBottom, bodyH);
+      }),
+    ),
+  );
+  const top = yTop + (dip ? 3 : 0.5);
+  return { object: group, ways, top, obstacle: { x0: b.x0, x1: b.x1, z0: b.z0, z1: b.z1, top } };
 }
 
 /**
@@ -431,7 +585,7 @@ export function buildPackage(kit: Kit, pkg: Package, doc: LayoutDoc): BuiltPacka
  * with the potted chip filling the rest. The body hangs outward from its
  * header row, over the rails and off the edge, exactly as the flat board draws it.
  */
-function buildModule(kit: Kit, pkg: Package, doc: LayoutDoc): BuiltPackage {
+function buildModule(kit: Kit, pkg: Package, doc: LayoutDoc, _models?: ModelSet | null): BuiltPackage {
   const group = new THREE.Group();
   const holes = Object.entries(doc.pinHoles[pkg.id] ?? {})
     .sort(([a], [b]) => Number(a) - Number(b))
@@ -557,6 +711,8 @@ export interface SevenSegLamp {
 
 /** Real outline of a 0.39 inch single-digit display such as the SA39-11EWA, in mm. */
 const SEG_BODY = { width: 12.7, depth: 19.0, height: 7.2, digitW: 6.2, digitH: 10.0, bar: 1.3 };
+/** A display stands this far above the board on its pins, which is what lets you see where each one goes in. */
+const SEG_STANDOFF = 2.5 * MM;
 
 /**
  * A single-digit seven-segment display at its real size: a grey epoxy block
@@ -565,35 +721,66 @@ const SEG_BODY = { width: 12.7, depth: 19.0, height: 7.2, digitW: 6.2, digitH: 1
  * drives them. The digit is upright with the decimal point on the row f side,
  * which is how the flat board and the build guide orient it.
  */
-function buildSevenSeg(kit: Kit, pkg: Package, doc: LayoutDoc): BuiltPackage {
+function buildSevenSeg(kit: Kit, pkg: Package, doc: LayoutDoc, models?: ModelSet | null): BuiltPackage {
   const group = new THREE.Group();
   const holes = Object.entries(doc.pinHoles[pkg.id] ?? {}).map(([, h]) => h);
   if (!holes.length) return { object: group, ways: [], top: TOP };
   const xs = holes.map(holeX);
-  const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
-  const cz = channelZ(pkg.col0);
-  const width = SEG_BODY.width * MM;
-  const depth = SEG_BODY.depth * MM;
-  const height = SEG_BODY.height * MM;
+  let cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+  let cz = channelZ(pkg.col0);
+  let width = SEG_BODY.width * MM;
+  let depth = SEG_BODY.depth * MM;
+  let height = SEG_BODY.height * MM;
   // A display stands a few millimetres above the board on its pins, which is
   // what lets you see where each one goes in.
-  const yBottom = TOP + 2.5 * MM;
-  const yTop = yBottom + height;
+  let yBottom = TOP + SEG_STANDOFF;
+  let yTop = yBottom + height;
+  // Where the digit is drawn, and how big: the centre of the window, then the
+  // digit's width, height and bar thickness.
+  let digit = { x: cx, z: cz, w: SEG_BODY.digitW * MM, h: SEG_BODY.digitH * MM, t: SEG_BODY.bar * MM };
 
-  const body = kit.mesh(new RoundedBoxGeometry(width, height, depth, 3, 1.2), kit.std({ color: '#8d8f94', roughness: 0.6, metalness: 0.02 }));
-  body.position.set(cx, (yBottom + yTop) / 2, cz);
-  group.add(body);
-  // The tinted window the segments sit under.
-  const win = kit.mesh(new THREE.BoxGeometry(width - 1.2 * MM, 0.3 * MM, depth - 1.2 * MM), kit.std({ color: '#2a0d0d', roughness: 0.25, metalness: 0.05 }));
-  win.position.set(cx, yTop + 0.15 * MM, cz);
-  group.add(win);
+  const model = mountModel(models, modelKeyFor(pkg.kind, undefined, pkg.pins), ...pinHolesXZ(doc, pkg.id), SEG_STANDOFF);
+  if (model) {
+    // The KiCad case in dark grey with its segment face in black glass; the
+    // lit segments are still the code's, laid on that face, so the simulator drives them.
+    let face: THREE.Box3 | null = null;
+    for (const { mesh, box } of model.meshes) {
+      const top = isTopPiece(model, box);
+      mesh.material = top ? kit.M.glass : kit.M.dark;
+      if (top) face = face ? face.union(box) : box.clone();
+    }
+    group.add(model.object);
+    const b = model.box;
+    cx = (b.x0 + b.x1) / 2;
+    cz = (b.z0 + b.z1) / 2;
+    width = b.x1 - b.x0;
+    depth = b.z1 - b.z0;
+    yBottom = b.y0;
+    yTop = b.y1;
+    height = yTop - yBottom;
+    if (face) {
+      // The model's own segments mark out the digit (the decimal point too):
+      // the code's bars go over them at the same size.
+      const f = placedBox(model.info, model.place, MM, asBox(face));
+      const t = digit.t * 1.2;
+      const h = f.z1 - f.z0 - t;
+      const w = Math.min(h * (SEG_BODY.digitW / SEG_BODY.digitH), f.x1 - f.x0 - t * 3);
+      digit = { x: (f.x0 + f.x1) / 2 - t * 0.7, z: (f.z0 + f.z1) / 2, w, h, t };
+    }
+  } else {
+    const body = kit.mesh(new RoundedBoxGeometry(width, height, depth, 3, 1.2), kit.std({ color: '#8d8f94', roughness: 0.6, metalness: 0.02 }));
+    body.position.set(cx, (yBottom + yTop) / 2, cz);
+    group.add(body);
+    // The tinted window the segments sit under.
+    const win = kit.mesh(new THREE.BoxGeometry(width - 1.2 * MM, 0.3 * MM, depth - 1.2 * MM), kit.std({ color: '#2a0d0d', roughness: 0.25, metalness: 0.05 }));
+    win.position.set(cx, yTop + 0.15 * MM, cz);
+    group.add(win);
+  }
 
   // Segment bars: a top, b upper right, c lower right, d bottom, e lower left,
   // f upper left, g middle; dp at the lower right. x runs across the board,
   // z down it, so the digit's top (segment a) faces the top rails.
-  const w = SEG_BODY.digitW * MM;
-  const h = SEG_BODY.digitH * MM;
-  const t = SEG_BODY.bar * MM;
+  const { w, h, t } = digit;
   const bars: Record<string, [number, number, number, number]> = {
     a: [0, -h / 2, w - t, t],
     g: [0, 0, w - t, t],
@@ -608,7 +795,7 @@ function buildSevenSeg(kit: Kit, pkg: Package, doc: LayoutDoc): BuiltPackage {
   for (const [seg, [dx, dz, bw, bd]] of Object.entries(bars)) {
     const mat = kit.std({ color: '#3b1414', emissive: '#ff3b1f', emissiveIntensity: 0, roughness: 0.5 });
     const bar = kit.mesh(new THREE.BoxGeometry(bw, 0.25 * MM, bd), mat);
-    bar.position.set(cx + dx, yTop + 0.4 * MM, cz + dz);
+    bar.position.set(digit.x + dx, yTop + 0.4 * MM, digit.z + dz);
     group.add(bar);
     segments[seg] = mat;
   }
@@ -828,7 +1015,7 @@ export interface BuiltPart {
 /** How far an axial body rides above the board before its leads bend down. */
 const AXIAL_LIFT = 9;
 
-export function buildPart(kit: Kit, part: PlacedPart, doc: LayoutDoc): BuiltPart {
+export function buildPart(kit: Kit, part: PlacedPart, doc: LayoutDoc, models?: ModelSet | null): BuiltPart {
   const group = new THREE.Group();
   const holes = part.holes.map((h) => at(h));
   let led: LedLamp | undefined;
@@ -837,11 +1024,11 @@ export function buildPart(kit: Kit, part: PlacedPart, doc: LayoutDoc): BuiltPart
     reach = threeLegged(kit, group, part, holes);
   } else if (part.style === 'LED') {
     const spec = doc.ledColors?.[part.id] ? ledSpecFor(doc.ledColors[part.id]) : ledSpec(part.value || 'LED');
-    const built = ledPart(kit, group, holes[0], holes[1], spec);
+    const built = ledPart(kit, group, holes[0], holes[1], spec, onHoles(models, part, holes));
     led = built.lamp;
     reach = built.reach;
   } else if (part.style === 'R') {
-    reach = resistor(kit, group, part, holes[0], holes[1], doc.resistorKind === 'metal');
+    reach = resistor(kit, group, part, holes[0], holes[1], doc.resistorKind === 'metal', onHoles(models, part, holes));
   } else {
     reach = axial(kit, group, part, holes[0], holes[1]);
   }
@@ -849,6 +1036,11 @@ export function buildPart(kit: Kit, part: PlacedPart, doc: LayoutDoc): BuiltPart
   // same key the flat board sends.
   if (part.style === 'SW' || part.style === 'BTN') group.userData.switchKey = part.id;
   return { object: group, led, obstacle: spread(holes, reach) };
+}
+
+/** A two-lead part's model, pad 1 on its first hole and pad 2 on its second. */
+function onHoles(models: ModelSet | null | undefined, part: PlacedPart, holes: THREE.Vector3[]): Mounted | null {
+  return mountModel(models, modelKeyFor(part.kind, part.style, holes.length), [holes[0].x, holes[0].z], [holes[1].x, holes[1].z]);
 }
 
 function spread(holes: THREE.Vector3[], reach: Reach): Obstacle {
@@ -867,7 +1059,8 @@ function axialLeads(kit: Kit, group: THREE.Group, a: THREE.Vector3, b: THREE.Vec
   return [ay, by];
 }
 
-function resistor(kit: Kit, group: THREE.Group, part: PlacedPart, a: THREE.Vector3, b: THREE.Vector3, metal: boolean): Reach {
+function resistor(kit: Kit, group: THREE.Group, part: PlacedPart, a: THREE.Vector3, b: THREE.Vector3, metal: boolean, model?: Mounted | null): Reach {
+  if (model) return resistorFromModel(kit, group, part, a, b, metal, model);
   const [ay, by] = axialLeads(kit, group, a, b, AXIAL_LIFT);
   const axis = by.clone().sub(ay);
   const span = axis.length();
@@ -882,9 +1075,15 @@ function resistor(kit: Kit, group: THREE.Group, part: PlacedPart, a: THREE.Vecto
   body.position.copy(centre);
   body.quaternion.copy(q);
   group.add(body);
+  colourBands(kit, group, part, metal, centre, dir, q, r, bodyLen);
+  return { top: TOP + AXIAL_LIFT + r, radius: r };
+}
 
-  // The colour code, read off the value the same way the checks read it, so
-  // the bands can never say something other than the printed value.
+/**
+ * The colour code, read off the value the same way the checks read it, so
+ * the bands can never say something other than the printed value.
+ */
+function colourBands(kit: Kit, group: THREE.Group, part: PlacedPart, metal: boolean, centre: THREE.Vector3, dir: THREE.Vector3, q: THREE.Quaternion, r: number, bodyLen: number): void {
   const bands = resistorBands(part.value, metal ? 'metal' : 'carbon');
   // The digit and multiplier bands grouped at one end, the tolerance band alone at the other.
   const offsets = bands?.length === 5 ? [-0.36, -0.24, -0.12, 0, 0.32] : [-0.34, -0.2, -0.06, 0.32];
@@ -894,21 +1093,74 @@ function resistor(kit: Kit, group: THREE.Group, part: PlacedPart, a: THREE.Vecto
     ring.quaternion.copy(q);
     group.add(ring);
   }
-  return { top: TOP + AXIAL_LIFT + r, radius: r };
 }
 
-function ledPart(kit: Kit, group: THREE.Group, cathode: THREE.Vector3, anode: THREE.Vector3, spec: LedSpec): { lamp: LedLamp; reach: Reach } {
+/**
+ * A resistor on the KiCad DIN0207 body: the leads at the height of the body's
+ * axis, the body squeezed along that axis only when the holes are too close
+ * for its 6.3 mm, and the bands sized to its radius and length.
+ */
+function resistorFromModel(kit: Kit, group: THREE.Group, part: PlacedPart, a: THREE.Vector3, b: THREE.Vector3, metal: boolean, model: Mounted): Reach {
+  const { info, place } = model;
+  const lift = ((info.box.min[1] + info.box.max[1]) / 2) * MM;
+  const [ay, by] = axialLeads(kit, group, a, b, lift);
+  const axis = by.clone().sub(ay);
+  const span = axis.length();
+  const p1 = info.pads['1'];
+  const p2 = info.pads['2'];
+  const modelLen = (info.box.max[0] - info.box.min[0]) * MM;
+  // Squeezing along the model's x is only a squeeze along the leads when the pads lie along x.
+  const bodyLen = p1[1] === p2[1] ? Math.max(2 * MM, Math.min(modelLen, span - 8)) : modelLen;
+  const k = bodyLen / modelLen;
+  if (k < 1) {
+    // Scale about the pads' midpoint, which stays on the holes' midpoint.
+    const mid = ((p1[0] + p2[0]) / 2) * MM;
+    model.object.scale.x = MM * k;
+    model.object.position.x += (1 - k) * mid * Math.cos(place.rotationY);
+    model.object.position.z -= (1 - k) * mid * Math.sin(place.rotationY);
+  }
+  for (const { mesh } of model.meshes) mesh.material = metal ? kit.M.bodyMetal : kit.M.body;
+  group.add(model.object);
+  const r = ((info.box.max[1] - info.box.min[1]) / 2) * MM;
+  const dir = axis.clone().normalize();
+  const centre = ay.clone().add(by).multiplyScalar(0.5);
+  const q = new THREE.Quaternion().setFromUnitVectors(UP, dir);
+  colourBands(kit, group, part, metal, centre, dir, q, r, bodyLen);
+  return { top: TOP + info.box.max[1] * MM, radius: r };
+}
+
+function ledPart(kit: Kit, group: THREE.Group, cathode: THREE.Vector3, anode: THREE.Vector3, spec: LedSpec, model?: Mounted | null): { lamp: LedLamp; reach: Reach } {
   // A 5 mm LED: 2.5 mm radius, a 2.9 mm flange with the cathode flat on it,
   // and about 8.5 mm from the board to the top of the dome.
   const R = 2.5 * MM;
   const flangeR = 2.9 * MM;
   const flangeH = 1 * MM;
   const barrelH = 4.6 * MM;
-  const base = TOP + 1.2 * MM;
-  const centre = cathode.clone().add(anode).multiplyScalar(0.5).setY(base);
+  let base = TOP + 1.2 * MM;
+  let centre = cathode.clone().add(anode).multiplyScalar(0.5).setY(base);
 
-  group.add(tube(kit, cathode.clone().setY(TOP - 5), cathode.clone().setY(base + flangeH * 0.6), 1.15, kit.M.tin, 8));
-  group.add(tube(kit, anode.clone().setY(TOP - 5), anode.clone().setY(base + flangeH * 0.6), 1.15, kit.M.tin, 8));
+  if (model) {
+    // KiCad stands the body 3 mm up on its legs: each leg rises from its hole
+    // and, if the holes are wider apart than the pads, bends in to its pad.
+    const b = model.box;
+    base = b.y0;
+    centre = v3((b.x0 + b.x1) / 2, base, (b.z0 + b.z1) / 2);
+    const { place, info } = model;
+    const c = Math.cos(place.rotationY);
+    const s = Math.sin(place.rotationY);
+    const pad = (n: string) => {
+      const [x, z] = info.pads[n];
+      return v3(place.x + (x * c + z * s) * MM, base + flangeH * 0.6, place.z + (-x * s + z * c) * MM);
+    };
+    for (const [hole, n] of [[cathode, '1'], [anode, '2']] as const) {
+      const knee = hole.clone().setY(base * 0.5);
+      group.add(tube(kit, hole.clone().setY(TOP - 5), knee, 1.15, kit.M.tin, 8));
+      group.add(tube(kit, knee, pad(n), 1.15, kit.M.tin, 8));
+    }
+  } else {
+    group.add(tube(kit, cathode.clone().setY(TOP - 5), cathode.clone().setY(base + flangeH * 0.6), 1.15, kit.M.tin, 8));
+    group.add(tube(kit, anode.clone().setY(TOP - 5), anode.clone().setY(base + flangeH * 0.6), 1.15, kit.M.tin, 8));
+  }
 
   const epoxy = kit.phys({
     color: spec.body,
@@ -931,13 +1183,19 @@ function ledPart(kit: Kit, group: THREE.Group, cathode: THREE.Vector3, anode: TH
   shell.position.copy(centre);
   shell.rotation.y = Math.atan2(-(cathode.z - centre.z), cathode.x - centre.x);
 
-  shell.add(kit.mesh(dFlange(flangeR, flangeR * 0.82, flangeH), epoxy));
-  const barrel = kit.mesh(new THREE.CylinderGeometry(R, R, barrelH, 32), epoxy);
-  barrel.position.y = flangeH + barrelH / 2;
-  shell.add(barrel);
-  const dome = kit.mesh(new THREE.SphereGeometry(R, 32, 20, 0, Math.PI * 2, 0, Math.PI / 2), epoxy);
-  dome.position.y = flangeH + barrelH;
-  shell.add(dome);
+  if (model) {
+    // The model's dome and flange, in this LED's epoxy, so lighting it lights them.
+    for (const { mesh } of model.meshes) mesh.material = epoxy;
+    group.add(model.object);
+  } else {
+    shell.add(kit.mesh(dFlange(flangeR, flangeR * 0.82, flangeH), epoxy));
+    const barrel = kit.mesh(new THREE.CylinderGeometry(R, R, barrelH, 32), epoxy);
+    barrel.position.y = flangeH + barrelH / 2;
+    shell.add(barrel);
+    const dome = kit.mesh(new THREE.SphereGeometry(R, 32, 20, 0, Math.PI * 2, 0, Math.PI / 2), epoxy);
+    dome.position.y = flangeH + barrelH;
+    shell.add(dome);
+  }
 
   // The lead frame you can see through the epoxy: the cathode's cup and the
   // slimmer anode post. Getting these the right way round is the difference
@@ -972,7 +1230,10 @@ function ledPart(kit: Kit, group: THREE.Group, cathode: THREE.Vector3, anode: TH
   glow.scale.setScalar(0.001);
   group.add(glow);
 
-  return { lamp: { material: epoxy, core, lamp, glow, spec }, reach: { top: base + flangeH + barrelH + R, radius: flangeR } };
+  const reach = model
+    ? { top: model.box.y1, radius: Math.max(model.box.x1 - model.box.x0, model.box.z1 - model.box.z0) / 2 }
+    : { top: base + flangeH + barrelH + R, radius: flangeR };
+  return { lamp: { material: epoxy, core, lamp, glow, spec }, reach };
 }
 
 /** Diodes, capacitors, inductors, switches: a body between two bent leads. */

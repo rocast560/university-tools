@@ -1,12 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import { holeKey } from '../src/layout/board.ts';
-import type { WirePath } from '../src/layout/types.ts';
-import { placeAt, pt, TIER_PITCH } from '../src/render/geometry.ts';
+import type { Hole, WirePath } from '../src/layout/types.ts';
+import { HEIGHT, placeAt, pt, TIER_PITCH } from '../src/render/geometry.ts';
 import { wirePolylines } from '../src/render/ortho.ts';
 import { handles, moveSegment } from '../src/edit/wireshape.ts';
-import { checkPlan, GAPS, LANE, nodeKey, pathToPlan, planToPath, routeWires, shapePlan, takenNodes, wireKey, WIRE_D, type Point, type WireRoute } from '../src/render/route3d.ts';
+import { checkPlan, GAPS, LANE, latticeLines, nodeKey, SEAM, SEAM_LANES, pathToPlan, planToPath, routeWires, shapePlan, takenNodes, wireKey, AIR_Z, WIRE_D, type Point, type WireRoute } from '../src/render/route3d.ts';
 import type { LayoutDoc } from '../src/pipeline.ts';
 import { centreLine, type V3 } from '../client/wiretube-math.ts';
+import { clipPairs } from '../src/render/clearance.ts';
 import { docs, FIXTURES } from './route-fixtures.ts';
 
 const routed = Object.fromEntries(Object.entries(docs).map(([name, doc]) => [name, routeWires(doc)]));
@@ -87,7 +88,7 @@ describe('routeWires on the fixtures', () => {
       }
     });
 
-    test(`${name}: every crossing has exactly one hump, at least one wire diameter high`, () => {
+    test(`${name}: every crossing has a hump, at least a diameter and a little air high`, () => {
       const plans = routes.map((r) => r.plan);
       let crossings = 0;
       for (let i = 0; i < plans.length; i++) {
@@ -103,9 +104,10 @@ describe('routeWires on the fixtures', () => {
           }
         }
       }
+      // Bends lying on another wire hump too, so there can be more humps than crossings.
       const lifts = routes.flatMap((r) => r.lifts);
-      expect(lifts.length).toBe(crossings);
-      expect(lifts.every((l) => l.height >= WIRE_D)).toBe(true);
+      expect(lifts.length).toBeGreaterThanOrEqual(crossings);
+      expect(lifts.every((l) => l.height >= WIRE_D + AIR_Z)).toBe(true);
     });
 
     test(`${name}: at every crossing the drawn wires are at least a diameter apart, centre to centre`, () => {
@@ -137,12 +139,12 @@ describe('routeWires on the fixtures', () => {
               if (!(v1[0] > Math.min(h1[0], h2[0]) + 0.5 && v1[0] < Math.max(h1[0], h2[0]) - 0.5 && h1[1] > Math.min(v1[1], v2[1]) + 0.5 && h1[1] < Math.max(v1[1], v2[1]) - 0.5)) continue;
               crossings++;
               const gap = Math.abs(heightAt(lines[i], [v1[0], h1[1]]) - heightAt(lines[j], [v1[0], h1[1]]));
-              if (gap < WIRE_D - 1e-9) tight.push(`${wireKey(doc.wires[i])} x ${wireKey(doc.wires[j])}: ${gap}`);
+              if (gap < WIRE_D + AIR_Z - 1e-9) tight.push(`${wireKey(doc.wires[i])} x ${wireKey(doc.wires[j])}: ${gap}`);
             }
           }
         }
       }
-      expect(crossings).toBe(routes.flatMap((r) => r.lifts).length);
+      expect(crossings).toBeLessThanOrEqual(routes.flatMap((r) => r.lifts).length);
       expect(tight).toEqual([]);
     });
 
@@ -284,10 +286,84 @@ describe('stacked boards', () => {
     expect(checkPlan(plan, [], board)).toBeNull();
   });
 
-  test('a wire joining the two boards keeps the corridor plan', () => {
-    const wires = [w('a5', 'j70')];
-    const r = routeWires({ wires, packages: [], board, pinHoles: {} });
+  test('a wire joining the two boards is routed on the stack’s lattice and crosses only in the gap between them', () => {
+    const wires = [w('a5', 'j70'), w('j20', 'a90'), w('e40', 'f75')];
+    const pinHoles: Record<string, Record<string, Hole>> = { R1: { '1': { col: 70, row: 'c' } }, R2: { '1': { col: 30, row: 'i' } } };
+    const r = routeWires({ wires, packages: [], board, pinHoles });
+    expect(r.warnings).toEqual([]);
+    const ys = latticeLines(board).map((l) => l.y);
+    const onLattice = ([x, y]: Point) => Math.abs((x - pt({ col: 1, row: 'a' })[0]) / LANE - Math.round((x - pt({ col: 1, row: 'a' })[0]) / LANE)) < 1e-9 && ys.some((v) => Math.abs(v - y) < 0.01);
+    const taken = takenNodes({ wires, pinHoles, board });
+    r.routes.forEach((route, i) => {
+      const plan = route.plan;
+      expect(route.warning).toBeUndefined();
+      expect(plan[0]).toEqual(placeAt(board, wires[i].a));
+      expect(plan[plan.length - 1]).toEqual(placeAt(board, wires[i].b));
+      // Every bend is a lattice node.
+      expect(plan.slice(1, -1).every(onLattice)).toBe(true);
+      expect(checkPlan(plan, [], board, taken)).toBeNull();
+      // Between the two boards' outer corridors it lies only on the seam's lanes, and it crosses from one board to the other there.
+      const seam = Array.from({ length: 2 * SEAM_LANES + 1 }, (_, l) => SEAM.y + (l - SEAM_LANES) * LANE);
+      const [lo, hi] = [GAPS[GAPS.length - 1].y, TIER_PITCH + GAPS[0].y];
+      for (let k = 0; k + 1 < plan.length; k++) {
+        const [p, q] = [plan[k], plan[k + 1]];
+        if (Math.abs(p[1] - q[1]) < 0.01 && p[1] > lo && p[1] < hi) expect(seam.some((y) => Math.abs(y - p[1]) < 0.01)).toBe(true);
+      }
+      const crossing = plan.slice(1).filter((q, k) => Math.min(plan[k][1], q[1]) < HEIGHT && Math.max(plan[k][1], q[1]) > TIER_PITCH);
+      expect(crossing.length).toBe(1);
+    });
+  });
+
+  test('a joining wire whose search gives up keeps the corridor plan, with a warning, and still hops', () => {
+    // A cap the short wire on the upper board fits in and the joining wire does not.
+    const wires = [{ ...w('a5', 'j70'), net: '/X' }, { ...w('g2', 'g12'), net: '/Y' }];
+    const r = routeWires({ wires, packages: [], board, pinHoles: {} }, {}, { maxExpand: 200 });
+    expect(r.warnings.length).toBe(1);
+    expect(r.routes[0].warning).toContain('/X');
+    expect(r.warnings[0]).toBe(r.routes[0].warning!);
     expect(r.routes[0].plan).toEqual(wirePolylines(wires, [], board)[0]);
+    // It crosses the board wire, and humps over it.
+    expect(r.routes[1].warning).toBeUndefined();
+    expect(r.routes[0].lifts.length).toBeGreaterThan(0);
+    expect(clipPairs({ routes: r.routes }, WIRE_D + AIR_Z)).toEqual([]);
+  });
+
+  test('a wire joining the two boards has no hand shape, and wires beside it stay a lane apart', () => {
+    const wires = [w('j20', 'a70'), w('j21', 'a71'), w('j22', 'a72')];
+    const r = routeWires({ wires, packages: [], board, pinHoles: {} });
+    expect(r.warnings).toEqual([]);
+    // Not hand-shapeable (the editor offers it no handles), as before.
+    for (const [i, route] of r.routes.entries()) expect(planToPath(wires[i], route.plan, board)).toBeNull();
+    // No two share a line: every run of one is a lane or more from every parallel run of another.
+    const runs = r.routes.flatMap((route, i) => route.plan.slice(1).map((q, k) => ({ i, p: route.plan[k], q })));
+    for (const a of runs) {
+      for (const b of runs) {
+        if (a.i >= b.i) continue;
+        const ah = Math.abs(a.p[1] - a.q[1]) < 0.01;
+        if (ah !== (Math.abs(b.p[1] - b.q[1]) < 0.01)) continue;
+        const [al, ac] = ah ? [0, 1] : [1, 0];
+        const overlap = Math.min(Math.max(a.p[al], a.q[al]), Math.max(b.p[al], b.q[al])) - Math.max(Math.min(a.p[al], a.q[al]), Math.min(b.p[al], b.q[al]));
+        if (overlap > 0.5) expect(Math.abs(a.p[ac] - b.p[ac])).toBeGreaterThanOrEqual(LANE - 0.01);
+      }
+    }
+  });
+
+  test('a bend in the lower board’s left margin is told from one in the upper board’s right margin', () => {
+    // Column 63.5 is both: the margin right of the upper board's last column and left of the lower board's first.
+    const x0 = pt({ col: 1, row: 'a' })[0];
+    const lower = w('a65', 'a70');
+    const [a, b] = [placeAt(board, lower.a), placeAt(board, lower.b)];
+    const left: Point[] = [a, [a[0], a[1] - LANE], [x0 - LANE, a[1] - LANE], [x0 - LANE, a[1] - 3 * LANE], [b[0], a[1] - 3 * LANE], b];
+    const path = planToPath(lower, left, board)!;
+    expect(path.points.map((p) => p.col)).toContain(63.5);
+    expect(pathToPlan(lower, path, board)).toEqual(left);
+    const upper = w('a55', 'a60');
+    const [c, d] = [placeAt(board, upper.a), placeAt(board, upper.b)];
+    const xr = pt({ col: 63, row: 'a' })[0] + LANE;
+    const right: Point[] = [c, [c[0], c[1] - LANE], [xr, c[1] - LANE], [xr, c[1] - 3 * LANE], [d[0], c[1] - 3 * LANE], d];
+    const p2 = planToPath(upper, right, board)!;
+    expect(p2.points.map((p) => p.col)).toContain(63.5);
+    expect(pathToPlan(upper, p2, board)).toEqual(right);
   });
 
   test('a lower-board plan round-trips through planToPath with global columns', () => {

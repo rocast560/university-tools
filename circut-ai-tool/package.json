@@ -14,6 +14,7 @@
     "dev": "vite",
     "build": "vite build",
     "sidecar": "bun scripts/build-sidecar.ts",
+    "models": "bun scripts/build-models.ts",
     "tauri": "tauri",
     "tauri:dev": "bun run build && bun run sidecar && tauri dev",
     "tauri:build": "bun run build && bun run sidecar && tauri build"
@@ -22,8 +23,12 @@
     "bun": ">=1.3"
   },
   "devDependencies": {
+    "@gltf-transform/core": "^4.5.1",
+    "@gltf-transform/extensions": "^4.5.1",
+    "@gltf-transform/functions": "^4.5.1",
     "@tauri-apps/cli": "^2",
     "@types/bun": "^1.3.0",
+    "meshoptimizer": "^1.3.0",
     "typescript": "^5.9.0",
     "vite": "^8.2.2"
   },

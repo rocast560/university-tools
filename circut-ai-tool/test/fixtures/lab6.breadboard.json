@@ -1,0 +1,1075 @@
+{
+  "version": 1,
+  "options": {
+    "board": "stacked",
+    "railSplit": null,
+    "dipSwitchPositions": 0,
+    "packageOrder": [],
+    "substitutions": {},
+    "wireStyle": "orthogonal",
+    "resistorKind": "metal"
+  },
+  "pinned": {
+    "U8": {
+      "1": {
+        "col": 84,
+        "row": "f"
+      },
+      "2": {
+        "col": 85,
+        "row": "f"
+      },
+      "3": {
+        "col": 86,
+        "row": "f"
+      },
+      "4": {
+        "col": 87,
+        "row": "f"
+      },
+      "5": {
+        "col": 88,
+        "row": "f"
+      },
+      "6": {
+        "col": 89,
+        "row": "f"
+      },
+      "7": {
+        "col": 90,
+        "row": "f"
+      },
+      "8": {
+        "col": 91,
+        "row": "f"
+      },
+      "9": {
+        "col": 91,
+        "row": "e"
+      },
+      "10": {
+        "col": 90,
+        "row": "e"
+      },
+      "11": {
+        "col": 89,
+        "row": "e"
+      },
+      "12": {
+        "col": 88,
+        "row": "e"
+      },
+      "13": {
+        "col": 87,
+        "row": "e"
+      },
+      "14": {
+        "col": 86,
+        "row": "e"
+      },
+      "15": {
+        "col": 85,
+        "row": "e"
+      },
+      "16": {
+        "col": 84,
+        "row": "e"
+      }
+    },
+    "R14": {
+      "1": {
+        "col": 86,
+        "row": "i"
+      },
+      "2": {
+        "col": 86,
+        "row": "B+"
+      }
+    }
+  },
+  "colors": {},
+  "placed": {},
+  "ledColors": {},
+  "wirePaths": {},
+  "tests": [
+    {
+      "name": "3 + 4 = 7",
+      "levels": {
+        "SW1:2": 1,
+        "SW1:3": 1,
+        "SW1:4": 0,
+        "SW1:5": 0,
+        "SW1:6": 0,
+        "SW2:1": 0,
+        "SW2:2": 0,
+        "SW2:3": 1,
+        "SW2:4": 0,
+        "SW2:5": 0,
+        "SW1:1": 0
+      },
+      "group": "1. Addition (M = 0)",
+      "note": "SW1 A4..A0 = 00011, M = 0; SW2 B4..B0 = 00100  (1 = switch off)",
+      "expect": {
+        "leds": {
+          "D1": false,
+          "D2": false
+        },
+        "displays": {
+          "DS1": "7"
+        }
+      }
+    },
+    {
+      "name": "5 + (-3) = 2",
+      "levels": {
+        "SW1:2": 1,
+        "SW1:3": 0,
+        "SW1:4": 1,
+        "SW1:5": 0,
+        "SW1:6": 0,
+        "SW2:1": 1,
+        "SW2:2": 0,
+        "SW2:3": 1,
+        "SW2:4": 1,
+        "SW2:5": 1,
+        "SW1:1": 0
+      },
+      "group": "1. Addition (M = 0)",
+      "note": "SW1 A4..A0 = 00101, M = 0; SW2 B4..B0 = 11101  (1 = switch off)",
+      "expect": {
+        "leds": {
+          "D1": false,
+          "D2": false
+        },
+        "displays": {
+          "DS1": "2"
+        }
+      }
+    },
+    {
+      "name": "2 + (-7) = -5",
+      "levels": {
+        "SW1:2": 0,
+        "SW1:3": 1,
+        "SW1:4": 0,
+        "SW1:5": 0,
+        "SW1:6": 0,
+        "SW2:1": 1,
+        "SW2:2": 0,
+        "SW2:3": 0,
+        "SW2:4": 1,
+        "SW2:5": 1,
+        "SW1:1": 0
+      },
+      "group": "1. Addition (M = 0)",
+      "note": "SW1 A4..A0 = 00010, M = 0; SW2 B4..B0 = 11001  (1 = switch off)",
+      "expect": {
+        "leds": {
+          "D1": true,
+          "D2": false
+        },
+        "displays": {
+          "DS1": "5"
+        }
+      }
+    },
+    {
+      "name": "-4 + (-5) = -9",
+      "levels": {
+        "SW1:2": 0,
+        "SW1:3": 0,
+        "SW1:4": 1,
+        "SW1:5": 1,
+        "SW1:6": 1,
+        "SW2:1": 1,
+        "SW2:2": 1,
+        "SW2:3": 0,
+        "SW2:4": 1,
+        "SW2:5": 1,
+        "SW1:1": 0
+      },
+      "group": "1. Addition (M = 0)",
+      "note": "SW1 A4..A0 = 11100, M = 0; SW2 B4..B0 = 11011  (1 = switch off)",
+      "expect": {
+        "leds": {
+          "D1": true,
+          "D2": false
+        },
+        "displays": {
+          "DS1": "9"
+        }
+      }
+    },
+    {
+      "name": "9 - 4 = 5",
+      "levels": {
+        "SW1:2": 1,
+        "SW1:3": 0,
+        "SW1:4": 0,
+        "SW1:5": 1,
+        "SW1:6": 0,
+        "SW2:1": 0,
+        "SW2:2": 0,
+        "SW2:3": 1,
+        "SW2:4": 0,
+        "SW2:5": 0,
+        "SW1:1": 1
+      },
+      "group": "2. Subtraction (M = 1)",
+      "note": "SW1 A4..A0 = 01001, M = 1; SW2 B4..B0 = 00100  (1 = switch off)",
+      "expect": {
+        "leds": {
+          "D1": false,
+          "D2": false
+        },
+        "displays": {
+          "DS1": "5"
+        }
+      }
+    },
+    {
+      "name": "3 - 5 = -2",
+      "levels": {
+        "SW1:2": 1,
+        "SW1:3": 1,
+        "SW1:4": 0,
+        "SW1:5": 0,
+        "SW1:6": 0,
+        "SW2:1": 1,
+        "SW2:2": 0,
+        "SW2:3": 1,
+        "SW2:4": 0,
+        "SW2:5": 0,
+        "SW1:1": 1
+      },
+      "group": "2. Subtraction (M = 1)",
+      "note": "SW1 A4..A0 = 00011, M = 1; SW2 B4..B0 = 00101  (1 = switch off)",
+      "expect": {
+        "leds": {
+          "D1": true,
+          "D2": false
+        },
+        "displays": {
+          "DS1": "2"
+        }
+      }
+    },
+    {
+      "name": "4 - (-5) = 9",
+      "levels": {
+        "SW1:2": 0,
+        "SW1:3": 0,
+        "SW1:4": 1,
+        "SW1:5": 0,
+        "SW1:6": 0,
+        "SW2:1": 1,
+        "SW2:2": 1,
+        "SW2:3": 0,
+        "SW2:4": 1,
+        "SW2:5": 1,
+        "SW1:1": 1
+      },
+      "group": "2. Subtraction (M = 1)",
+      "note": "SW1 A4..A0 = 00100, M = 1; SW2 B4..B0 = 11011  (1 = switch off)",
+      "expect": {
+        "leds": {
+          "D1": false,
+          "D2": false
+        },
+        "displays": {
+          "DS1": "9"
+        }
+      }
+    },
+    {
+      "name": "-2 - (-6) = 4",
+      "levels": {
+        "SW1:2": 0,
+        "SW1:3": 1,
+        "SW1:4": 1,
+        "SW1:5": 1,
+        "SW1:6": 1,
+        "SW2:1": 0,
+        "SW2:2": 1,
+        "SW2:3": 0,
+        "SW2:4": 1,
+        "SW2:5": 1,
+        "SW1:1": 1
+      },
+      "group": "2. Subtraction (M = 1)",
+      "note": "SW1 A4..A0 = 11110, M = 1; SW2 B4..B0 = 11010  (1 = switch off)",
+      "expect": {
+        "leds": {
+          "D1": false,
+          "D2": false
+        },
+        "displays": {
+          "DS1": "4"
+        }
+      }
+    },
+    {
+      "name": "5 - 5 = 0",
+      "levels": {
+        "SW1:2": 1,
+        "SW1:3": 0,
+        "SW1:4": 1,
+        "SW1:5": 0,
+        "SW1:6": 0,
+        "SW2:1": 1,
+        "SW2:2": 0,
+        "SW2:3": 1,
+        "SW2:4": 0,
+        "SW2:5": 0,
+        "SW1:1": 1
+      },
+      "group": "2. Subtraction (M = 1)",
+      "note": "SW1 A4..A0 = 00101, M = 1; SW2 B4..B0 = 00101  (1 = switch off)",
+      "expect": {
+        "leds": {
+          "D1": false,
+          "D2": false
+        },
+        "displays": {
+          "DS1": "0"
+        }
+      }
+    },
+    {
+      "name": "6 + 3 = 9",
+      "levels": {
+        "SW1:2": 0,
+        "SW1:3": 1,
+        "SW1:4": 1,
+        "SW1:5": 0,
+        "SW1:6": 0,
+        "SW2:1": 1,
+        "SW2:2": 1,
+        "SW2:3": 0,
+        "SW2:4": 0,
+        "SW2:5": 0,
+        "SW1:1": 0
+      },
+      "group": "3. Same inputs, M toggled",
+      "note": "SW1 A4..A0 = 00110, M = 0; SW2 B4..B0 = 00011  (1 = switch off)",
+      "expect": {
+        "leds": {
+          "D1": false,
+          "D2": false
+        },
+        "displays": {
+          "DS1": "9"
+        }
+      }
+    },
+    {
+      "name": "6 - 3 = 3",
+      "levels": {
+        "SW1:2": 0,
+        "SW1:3": 1,
+        "SW1:4": 1,
+        "SW1:5": 0,
+        "SW1:6": 0,
+        "SW2:1": 1,
+        "SW2:2": 1,
+        "SW2:3": 0,
+        "SW2:4": 0,
+        "SW2:5": 0,
+        "SW1:1": 1
+      },
+      "group": "3. Same inputs, M toggled",
+      "note": "SW1 A4..A0 = 00110, M = 1; SW2 B4..B0 = 00011  (1 = switch off)",
+      "expect": {
+        "leds": {
+          "D1": false,
+          "D2": false
+        },
+        "displays": {
+          "DS1": "3"
+        }
+      }
+    },
+    {
+      "name": "+0: 0 + 0",
+      "levels": {
+        "SW1:2": 0,
+        "SW1:3": 0,
+        "SW1:4": 0,
+        "SW1:5": 0,
+        "SW1:6": 0,
+        "SW2:1": 0,
+        "SW2:2": 0,
+        "SW2:3": 0,
+        "SW2:4": 0,
+        "SW2:5": 0,
+        "SW1:1": 0
+      },
+      "group": "4. Positive results 0 to 9 (SIGN off)",
+      "note": "SW1 A4..A0 = 00000, M = 0; SW2 B4..B0 = 00000  (1 = switch off)",
+      "expect": {
+        "leds": {
+          "D1": false,
+          "D2": false
+        },
+        "displays": {
+          "DS1": "0"
+        }
+      }
+    },
+    {
+      "name": "+1: 1 + 0",
+      "levels": {
+        "SW1:2": 1,
+        "SW1:3": 0,
+        "SW1:4": 0,
+        "SW1:5": 0,
+        "SW1:6": 0,
+        "SW2:1": 0,
+        "SW2:2": 0,
+        "SW2:3": 0,
+        "SW2:4": 0,
+        "SW2:5": 0,
+        "SW1:1": 0
+      },
+      "group": "4. Positive results 0 to 9 (SIGN off)",
+      "note": "SW1 A4..A0 = 00001, M = 0; SW2 B4..B0 = 00000  (1 = switch off)",
+      "expect": {
+        "leds": {
+          "D1": false,
+          "D2": false
+        },
+        "displays": {
+          "DS1": "1"
+        }
+      }
+    },
+    {
+      "name": "+2: 2 + 0",
+      "levels": {
+        "SW1:2": 0,
+        "SW1:3": 1,
+        "SW1:4": 0,
+        "SW1:5": 0,
+        "SW1:6": 0,
+        "SW2:1": 0,
+        "SW2:2": 0,
+        "SW2:3": 0,
+        "SW2:4": 0,
+        "SW2:5": 0,
+        "SW1:1": 0
+      },
+      "group": "4. Positive results 0 to 9 (SIGN off)",
+      "note": "SW1 A4..A0 = 00010, M = 0; SW2 B4..B0 = 00000  (1 = switch off)",
+      "expect": {
+        "leds": {
+          "D1": false,
+          "D2": false
+        },
+        "displays": {
+          "DS1": "2"
+        }
+      }
+    },
+    {
+      "name": "+3: 3 + 0",
+      "levels": {
+        "SW1:2": 1,
+        "SW1:3": 1,
+        "SW1:4": 0,
+        "SW1:5": 0,
+        "SW1:6": 0,
+        "SW2:1": 0,
+        "SW2:2": 0,
+        "SW2:3": 0,
+        "SW2:4": 0,
+        "SW2:5": 0,
+        "SW1:1": 0
+      },
+      "group": "4. Positive results 0 to 9 (SIGN off)",
+      "note": "SW1 A4..A0 = 00011, M = 0; SW2 B4..B0 = 00000  (1 = switch off)",
+      "expect": {
+        "leds": {
+          "D1": false,
+          "D2": false
+        },
+        "displays": {
+          "DS1": "3"
+        }
+      }
+    },
+    {
+      "name": "+4: 4 + 0",
+      "levels": {
+        "SW1:2": 0,
+        "SW1:3": 0,
+        "SW1:4": 1,
+        "SW1:5": 0,
+        "SW1:6": 0,
+        "SW2:1": 0,
+        "SW2:2": 0,
+        "SW2:3": 0,
+        "SW2:4": 0,
+        "SW2:5": 0,
+        "SW1:1": 0
+      },
+      "group": "4. Positive results 0 to 9 (SIGN off)",
+      "note": "SW1 A4..A0 = 00100, M = 0; SW2 B4..B0 = 00000  (1 = switch off)",
+      "expect": {
+        "leds": {
+          "D1": false,
+          "D2": false
+        },
+        "displays": {
+          "DS1": "4"
+        }
+      }
+    },
+    {
+      "name": "+5: 5 + 0",
+      "levels": {
+        "SW1:2": 1,
+        "SW1:3": 0,
+        "SW1:4": 1,
+        "SW1:5": 0,
+        "SW1:6": 0,
+        "SW2:1": 0,
+        "SW2:2": 0,
+        "SW2:3": 0,
+        "SW2:4": 0,
+        "SW2:5": 0,
+        "SW1:1": 0
+      },
+      "group": "4. Positive results 0 to 9 (SIGN off)",
+      "note": "SW1 A4..A0 = 00101, M = 0; SW2 B4..B0 = 00000  (1 = switch off)",
+      "expect": {
+        "leds": {
+          "D1": false,
+          "D2": false
+        },
+        "displays": {
+          "DS1": "5"
+        }
+      }
+    },
+    {
+      "name": "+6: 6 + 0",
+      "levels": {
+        "SW1:2": 0,
+        "SW1:3": 1,
+        "SW1:4": 1,
+        "SW1:5": 0,
+        "SW1:6": 0,
+        "SW2:1": 0,
+        "SW2:2": 0,
+        "SW2:3": 0,
+        "SW2:4": 0,
+        "SW2:5": 0,
+        "SW1:1": 0
+      },
+      "group": "4. Positive results 0 to 9 (SIGN off)",
+      "note": "SW1 A4..A0 = 00110, M = 0; SW2 B4..B0 = 00000  (1 = switch off)",
+      "expect": {
+        "leds": {
+          "D1": false,
+          "D2": false
+        },
+        "displays": {
+          "DS1": "6"
+        }
+      }
+    },
+    {
+      "name": "+7: 7 + 0",
+      "levels": {
+        "SW1:2": 1,
+        "SW1:3": 1,
+        "SW1:4": 1,
+        "SW1:5": 0,
+        "SW1:6": 0,
+        "SW2:1": 0,
+        "SW2:2": 0,
+        "SW2:3": 0,
+        "SW2:4": 0,
+        "SW2:5": 0,
+        "SW1:1": 0
+      },
+      "group": "4. Positive results 0 to 9 (SIGN off)",
+      "note": "SW1 A4..A0 = 00111, M = 0; SW2 B4..B0 = 00000  (1 = switch off)",
+      "expect": {
+        "leds": {
+          "D1": false,
+          "D2": false
+        },
+        "displays": {
+          "DS1": "7"
+        }
+      }
+    },
+    {
+      "name": "+8: 8 + 0",
+      "levels": {
+        "SW1:2": 0,
+        "SW1:3": 0,
+        "SW1:4": 0,
+        "SW1:5": 1,
+        "SW1:6": 0,
+        "SW2:1": 0,
+        "SW2:2": 0,
+        "SW2:3": 0,
+        "SW2:4": 0,
+        "SW2:5": 0,
+        "SW1:1": 0
+      },
+      "group": "4. Positive results 0 to 9 (SIGN off)",
+      "note": "SW1 A4..A0 = 01000, M = 0; SW2 B4..B0 = 00000  (1 = switch off)",
+      "expect": {
+        "leds": {
+          "D1": false,
+          "D2": false
+        },
+        "displays": {
+          "DS1": "8"
+        }
+      }
+    },
+    {
+      "name": "+9: 9 + 0",
+      "levels": {
+        "SW1:2": 1,
+        "SW1:3": 0,
+        "SW1:4": 0,
+        "SW1:5": 1,
+        "SW1:6": 0,
+        "SW2:1": 0,
+        "SW2:2": 0,
+        "SW2:3": 0,
+        "SW2:4": 0,
+        "SW2:5": 0,
+        "SW1:1": 0
+      },
+      "group": "4. Positive results 0 to 9 (SIGN off)",
+      "note": "SW1 A4..A0 = 01001, M = 0; SW2 B4..B0 = 00000  (1 = switch off)",
+      "expect": {
+        "leds": {
+          "D1": false,
+          "D2": false
+        },
+        "displays": {
+          "DS1": "9"
+        }
+      }
+    },
+    {
+      "name": "-1: 0 - 1",
+      "levels": {
+        "SW1:2": 0,
+        "SW1:3": 0,
+        "SW1:4": 0,
+        "SW1:5": 0,
+        "SW1:6": 0,
+        "SW2:1": 1,
+        "SW2:2": 0,
+        "SW2:3": 0,
+        "SW2:4": 0,
+        "SW2:5": 0,
+        "SW1:1": 1
+      },
+      "group": "5. Negative results -1 to -9 (SIGN on)",
+      "note": "SW1 A4..A0 = 00000, M = 1; SW2 B4..B0 = 00001  (1 = switch off)",
+      "expect": {
+        "leds": {
+          "D1": true,
+          "D2": false
+        },
+        "displays": {
+          "DS1": "1"
+        }
+      }
+    },
+    {
+      "name": "-2: 0 - 2",
+      "levels": {
+        "SW1:2": 0,
+        "SW1:3": 0,
+        "SW1:4": 0,
+        "SW1:5": 0,
+        "SW1:6": 0,
+        "SW2:1": 0,
+        "SW2:2": 1,
+        "SW2:3": 0,
+        "SW2:4": 0,
+        "SW2:5": 0,
+        "SW1:1": 1
+      },
+      "group": "5. Negative results -1 to -9 (SIGN on)",
+      "note": "SW1 A4..A0 = 00000, M = 1; SW2 B4..B0 = 00010  (1 = switch off)",
+      "expect": {
+        "leds": {
+          "D1": true,
+          "D2": false
+        },
+        "displays": {
+          "DS1": "2"
+        }
+      }
+    },
+    {
+      "name": "-3: 0 - 3",
+      "levels": {
+        "SW1:2": 0,
+        "SW1:3": 0,
+        "SW1:4": 0,
+        "SW1:5": 0,
+        "SW1:6": 0,
+        "SW2:1": 1,
+        "SW2:2": 1,
+        "SW2:3": 0,
+        "SW2:4": 0,
+        "SW2:5": 0,
+        "SW1:1": 1
+      },
+      "group": "5. Negative results -1 to -9 (SIGN on)",
+      "note": "SW1 A4..A0 = 00000, M = 1; SW2 B4..B0 = 00011  (1 = switch off)",
+      "expect": {
+        "leds": {
+          "D1": true,
+          "D2": false
+        },
+        "displays": {
+          "DS1": "3"
+        }
+      }
+    },
+    {
+      "name": "-4: 0 - 4",
+      "levels": {
+        "SW1:2": 0,
+        "SW1:3": 0,
+        "SW1:4": 0,
+        "SW1:5": 0,
+        "SW1:6": 0,
+        "SW2:1": 0,
+        "SW2:2": 0,
+        "SW2:3": 1,
+        "SW2:4": 0,
+        "SW2:5": 0,
+        "SW1:1": 1
+      },
+      "group": "5. Negative results -1 to -9 (SIGN on)",
+      "note": "SW1 A4..A0 = 00000, M = 1; SW2 B4..B0 = 00100  (1 = switch off)",
+      "expect": {
+        "leds": {
+          "D1": true,
+          "D2": false
+        },
+        "displays": {
+          "DS1": "4"
+        }
+      }
+    },
+    {
+      "name": "-5: 0 - 5",
+      "levels": {
+        "SW1:2": 0,
+        "SW1:3": 0,
+        "SW1:4": 0,
+        "SW1:5": 0,
+        "SW1:6": 0,
+        "SW2:1": 1,
+        "SW2:2": 0,
+        "SW2:3": 1,
+        "SW2:4": 0,
+        "SW2:5": 0,
+        "SW1:1": 1
+      },
+      "group": "5. Negative results -1 to -9 (SIGN on)",
+      "note": "SW1 A4..A0 = 00000, M = 1; SW2 B4..B0 = 00101  (1 = switch off)",
+      "expect": {
+        "leds": {
+          "D1": true,
+          "D2": false
+        },
+        "displays": {
+          "DS1": "5"
+        }
+      }
+    },
+    {
+      "name": "-6: 0 - 6",
+      "levels": {
+        "SW1:2": 0,
+        "SW1:3": 0,
+        "SW1:4": 0,
+        "SW1:5": 0,
+        "SW1:6": 0,
+        "SW2:1": 0,
+        "SW2:2": 1,
+        "SW2:3": 1,
+        "SW2:4": 0,
+        "SW2:5": 0,
+        "SW1:1": 1
+      },
+      "group": "5. Negative results -1 to -9 (SIGN on)",
+      "note": "SW1 A4..A0 = 00000, M = 1; SW2 B4..B0 = 00110  (1 = switch off)",
+      "expect": {
+        "leds": {
+          "D1": true,
+          "D2": false
+        },
+        "displays": {
+          "DS1": "6"
+        }
+      }
+    },
+    {
+      "name": "-7: 0 - 7",
+      "levels": {
+        "SW1:2": 0,
+        "SW1:3": 0,
+        "SW1:4": 0,
+        "SW1:5": 0,
+        "SW1:6": 0,
+        "SW2:1": 1,
+        "SW2:2": 1,
+        "SW2:3": 1,
+        "SW2:4": 0,
+        "SW2:5": 0,
+        "SW1:1": 1
+      },
+      "group": "5. Negative results -1 to -9 (SIGN on)",
+      "note": "SW1 A4..A0 = 00000, M = 1; SW2 B4..B0 = 00111  (1 = switch off)",
+      "expect": {
+        "leds": {
+          "D1": true,
+          "D2": false
+        },
+        "displays": {
+          "DS1": "7"
+        }
+      }
+    },
+    {
+      "name": "-8: 0 - 8",
+      "levels": {
+        "SW1:2": 0,
+        "SW1:3": 0,
+        "SW1:4": 0,
+        "SW1:5": 0,
+        "SW1:6": 0,
+        "SW2:1": 0,
+        "SW2:2": 0,
+        "SW2:3": 0,
+        "SW2:4": 1,
+        "SW2:5": 0,
+        "SW1:1": 1
+      },
+      "group": "5. Negative results -1 to -9 (SIGN on)",
+      "note": "SW1 A4..A0 = 00000, M = 1; SW2 B4..B0 = 01000  (1 = switch off)",
+      "expect": {
+        "leds": {
+          "D1": true,
+          "D2": false
+        },
+        "displays": {
+          "DS1": "8"
+        }
+      }
+    },
+    {
+      "name": "-9: 0 - 9",
+      "levels": {
+        "SW1:2": 0,
+        "SW1:3": 0,
+        "SW1:4": 0,
+        "SW1:5": 0,
+        "SW1:6": 0,
+        "SW2:1": 1,
+        "SW2:2": 0,
+        "SW2:3": 0,
+        "SW2:4": 1,
+        "SW2:5": 0,
+        "SW1:1": 1
+      },
+      "group": "5. Negative results -1 to -9 (SIGN on)",
+      "note": "SW1 A4..A0 = 00000, M = 1; SW2 B4..B0 = 01001  (1 = switch off)",
+      "expect": {
+        "leds": {
+          "D1": true,
+          "D2": false
+        },
+        "displays": {
+          "DS1": "9"
+        }
+      }
+    },
+    {
+      "name": "9 + 8 = 17",
+      "levels": {
+        "SW1:2": 1,
+        "SW1:3": 0,
+        "SW1:4": 0,
+        "SW1:5": 1,
+        "SW1:6": 0,
+        "SW2:1": 0,
+        "SW2:2": 0,
+        "SW2:3": 0,
+        "SW2:4": 1,
+        "SW2:5": 0,
+        "SW1:1": 0
+      },
+      "group": "6. Overflow (OVERFLOW on)",
+      "note": "SW1 A4..A0 = 01001, M = 0; SW2 B4..B0 = 01000  (1 = switch off); OVERFLOW on (display and SIGN not meaningful)",
+      "expect": {
+        "leds": {
+          "D2": true
+        }
+      }
+    },
+    {
+      "name": "-9 + (-8) = -17",
+      "levels": {
+        "SW1:2": 1,
+        "SW1:3": 1,
+        "SW1:4": 1,
+        "SW1:5": 0,
+        "SW1:6": 1,
+        "SW2:1": 0,
+        "SW2:2": 0,
+        "SW2:3": 0,
+        "SW2:4": 1,
+        "SW2:5": 1,
+        "SW1:1": 0
+      },
+      "group": "6. Overflow (OVERFLOW on)",
+      "note": "SW1 A4..A0 = 10111, M = 0; SW2 B4..B0 = 11000  (1 = switch off); OVERFLOW on (display and SIGN not meaningful)",
+      "expect": {
+        "leds": {
+          "D2": true
+        }
+      }
+    },
+    {
+      "name": "-9 - 8 = -17",
+      "levels": {
+        "SW1:2": 1,
+        "SW1:3": 1,
+        "SW1:4": 1,
+        "SW1:5": 0,
+        "SW1:6": 1,
+        "SW2:1": 0,
+        "SW2:2": 0,
+        "SW2:3": 0,
+        "SW2:4": 1,
+        "SW2:5": 0,
+        "SW1:1": 1
+      },
+      "group": "6. Overflow (OVERFLOW on)",
+      "note": "SW1 A4..A0 = 10111, M = 1; SW2 B4..B0 = 01000  (1 = switch off); OVERFLOW on (display and SIGN not meaningful)",
+      "expect": {
+        "leds": {
+          "D2": true
+        }
+      }
+    },
+    {
+      "name": "9 - (-8) = 17",
+      "levels": {
+        "SW1:2": 1,
+        "SW1:3": 0,
+        "SW1:4": 0,
+        "SW1:5": 1,
+        "SW1:6": 0,
+        "SW2:1": 0,
+        "SW2:2": 0,
+        "SW2:3": 0,
+        "SW2:4": 1,
+        "SW2:5": 1,
+        "SW1:1": 1
+      },
+      "group": "6. Overflow (OVERFLOW on)",
+      "note": "SW1 A4..A0 = 01001, M = 1; SW2 B4..B0 = 11000  (1 = switch off); OVERFLOW on (display and SIGN not meaningful)",
+      "expect": {
+        "leds": {
+          "D2": true
+        }
+      }
+    },
+    {
+      "name": "15 + 1 = 16",
+      "levels": {
+        "SW1:2": 1,
+        "SW1:3": 1,
+        "SW1:4": 1,
+        "SW1:5": 1,
+        "SW1:6": 0,
+        "SW2:1": 1,
+        "SW2:2": 0,
+        "SW2:3": 0,
+        "SW2:4": 0,
+        "SW2:5": 0,
+        "SW1:1": 0
+      },
+      "group": "6. Overflow (OVERFLOW on)",
+      "note": "SW1 A4..A0 = 01111, M = 0; SW2 B4..B0 = 00001  (1 = switch off); OVERFLOW on (display and SIGN not meaningful)",
+      "expect": {
+        "leds": {
+          "D2": true
+        }
+      }
+    },
+    {
+      "name": "9 + (-9) = 0",
+      "levels": {
+        "SW1:2": 1,
+        "SW1:3": 0,
+        "SW1:4": 0,
+        "SW1:5": 1,
+        "SW1:6": 0,
+        "SW2:1": 1,
+        "SW2:2": 1,
+        "SW2:3": 1,
+        "SW2:4": 0,
+        "SW2:5": 1,
+        "SW1:1": 0
+      },
+      "group": "7. Results that cancel to 0 (SIGN off)",
+      "note": "SW1 A4..A0 = 01001, M = 0; SW2 B4..B0 = 10111  (1 = switch off)",
+      "expect": {
+        "leds": {
+          "D1": false,
+          "D2": false
+        },
+        "displays": {
+          "DS1": "0"
+        }
+      }
+    },
+    {
+      "name": "-9 - (-9) = 0",
+      "levels": {
+        "SW1:2": 1,
+        "SW1:3": 1,
+        "SW1:4": 1,
+        "SW1:5": 0,
+        "SW1:6": 1,
+        "SW2:1": 1,
+        "SW2:2": 1,
+        "SW2:3": 1,
+        "SW2:4": 0,
+        "SW2:5": 1,
+        "SW1:1": 1
+      },
+      "group": "7. Results that cancel to 0 (SIGN off)",
+      "note": "SW1 A4..A0 = 10111, M = 1; SW2 B4..B0 = 10111  (1 = switch off)",
+      "expect": {
+        "leds": {
+          "D1": false,
+          "D2": false
+        },
+        "displays": {
+          "DS1": "0"
+        }
+      }
+    }
+  ]
+}

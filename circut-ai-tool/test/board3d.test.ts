@@ -1,9 +1,13 @@
 import { describe, expect, test } from 'bun:test';
-import { archHeight, archY, chipLegend, MAX_ARCH, routeWire, WIRE_CLEARANCE, type Obstacle } from '../client/board3d-parts.ts';
+import { archHeight, archY, chipLegend, dipLegPath, MAX_ARCH, MM, placedBox, routeWire, WIRE_CLEARANCE, type Obstacle } from '../client/board3d-parts.ts';
+import { readFileSync } from 'node:fs';
+import { bodyPlacement, modelKeyFor, validateManifest, type ModelInfo } from '../src/models/manifest.ts';
+import { holeKey } from '../src/layout/board.ts';
+import { placeAt } from '../src/render/geometry.ts';
 import { layout } from '../src/layout/engine.ts';
-import { emptySidecar } from '../src/layout/types.ts';
+import { emptySidecar, normalizeSidecar, type Hole } from '../src/layout/types.ts';
 import { makeDesign, parseNetlist } from '../src/netlist.ts';
-import { buildLayoutDoc } from '../src/pipeline.ts';
+import { buildLayoutDoc, type LayoutDoc } from '../src/pipeline.ts';
 import { readFixture } from './smoke.test.ts';
 
 type Point = [number, number];
@@ -174,4 +178,114 @@ describe('chipLegend', () => {
     const pkg = res.packages.find((p) => p.id === 'U9')!;
     expect(chipLegend(pkg, { ...doc, values: res.values } as never)).toEqual({ code: '74LS99', description: '' });
   });
+});
+
+describe('model bodies', () => {
+  test('a DIP leg path ends in its hole, below the board surface', () => {
+    const path = dipLegPath({ x: 120, z: 200 }, 180, 22, 2, 25);
+    const end = path[path.length - 1];
+    expect(end[0]).toBe(120);
+    expect(end[2]).toBe(200);
+    expect(end[1]).toBeLessThan(0);
+    expect(path[0][2]).toBe(180 + 22); // leaves the body side facing its hole
+  });
+
+  test('a leg on the far row leaves the far side of the body', () => {
+    const path = dipLegPath({ x: 120, z: 150 }, 180, 22, 2, 25);
+    expect(path[0][2]).toBe(180 - 22);
+    expect(path.every(([x]) => x === 120)).toBe(true);
+  });
+
+  test('placedBox turns the model box with the part, so a DIP body straddles its rows', () => {
+    const info = {
+      file: 'dip14.glb', footprint: '', pads: { '1': [0, 0], '2': [0, 2.54] },
+      box: { min: [0.635, 0.38, -1.905], max: [6.985, 3.68, 17.145] },
+    } as ModelInfo;
+    // Pin 1 at the origin, pin 2 one pitch along +x: the model's z (its pin row) turns onto board x.
+    const p = bodyPlacement(info, '1', '2', [0, 0], [18, 0], MM);
+    const b = placedBox(info, p, MM);
+    const near = (a: number, e: number) => expect(Math.abs(a - e)).toBeLessThan(1e-6);
+    near(b.x0, -1.905 * MM);
+    near(b.x1, 17.145 * MM);
+    near(b.z0, -6.985 * MM);
+    near(b.z1, -0.635 * MM);
+    near(b.y0, 0.38 * MM);
+    near(b.y1, 3.68 * MM);
+  });
+  test('a DIP body sits midway between both pin rows, squeezed to the drawn gap, with its legs alike on each side', () => {
+    // DIP-14 as KiCad has it: pins 1-7 down x = 0, pins 8-14 back up x = 7.62 mm.
+    const pads: Record<string, [number, number]> = {};
+    for (let i = 0; i < 7; i++) {
+      pads[String(i + 1)] = [0, i * 2.54];
+      pads[String(14 - i)] = [7.62, i * 2.54];
+    }
+    const info = { file: 'dip14.glb', footprint: '', pads, box: { min: [0.635, 0.38, -1.905], max: [6.985, 3.68, 17.145] } } as ModelInfo;
+    // On the board: pin 1 at row e (z 156), pin 14 across the gutter at row f (z 192), 36 units, not 7.62 mm.
+    const holes: Record<string, [number, number]> = {};
+    for (let i = 0; i < 7; i++) {
+      holes[String(i + 1)] = [100 + i * 18, 192];
+      holes[String(14 - i)] = [100 + i * 18, 156];
+    }
+    const p = bodyPlacement(info, '1', '2', holes['1'], holes['2'], MM, holes);
+    const b = placedBox(info, p, MM);
+    const near = (a: number, e: number) => expect(Math.abs(a - e)).toBeLessThan(1e-6);
+    near((b.z0 + b.z1) / 2, 174);
+    near((b.x0 + b.x1) / 2, 100 + 3 * 18);
+    // The epoxy's 6.35 mm across 7.62 mm of rows, drawn across 36 units.
+    near(b.z1 - b.z0, 36 * (6.35 / 7.62));
+    expect(b.z0).toBeGreaterThan(156);
+    expect(b.z1).toBeLessThan(192);
+    // The far row's pin 14 and the near row's pin 1 leave the body at the same distance.
+    const half = (b.z1 - b.z0) / 2;
+    const p1 = dipLegPath({ x: 100, z: 192 }, 174, half, b.y0, b.y1 - b.y0);
+    const p14 = dipLegPath({ x: 100, z: 156 }, 174, half, b.y0, b.y1 - b.y0);
+    near(p1[0][2] - 174, 174 - p14[0][2]);
+    expect(p14[p14.length - 1][2]).toBe(156);
+    expect(p1[p1.length - 1][2]).toBe(192);
+  });
+});
+
+describe('KiCad bodies on the real boards', () => {
+  const read = (file: string) => readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
+  const manifest = validateManifest(JSON.parse(read('public/models/manifest.json')));
+  const boards: [string, LayoutDoc][] = [
+    ['lab6', buildLayoutDoc(parseNetlist(read('test/fixtures/lab6.net')), normalizeSidecar(JSON.parse(read('test/fixtures/lab6.breadboard.json'))))],
+    ['PL1_1', buildLayoutDoc(parseNetlist(readFixture('PL1_1.net')), normalizeSidecar({}))],
+  ];
+
+  for (const [name, doc] of boards)
+    test(`${name}: each model body is centred on its pins and covers no other hole`, () => {
+      const at = (h: Hole) => placeAt(doc.board, h);
+      let checked = 0;
+      for (const pkg of doc.packages) {
+        const key = modelKeyFor(pkg.kind, undefined, pkg.pins, pkg.positions);
+        const info = key ? manifest.models[key] : undefined;
+        const own = doc.pinHoles[pkg.id] ?? {};
+        if (!info || !own['1'] || !own['2']) continue;
+        const holes = Object.fromEntries(Object.entries(own).map(([pin, h]) => [pin, at(h)])) as Record<string, [number, number]>;
+        const b = placedBox(info, bodyPlacement(info, '1', '2', holes['1'], holes['2'], MM, holes), MM);
+        const pts = Object.values(holes);
+        const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length;
+        const cz = pts.reduce((s, p) => s + p[1], 0) / pts.length;
+        expect(Math.abs((b.x0 + b.x1) / 2 - cx), `${pkg.id} x`).toBeLessThan(0.5);
+        expect(Math.abs((b.z0 + b.z1) / 2 - cz), `${pkg.id} z`).toBeLessThan(0.5);
+        // No hole another part's pin or a jumper goes into lies under the body.
+        const ownKeys = new Set(Object.values(own).map(holeKey));
+        const others: [string, Hole][] = [
+          ...doc.packages.filter((q) => q.id !== pkg.id).flatMap((q) => Object.values(doc.pinHoles[q.id] ?? {}).map((h): [string, Hole] => [q.id, h])),
+          ...doc.parts.flatMap((p) => p.holes.map((h): [string, Hole] => [p.id, h])),
+          ...doc.wires.flatMap((w) => [w.a, w.b].map((h): [string, Hole] => [`wire ${w.net}`, h])),
+        ];
+        const inside = others
+          .filter(([, h]) => !ownKeys.has(holeKey(h)))
+          .filter(([, h]) => {
+            const [x, z] = at(h);
+            return x > b.x0 + 0.5 && x < b.x1 - 0.5 && z > b.z0 + 0.5 && z < b.z1 - 0.5;
+          })
+          .map(([who, h]) => `${who} ${h.row}${h.col}`);
+        expect(inside, `${pkg.id} body covers`).toEqual([]);
+        checked++;
+      }
+      expect(checked).toBeGreaterThan(0);
+    });
 });

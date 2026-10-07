@@ -367,3 +367,32 @@ test('a DIP leg path ends in its hole, below the board surface', () => {
 - Spec §3.1 → Task 2; §3.2 → Task 3; §3.3 → Task 4; §3.4 → Task 5; §4 errors → Tasks 2 (script refuses), 3 (loader never rejects), 5 (fallback e2e); §5 tests → Tasks 1, 2, 4, 5; §6 docs → Tasks 2 (license file), 6.
 - Spec correction recorded in Global Constraints: display model is `7SegmentLED_LTS6760_LTS6780`, assets live in `public/models/` (Vite's public dir), both also fixed in the spec.
 - Names used across tasks: `ModelKey`, `KIT_MODELS`, `ModelInfo`, `Manifest`, `validateManifest`, `modelKeyFor`, `isLegMaterial`, `Frame`, `applyFrame`, `chooseFrame`, `bodyPlacement`, `ModelSet`, `loadModels`, `setModels`, `dipLegPath` — each defined once.
+
+---
+
+## Addendum (2026-10-06): jumpers must not clip into each other
+
+User request, design approved in chat with option **A**. Research report (measured on lab 6: 398 wire pairs closer than one wire width; causes: cross-board wires never get lifts (381), lift height measured only at the crossing point (15), same-net wires sharing a bend (2); plus 99 touching pairs). Throwaway measurement script to port: `C:\Users\rober\AppData\Local\Temp\claude\C--Windows-system32\dfbb6d48-3680-41be-8659-b22c673d287e\scratchpad\clip.ts` (capsule distance between `centreLine` + `fillet` centre lines, as `client/wiretube-math.ts` builds them).
+
+Constants (src/render/route3d.ts): `WIRE_R = 4`, `WIRE_D = 8`, `LANE = 9`; lifts computed in the hump pass (~:929-947); `crossing()` ~:837-847; `clashes()` ~:807-834; `routeStacked` ~:958-990; corridor router `src/render/ortho.ts wirePolylines`.
+
+### Task 7: Clipping regression test, lift height, shared corners
+
+**Files:** Create `src/render/clearance.ts` (pure: centre lines for routes and the minimum distance between every pair of different wires), `test/clearance.test.ts`, fixtures `test/fixtures/lab6.net` + `test/fixtures/lab6.breadboard.json` (copied from the user's lab 6: export the netlist with kicad-cli, copy the sidecar). Modify `src/render/route3d.ts`.
+
+**Interfaces — Produces:** `export function clipPairs(doc: LayoutDoc, minGap = 2 * WIRE_R): { a: number; b: number; distance: number; at: [number, number, number] }[]` (pairs of wire indices whose 3D centre lines come closer than `minGap`), using the same `centreLine`/`fillet` the 3D tubes use (move whatever is needed from `client/wiretube-math.ts` into a DOM-free module if it is not already importable from `src/`).
+
+- [ ] **Step 1: Failing test** `test/clearance.test.ts`: build the lab 6 doc from the fixtures with `buildLayoutDoc` (square wires) and assert `clipPairs(doc)` is empty; same for the lab 3 / PL1_1 fixture with `wireStyle: 'orthogonal'`. Also unit tests for `clipPairs` on hand-made two-wire docs: crossing flat wires → 1 pair; one humped by `WIRE_D + AIR` → 0 pairs. Run — FAIL (lab 6 reports hundreds of pairs).
+- [ ] **Step 2: Lift height (research fix 2).** In the hump pass, measure the lower wire's height as its **highest point within ±(WIRE_R + BEND_R) of the crossing** along both wires (not at the crossing point alone) and lift to `WIRE_D + AIR_Z + below` with `const AIR_Z = 1`. Add a unit test with a crossing on the lower wire's ramp (distance 6.66 today) → ≥ 8 after.
+- [ ] **Step 3: Shared corners (research fix 5).** Treat a bend of one wire lying on another wire's run, and collinear overlaps, as crossings that need a lift; and give same-net wires the `TOUCH` cost so they stop sharing a bend node. Unit test: the two same-net pairs from lab 6 (`U2-S1 c74-g77 / h77-d77`, `U1-C0 c52-g55 / h55-d55`) are ≥ 8 apart.
+- [ ] **Step 4:** Lab 6 will still fail on the cross-board wires (Task 8). Mark only the lab 6 assertion `test.todo`-equivalent by asserting that every remaining pair involves a cross-board wire (`tierOf(a) !== tierOf(b)` for one of the two), and PL1_1 has zero pairs. Typecheck, tests, build, e2e. Commit `fix(3d): lifts clear the lower wire's whole hump; shared corners hop too`.
+
+### Task 8: One lattice for a stacked board (option A) and lifts across it
+
+**Files:** Modify `src/render/route3d.ts` (Grid/GAPS/nodeKey/routeStacked), `test/route3d.test.ts`, `test/clearance.test.ts`.
+
+- Route a stacked board as **one lattice**: both boards' rows plus the gap between them (`TIER_PITCH - HEIGHT` = 50 units) as extra corridor lines, with the seam crossable only in that gap and not through either board's rails. Cross-board wires are then routed, nudged and humped together with all the others; `routeStacked`'s per-board split is replaced. Keep `nodeKey`'s `t:` prefix scheme or replace it with a single global lattice index — whichever keeps `takenNodes`, `checkPlan`, `pathToPlan`/`planToPath` working; saved hand shapes on a stacked board keep loading (pathToPlan with global columns, tested).
+- The hump pass runs once over all routes of the board (research fix 1).
+- [ ] **Step 1:** change the Task 7 lab 6 assertion to `clipPairs(doc)` empty — FAIL.
+- [ ] **Step 2:** implement; existing route3d tests (stacked boards, saved shapes, nudging) keep passing; add one test that a cross-board wire's plan stays on the lattice (every bend is a lattice node) and crosses the seam in the gap.
+- [ ] **Step 3:** typecheck, tests, build, e2e; screenshots of lab 6 in 3D (square wires, high detail) before/after saved to the scratchpad. Commit `fix(3d): route stacked boards on one lattice so cross-board jumpers hop and nudge with the rest`.

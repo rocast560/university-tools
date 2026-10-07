@@ -10,6 +10,9 @@
 import { analog } from '../analog.ts';
 import { api } from '../api.ts';
 import type { Board3D } from '../board3d.ts';
+import type { ModelSet } from '../models.ts';
+import { cachedModels } from './modelcache.ts';
+import type { ModelKey } from '../../src/models/manifest.ts';
 import { currentHighlight } from '../board.ts';
 import { showBar } from '../showbar.ts';
 import type { PartGroup } from '../../src/render/index.ts';
@@ -44,6 +47,28 @@ export const addKeyHandler = (fn: KeyHandler) => (keyHandlers.add(fn), () => key
 const ORBIT_HINT = 'drag to orbit · right-drag to pan · scroll to zoom · click a part or a wire to select it · F focus · R rotate · Shift+R flip chip · 1-9 wire colour · Del delete · Ctrl+Z undo · Esc close';
 const FLY_HINT = 'WASD to move · mouse to look · space and C for up and down · shift to sprint · F or Esc to orbit again';
 
+type Detail = 'high' | 'simple';
+const DETAIL_KEY = 'benchmate.3dDetail';
+const readDetail = (): Detail => {
+  try {
+    return localStorage.getItem(DETAIL_KEY) === 'simple' ? 'simple' : 'high';
+  } catch {
+    return 'high';
+  }
+};
+const saveDetail = (d: Detail) => {
+  try {
+    localStorage.setItem(DETAIL_KEY, d);
+  } catch {
+    /* private mode: the choice just doesn't persist */
+  }
+};
+
+// The kit models are fetched once per page; reopening the editor reuses them.
+// Never rejects: no models just means the simple shapes.
+let dropHook: ModelKey[] = [];
+const getModels = cachedModels(() => import('../models.ts').then((m) => m.loadModels('/models/', undefined, dropHook)));
+
 const typing = (t: EventTarget | null) => {
   const el = t as HTMLElement | null;
   return !!el && (el.isContentEditable || /^(input|textarea|select)$/i.test(el.tagName));
@@ -65,6 +90,7 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
     '<button type="button" class="ws-btn" data-ws="fly" title="Fly through (F with nothing selected)">Fly through</button>' +
     '<button type="button" class="ws-btn" data-ws="prev" title="previous build step">◀</button><span class="ws-step"></span><button type="button" class="ws-btn" data-ws="next" title="next build step">▶</button>' +
     '<button type="button" class="ws-btn" data-ws="wires" title="curved arcs or square-cornered runs">Wires: curved</button>' +
+    '<button type="button" class="ws-btn" data-ws="detail" title="Real part models or simple shapes">Detail: high</button>' +
     '<button type="button" class="ws-btn" data-ws="wire" title="Draw a jumper from one hole to another (W)">Wire</button>' +
     '<button type="button" class="ws-btn" data-ws="undo" title="Undo (Ctrl+Z)" disabled>Undo</button><button type="button" class="ws-btn" data-ws="redo" title="Redo (Ctrl+Shift+Z)" disabled>Redo</button>' +
     '<span class="ws-hint"></span></div>' +
@@ -75,6 +101,8 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
   const canvasHost = root.querySelector<HTMLElement>('.ws-canvas')!;
   const hintEl = root.querySelector<HTMLElement>('.ws-hint')!;
   const stepEl = root.querySelector<HTMLElement>('.ws-step')!;
+  const detailBtn = root.querySelector<HTMLButtonElement>('[data-ws=detail]')!;
+  detailBtn.textContent = `Detail: ${readDetail()}`;
   const wiresBtn = root.querySelector<HTMLButtonElement>('[data-ws=wires]')!;
 
   const dismantle = () => {
@@ -93,6 +121,12 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
     throw e;
   }
   // Closed again while three was still downloading.
+  if (signal?.aborted || !root.isConnected) {
+    dismantle();
+    return null;
+  }
+  let detail = readDetail();
+  let models: ModelSet | null = detail === 'high' ? await getModels() : null;
   if (signal?.aborted || !root.isConnected) {
     dismantle();
     return null;
@@ -138,6 +172,7 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
     if (location.search.includes('e2e') && (window as { __e3dFailMount?: boolean }).__e3dFailMount) throw new Error('mount failed (test)');
     const board = mount3d(canvasHost, p.doc, {
       wireStyle: mountedStyle,
+      models,
       onToggle(key) {
         const q = store.get().project;
         if (!q) return;
@@ -271,6 +306,18 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
           })
           .catch((err: Error) => toast(err.message));
       }
+      if (what === 'detail') {
+        detail = detail === 'high' ? 'simple' : 'high';
+        saveDetail(detail);
+        detailBtn.textContent = `Detail: ${detail}`;
+        const want = detail;
+        (want === 'high' ? getModels() : Promise.resolve(null)).then((set) => {
+          // Toggled again, or closed, while the models were loading.
+          if (closed || detail !== want) return;
+          models = set;
+          board.setModels(models);
+        });
+      }
       if (what === 'undo') void editHistory.undo();
       if (what === 'redo') void editHistory.redo();
     });
@@ -364,6 +411,7 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
         // Wires (phase 2).
         routes: () => store.get().project?.doc.routes?.map((r) => r.plan) ?? null,
         wires: () => store.get().project?.doc.wires.map(wireKey) ?? [],
+        maxLift: () => Math.max(0, ...(store.get().project?.doc.routes ?? []).flatMap((r) => r.lifts.map((l) => l.height))),
         wireScreen(i: number) {
           const a = board.wireAnchor(i);
           const r = canvasHost.getBoundingClientRect();
@@ -390,6 +438,12 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
           return a.visible ? { x: r.left + a.x, y: r.top + a.y } : null;
         },
         failNextMove: _failNextMove,
+        modelKeys: () => (models?.keys ?? []) as string[],
+        // Test-only: the next open loads without these (the cache is cleared so it does).
+        dropModels(keys: ModelKey[]) {
+          dropHook = keys;
+          getModels.clear();
+        },
         // The wire tool.
         pinNet: (ref: string, pin: string) => store.get().project?.design.components.get(ref)?.pins.get(pin)?.net ?? null,
         jumper(a: Hole, b: Hole) {

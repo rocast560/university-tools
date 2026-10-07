@@ -305,6 +305,57 @@ async function click(page: CDP, x: number, y: number) {
 }
 
 const SCENARIOS: Record<string, (page: CDP, id: string) => Promise<void>> = {
+  async 'the editor opens with the kit models loaded'(page) {
+    await open3d(page);
+    const keys = await page.eval<string[]>(`__e3d.modelKeys().slice().sort()`);
+    if (keys.join() !== 'dip14,dip16,dipswitch7,led5,r0207,seg056') throw new Error(`models loaded: ${keys.join() || 'none'}`);
+  },
+  async 'Detail toggle swaps to simple shapes and back'(page) {
+    try {
+      await open3d(page);
+      await page.until(`__e3d.modelKeys().length === 6`, 'the models');
+      await page.eval(`document.querySelector('[data-ws=detail]').click()`);
+      await page.until(`document.querySelector('[data-ws=detail]').textContent === 'Detail: simple' && __e3d.modelKeys().length === 0`, 'simple detail');
+      await page.reload();
+      await page.until(`document.querySelector('[data-action=view3d]')`, 'the project page');
+      await open3d(page);
+      if ((await page.eval<string>(`document.querySelector('[data-ws=detail]').textContent`)) !== 'Detail: simple') throw new Error('the choice was not remembered');
+      await page.eval(`document.querySelector('[data-ws=detail]').click()`);
+      await page.until(`document.querySelector('[data-ws=detail]').textContent === 'Detail: high' && __e3d.modelKeys().length === 6`, 'high detail again');
+    } finally {
+      await page.eval(`try { localStorage.removeItem('benchmate.3dDetail'); } catch {}`);
+    }
+  },
+  async 'Detail toggle keeps the selection and the Show filter'(page) {
+    try {
+      await open3d(page);
+      await page.until(`__e3d.modelKeys().length === 6`, 'the models');
+      const target = (await pickable(page))[0];
+      if (!target) throw new Error('no pickable part');
+      await page.eval(`__e3d.select(${JSON.stringify(target.ref)})`);
+      await page.eval(`document.querySelector('.ws-legend [data-show=resistors]').click()`);
+      for (const want of ['simple', 'high']) {
+        await page.eval(`document.querySelector('[data-ws=detail]').click()`);
+        await page.until(`document.querySelector('[data-ws=detail]').textContent === 'Detail: ${want}' && __e3d.modelKeys().length === ${want === 'high' ? 6 : 0}`, `${want} detail`);
+        const ok = await page.eval<boolean>(`__e3d.selected() === ${JSON.stringify(target.ref)} && document.querySelector('.ws-legend [data-show=resistors]').classList.contains('is-on')`);
+        if (!ok) throw new Error(`the selection or Show filter was lost going to ${want}`);
+      }
+    } finally {
+      await page.eval(`try { localStorage.removeItem('benchmate.3dDetail'); } catch {}`);
+    }
+  },
+  async 'a missing model falls back'(page) {
+    await open3d(page);
+    await page.eval(`__e3d.dropModels(['dip14'])`);
+    await page.key('Escape', 'Escape');
+    await page.until(`!document.querySelector('.ws')`, 'the editor to close');
+    await open3d(page);
+    const keys = await page.eval<string[]>(`__e3d.modelKeys()`);
+    if (keys.includes('dip14') || keys.length !== 5) throw new Error(`keys after the drop: ${keys.join()}`);
+    if (!(await pickable(page)).length) throw new Error('nothing is pickable');
+    const chip = await page.eval<{ x: number; y: number } | null>(`(() => { const ref = __e3d.chips()[0]; const at = ref && __e3d.screenOf(ref); return at ? { x: at.x, y: at.y } : null; })()`);
+    if (!chip) throw new Error('no chip on screen');
+  },
   async 'workspace opens full screen'(page) {
     await open3d(page);
     const r = await page.eval<{ w: number; h: number }>(`(() => { const b = document.querySelector('.ws').getBoundingClientRect(); return { w: b.width, h: b.height }; })()`);
@@ -562,12 +613,12 @@ const SCENARIOS: Record<string, (page: CDP, id: string) => Promise<void>> = {
     try {
       await open3d(page);
       await page.until(`__e3d.routes() && __e3d.routes().length === __e3d.wires().length`, 'routed square wires');
-      // Flat: the centre line sits one radius up and the jacket reaches one more radius. A hump is one
-      // diameter over whatever it crosses, and the wire it crosses may itself be humping over a third,
-      // so humps stack. No crossing on this board is more than two deep (its highest lift is 14), so
-      // the bound allows two diameters: 4 + 2 * 8 + 4, plus a hair.
+      // Flat: the centre line sits one radius up and the jacket reaches one more radius, so nothing
+      // is higher than the tallest hump the router asked for plus a diameter. (How tall humps may
+      // be is held per board in test/clearance.test.ts.)
       const top = await page.eval<number>(`__e3d.wireTop()`);
-      if (!(top > 0 && top <= 4 + 2 * 8 + 4 + 0.5)) throw new Error(`the highest jacket reaches y = ${top}; flat wires stay under 24.5`);
+      const lift = await page.eval<number>(`__e3d.maxLift()`);
+      if (!(top > 0 && top <= lift + 2 * 4 + 0.5)) throw new Error(`the highest jacket reaches y = ${top}; the tallest hump is ${lift}, so it should stay under ${lift + 8.5}`);
       // The page's flat board draws the very same paths.
       const same = await page.eval<boolean>(
         `(() => { const d = [...document.querySelectorAll('#board .wire')].map((g) => g.querySelectorAll('path')[1]?.getAttribute('d')); const want = __e3d.routes().map((p) => p.map(([x, y], k) => (k ? 'L ' : 'M ') + x + ' ' + y).join(' ')); return d.length === want.length && d.every((v, i) => v === want[i]); })()`,
