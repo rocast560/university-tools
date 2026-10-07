@@ -2216,13 +2216,13 @@ tr:hover td {
   display: inline;
 }
 
-/* ---------- status lights ---------- */
+/* ---------- status lights: a compact agent count with a popover ---------- */
 
 .status-lights {
   position: relative;
   z-index: 40;
-  font-family: var(--font-mono);
-  font-size: 11px;
+  font-family: var(--font-body);
+  font-size: 12px;
   color: var(--ink-2);
   margin: 0 6px;
 }
@@ -2231,19 +2231,47 @@ tr:hover td {
   margin-right: auto;
 }
 
-.status-lights.is-hidden .light {
-  display: none;
+.lights-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  box-shadow: none;
+  color: var(--ink-2);
+  font: 500 12px/1 var(--font-body);
+  white-space: nowrap;
 }
 
-.lights-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 5px 8px 5px 10px;
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: var(--r-md);
-  box-shadow: var(--shadow-1);
+.lights-count:hover {
+  background: var(--sunken);
+  color: var(--ink);
+}
+
+.lights-count i,
+.light i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--quiet);
+  flex: none;
+}
+
+.lights-count.has-agents i,
+.light.is-on i {
+  background: var(--ok);
+}
+
+.lights-count.is-live i,
+.light.is-live i {
+  background: var(--ok);
+  animation: light-blink 0.5s steps(2, start) infinite;
+}
+
+.status-lights.is-hidden .lights-count i {
+  display: none;
 }
 
 .light {
@@ -2253,41 +2281,26 @@ tr:hover td {
   white-space: nowrap;
 }
 
-.light i {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #5f6b7c;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25) inset;
-}
-
-.light.is-on i {
-  background: #32a467;
-  box-shadow: 0 0 6px rgba(50, 164, 103, 0.7);
-}
-
-.light.is-live i {
-  background: #4c90f0;
-  animation: light-blink 0.5s steps(2, start) infinite;
-}
-
 .light.is-on,
 .light.is-live {
   color: var(--ink);
 }
 
-@keyframes light-blink {
-  0% { box-shadow: 0 0 8px rgba(76, 144, 240, 0.9); opacity: 1; }
-  100% { box-shadow: none; opacity: 0.35; }
+.lights-list {
+  display: grid;
+  gap: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line-soft);
 }
 
-.lights-gear {
-  padding: 2px 6px;
-  font-size: 12px;
-  background: transparent;
-  box-shadow: none;
-  border-color: transparent;
-  color: var(--ink-2);
+@keyframes light-blink {
+  0% { opacity: 1; }
+  100% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lights-count.is-live i,
+  .light.is-live i { animation: none; }
 }
 
 .lights-settings {
@@ -2707,23 +2720,7 @@ body.ws-open { overflow: hidden; }
   margin: 0 0 8px;
 }
 
-/* The Show filter above the net legend: one kind of part, the rest faded. */
-.legend .showbar {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-bottom: 6px;
-  font-family: var(--font-sans, inherit);
-}
-.legend .showbar span {
-  padding: 0;
-  cursor: default;
-}
-.legend .showbar span:hover {
-  background: none;
-}
+/* The Show filter floats over the board (.board-float); this is the 3D legend's. */
 .view3d-legend .showbar {
   flex-basis: 100%;
   display: flex;
@@ -2803,9 +2800,6 @@ body.ws-open { overflow: hidden; }
 .board-card:fullscreen[data-chrome='compact'] #legend > * {
   flex: none;
 }
-.board-card:fullscreen[data-chrome='compact'] #legend .showbar {
-  margin: 0 10px 0 0;
-}
 .board-card:fullscreen[data-chrome='compact'] .view3d-legend {
   flex-wrap: nowrap;
   overflow-x: auto;
@@ -2822,6 +2816,7 @@ body.ws-open { overflow: hidden; }
 /* Hidden: the board, and only the board. */
 .board-card:fullscreen[data-chrome='hidden'] #toolbar,
 .board-card:fullscreen[data-chrome='hidden'] #legend,
+.board-card:fullscreen[data-chrome='hidden'] .board-float,
 .board-card:fullscreen[data-chrome='hidden'] .view3d-legend,
 .board-card:fullscreen[data-chrome='hidden'] .view3d-bar {
   display: none;
@@ -2869,4 +2864,253 @@ body.ws-open { overflow: hidden; }
 .ws-legend .showbar .btn {
   padding: 2px 9px;
   font-size: 12px;
+}
+
+/* ---------- Calm Console: project app bar, grouped toolbar, Export menu ---------- */
+
+header.appbar .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 6px;
+  border-radius: var(--r-md);
+  color: var(--ink);
+  font-weight: 700;
+  font-size: 14px;
+  text-decoration: none;
+  letter-spacing: -0.01em;
+}
+header.appbar .brand .i {
+  width: 18px;
+  height: 18px;
+  color: var(--accent);
+}
+header.appbar .brand-mate,
+.home h1 .i {
+  color: var(--accent);
+}
+.home h1 .i {
+  width: 26px;
+  height: 26px;
+  margin-right: 8px;
+  vertical-align: -4px;
+}
+/* The inlined favicon mark gives way to the line-icon brand. */
+header.appbar h1::before,
+.home header h1::before {
+  content: none;
+}
+header.appbar .proj-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-2);
+  max-width: min(40ch, 40vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+header.appbar .btn {
+  height: 28px;
+  padding: 0 9px;
+  font-size: 12px;
+}
+.btn.icon-only {
+  padding: 0;
+  width: 28px;
+}
+.btn .caret {
+  margin-left: 2px;
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+/* One row of grouped controls; groups are divided by a hairline, not boxed. */
+.toolbar {
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+  padding: 0;
+}
+.toolbar .tgroup {
+  background: none;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  gap: 4px;
+  display: inline-flex;
+  align-items: center;
+}
+.toolbar .tgroup .btn,
+.toolbar .export > .btn,
+.toolbar > .btn {
+  height: 28px;
+  padding: 0 9px;
+  font-size: 12px;
+  font-weight: 500;
+  gap: 5px;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  color: var(--ink-2);
+  box-shadow: none;
+}
+.toolbar .tgroup .btn.icon-only {
+  padding: 0;
+  width: 28px;
+}
+.toolbar .tgroup .btn:hover,
+.toolbar .export > .btn:hover {
+  background: var(--sunken);
+  color: var(--ink);
+  box-shadow: none;
+}
+.toolbar .tgroup .btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+.toolbar .tgroup .btn.primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  color: var(--accent-ink);
+}
+.toolbar .tgroup .btn.is-on:not(.primary) {
+  background: var(--accent-soft);
+  border-color: var(--quiet);
+  color: var(--ok);
+  box-shadow: none;
+}
+.toolbar .tgroup.run .simclock {
+  padding: 0 4px;
+  font-size: 11px;
+  color: var(--ink-2);
+}
+.tsep {
+  align-self: stretch;
+  width: 1px;
+  margin: 3px 4px;
+  background: var(--line);
+  flex: none;
+}
+.toolbar .statuschip {
+  margin-left: auto;
+  background: none;
+  border: 0;
+  padding: 0 2px;
+  gap: 8px;
+  color: var(--ink-2);
+  font-size: 12px;
+}
+.toolbar .statuschip .errs::before {
+  content: none;
+}
+.toolbar .statuschip .errs {
+  gap: 4px;
+}
+.toolbar .statuschip .errs .i {
+  width: 14px;
+  height: 14px;
+}
+.toolbar .statuschip .errs.is-ok {
+  color: var(--ok);
+}
+.toolbar .statuschip .errs.is-bad {
+  color: var(--bad);
+}
+
+.export {
+  position: relative;
+  display: inline-flex;
+}
+.export-menu {
+  position: fixed;
+  z-index: 60;
+  min-width: 168px;
+  padding: 4px;
+  display: grid;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-2);
+}
+.export-menu [role='menuitem'] {
+  display: block;
+  width: 100%;
+  height: auto;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: none;
+  box-shadow: none;
+  color: var(--ink);
+  font: 500 12.5px/1.2 var(--font-body);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+.export-menu [role='menuitem']:hover,
+.export-menu [role='menuitem']:focus-visible {
+  background: var(--sunken);
+}
+
+/* The Show filter floats over the board's bottom-left corner. */
+.board-stage {
+  position: relative;
+}
+.board-card:fullscreen .board-stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.board-float {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  z-index: 2;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 3px 5px;
+  font-size: 12px;
+}
+.board-float .showbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.board-float .showbar .muted {
+  padding: 0 3px;
+}
+.board-float .tgroup {
+  background: none;
+  border: 0;
+  padding: 0;
+  gap: 2px;
+}
+.board-float .btn {
+  height: 24px;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 500;
+  background: transparent;
+  border-color: transparent;
+  color: var(--ink-2);
+  box-shadow: none;
+}
+.board-float .btn:hover {
+  background: var(--sunken);
+  color: var(--ink);
+}
+.board-float .btn.is-on {
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--ok);
+}
+@media print {
+  .board-float,
+  .export-menu {
+    display: none !important;
+  }
 }

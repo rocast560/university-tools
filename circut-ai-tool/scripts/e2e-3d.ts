@@ -1113,6 +1113,20 @@ const SCENARIOS: Record<string, (page: CDP, id: string) => Promise<void>> = {
     await page.until(`!document.querySelector('[data-ws=wire]').classList.contains('is-on')`, 'arming a part to turn the wire tool off');
     await page.key('Escape', 'Escape');
   },
+  async 'Export menu works from the keyboard'(page) {
+    await page.eval(`document.querySelector('[data-action=export]').focus()`);
+    await page.key('Enter', 'Enter');
+    await page.until(`document.querySelector('[role=menu]') && document.querySelectorAll('[role=menu] [role=menuitem]').length === 4`, 'the menu with four items');
+    if (!(await page.eval<boolean>(`document.querySelector('[data-action=export]').getAttribute('aria-expanded') === 'true'`))) throw new Error('aria-expanded is not true');
+    const first = await page.eval<string>(`document.activeElement.textContent.trim()`);
+    await page.key('ArrowDown', 'ArrowDown');
+    const second = await page.eval<string>(`document.activeElement.textContent.trim()`);
+    if (!first || !second || first === second) throw new Error(`ArrowDown did not move focus (${first} -> ${second})`);
+    await page.key('Escape', 'Escape');
+    await page.until(`!document.querySelector('[role=menu]')`, 'Esc to close the menu');
+    if (!(await page.eval<boolean>(`document.activeElement === document.querySelector('[data-action=export]')`))) throw new Error('focus did not return to the Export button');
+    if (!(await page.eval<boolean>(`document.querySelector('[data-action=export]').getAttribute('aria-expanded') === 'false'`))) throw new Error('aria-expanded is not false');
+  },
 };
 
 void main();

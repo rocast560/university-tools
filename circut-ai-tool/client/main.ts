@@ -3,6 +3,7 @@
 
 // Bundled, so the type never depends on a CDN (the app runs offline in Docker).
 import { mountFullscreenChrome } from './fschrome.ts';
+import { icon } from './icons.ts';
 import '@fontsource-variable/geist';
 import '@fontsource-variable/geist-mono';
 import { normalizeSidecar } from '../src/layout/types.ts';
@@ -94,7 +95,7 @@ async function renderHome() {
   // The header is rebuilt below; the lights follow it once it exists.
   queueMicrotask(placeLights);
   setTimeout(placeLights, 300);
-  app.replaceChildren(h(`<main class="home"><header><h1><span>Bench<span class="brand-mate">Mate</span></span></h1><p class="sub">Open a KiCad schematic and get a breadboard wiring diagram, a build guide, checks and a logic simulator.</p></header>
+  app.replaceChildren(h(`<main class="home"><header><h1>${icon('brand')}<span>Bench<span class="brand-mate">Mate</span></span></h1><p class="sub">Open a KiCad schematic and get a breadboard wiring diagram, a build guide, checks and a logic simulator.</p></header>
     <section class="open"><div id="drop" class="dropzone"><b>Drop a .kicad_sch here</b><span class="muted">or</span><button class="primary" type="button" id="pick">Import…</button><input type="file" id="file" accept=".kicad_sch" hidden></div>
       <form id="open-form"><label>Or open one in place <input name="path" placeholder="absolute path to a .kicad_sch" required></label><button type="submit">Open</button></form></section>
     <section><h2>Lab 3 · BCD to 7-segment</h2><p>L3 Auxiliary supplies inverted inputs and segments a–d. This example completes e–g with gates and a common-anode display. W is the 8-bit weight; Z is the 1-bit weight. A low output lights a segment.</p><button type="button" id="lab3-example">Create Lab 3 prelab example</button><p class="muted">Header numbers follow the instructor’s board labels, not its internal IC. Inputs 10–15 are don’t-care cases. The electrical model is approximate.</p></section>
@@ -158,6 +159,12 @@ async function renderHome() {
   }
 }
 
+/** Moon in the dark theme, sun in the light one: the icon shows what a click switches to. */
+function themeButton(theme: AppState['theme']): string {
+  const to = theme === 'dark' ? 'light' : 'dark';
+  return `<button type="button" id="theme" class="btn icon-only" title="Switch to ${to} theme" aria-label="Switch to ${to} theme">${icon(theme === 'dark' ? 'moon' : 'sun')}</button>`;
+}
+
 let boardUnmount: (() => void) | null = null;
 
 function renderProject(s: AppState) {
@@ -172,11 +179,13 @@ function renderProject(s: AppState) {
     // with it or its renderer keeps running against a detached canvas.
     close3d();
     app.replaceChildren(h(`<main class="project" data-id="${p.id}">
-      <header class="appbar"><a href="#/" class="back">← Projects</a><h1>${esc(p.name)}</h1><span class="path" title="${esc(p.path)}">${esc(p.path)}</span><div class="spacer"></div><a class="btn ghost" href="#/connect">Connect</a><button type="button" id="theme">${s.theme === 'dark' ? 'Light' : 'Dark'}</button></header>
-      <div class="layout ${localStorage.getItem('panelsCollapsed') === '1' ? 'collapsed' : ''}"><section class="boardcol"><div class="board-card"><div id="board"></div><div id="toolbar" class="toolbar"></div><div id="legend" class="legend"></div></div></section><aside id="panels" class="panels"></aside></div></main>`));
+      <header class="appbar"><a href="#/" class="brand" title="All projects" aria-label="BenchMate, all projects">${icon('brand')}<span>Bench<span class="brand-mate">Mate</span></span></a><h1 class="proj-name" title="${esc(p.path)}">${esc(p.name)}</h1><div class="spacer"></div><a class="btn" href="#/connect">${icon('connect')}Connect</a>${themeButton(s.theme)}</header>
+      <div class="layout ${localStorage.getItem('panelsCollapsed') === '1' ? 'collapsed' : ''}"><section class="boardcol"><div class="board-card"><div class="board-stage"><div id="board"></div><div id="boardfloat" class="board-float" role="group" aria-label="Show"></div></div><div id="toolbar" class="toolbar"></div><div id="legend" class="legend"></div></div></section><aside id="panels" class="panels"></aside></div></main>`));
     boardUnmount = mountBoard(app.querySelector('#board')!);
     mountFullscreenChrome(app.querySelector<HTMLElement>('.board-card')!);
-    app.querySelector('#theme')!.addEventListener('click', () => {
+    // The button is swapped on each render (its icon follows the theme), so the click is delegated.
+    app.querySelector('header.appbar')!.addEventListener('click', (e) => {
+      if (!(e.target as HTMLElement).closest('#theme')) return;
       const theme = store.get().theme === 'dark' ? 'light' : 'dark';
       try {
         localStorage.setItem('theme', theme);
@@ -186,7 +195,8 @@ function renderProject(s: AppState) {
       store.set({ theme });
     });
   }
-  app.querySelector('#theme')!.textContent = s.theme === 'dark' ? 'Light' : 'Dark';
+  const themeBtn = app.querySelector('#theme')!;
+  if (!themeBtn.getAttribute('aria-label')?.includes(s.theme === 'dark' ? 'light' : 'dark')) themeBtn.outerHTML = themeButton(s.theme);
   renderPanels(app.querySelector('#panels')!, app.querySelector('#toolbar')!, app.querySelector('#legend')!, s);
   placeLights();
 }

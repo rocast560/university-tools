@@ -63,6 +63,16 @@ function stateOf(kind: Kind): 'live' | 'on' | 'off' {
   return age < LIVE_MS ? 'live' : age < ON_MS ? 'on' : 'off';
 }
 
+/** Agents that have been by recently (blinking or steady), among the ones shown. */
+function agentCount(): number {
+  return KINDS.filter((k) => settings.show[k] && stateOf(k) !== 'off').length;
+}
+
+const countLabel = () => {
+  const n = agentCount();
+  return n === 0 ? 'No agents' : `${n} agent${n === 1 ? '' : 's'}`;
+};
+
 function paint() {
   if (!root) return;
   root.className = `status-lights ${settings.corner} ${settings.enabled ? '' : 'is-hidden'} ${open ? 'is-open' : ''}`;
@@ -74,15 +84,18 @@ function paint() {
       return `<span class="light is-${state}" data-kind="${k}" title="${esc(when)}"><i></i>${esc(LABELS[k])}</span>`;
     })
     .join('');
+  // The popover lists each agent, then the settings for which ones to show and where.
   const panel = open
-    ? `<div class="lights-settings">
-        <label><input type="checkbox" data-set="enabled" ${settings.enabled ? 'checked' : ''}> Show status lights</label>
+    ? `<div class="lights-settings" role="dialog" aria-label="Agents">
+        <div class="lights-list">${lights || '<span class="muted">No agents are shown.</span>'}</div>
+        <label><input type="checkbox" data-set="enabled" ${settings.enabled ? 'checked' : ''}> Show agent count</label>
         <label>Corner <select data-set="corner"><option value="top-right" ${settings.corner === 'top-right' ? 'selected' : ''}>top right</option><option value="top-left" ${settings.corner === 'top-left' ? 'selected' : ''}>top left</option></select></label>
         ${KINDS.map((k) => `<label><input type="checkbox" data-show="${k}" ${settings.show[k] ? 'checked' : ''}> ${esc(LABELS[k])}</label>`).join('')}
-        <p class="muted">A light blinks while that assistant is calling the server, stays lit for five minutes after, and dims when it has gone quiet. Set each one up on the Connect page.</p>
+        <p class="muted">An agent blinks while it is calling the server, stays lit for five minutes after, and drops out of the count when it has gone quiet. Set each one up on the Connect page.</p>
       </div>`
     : '';
-  root.innerHTML = `<div class="lights-row">${lights}<button type="button" class="lights-gear" title="status light settings" aria-label="status light settings">⚙</button></div>${panel}`;
+  const live = KINDS.some((k) => settings.show[k] && stateOf(k) === 'live');
+  root.innerHTML = `<button type="button" class="lights-count ${agentCount() ? 'has-agents' : ''} ${live ? 'is-live' : ''}" aria-haspopup="dialog" aria-expanded="${open}" title="Agents connected over MCP"><i aria-hidden="true"></i><span class="lights-n">${settings.enabled ? countLabel() : 'Agents'}</span></button>${panel}`;
 }
 
 /** Refresh only the lights' states, so an open settings panel is left alone. */
@@ -96,6 +109,13 @@ function tick() {
     el.title = c ? `${c.name} · last call ${c.lastMethod} · ${Math.max(0, Math.round((Date.now() - c.lastSeen) / 1000))}s ago` : 'not connected yet';
     const word = el.querySelector('.conn-state');
     if (word) word.textContent = state === 'live' ? 'calling now' : state === 'on' ? 'connected' : 'not connected';
+  }
+  const btn = root?.querySelector<HTMLElement>('.lights-count');
+  if (btn) {
+    btn.classList.toggle('has-agents', agentCount() > 0);
+    btn.classList.toggle('is-live', KINDS.some((k) => settings.show[k] && stateOf(k) === 'live'));
+    const n = btn.querySelector('.lights-n');
+    if (n && settings.enabled) n.textContent = countLabel();
   }
 }
 
@@ -125,8 +145,16 @@ export function mountLights() {
   placeLights();
   root.addEventListener('click', (e) => {
     const t = e.target as HTMLElement;
-    if (t.closest('.lights-gear')) {
+    if (t.closest('.lights-count')) {
       open = !open;
+      paint();
+      if (open) root?.querySelector<HTMLElement>('.lights-settings input')?.focus();
+    }
+  });
+  // Click elsewhere closes the popover.
+  document.addEventListener('pointerdown', (e) => {
+    if (open && root && !root.contains(e.target as Node)) {
+      open = false;
       paint();
     }
   });
@@ -146,6 +174,7 @@ export function mountLights() {
     if (e.key === 'Escape' && open) {
       open = false;
       paint();
+      root?.querySelector<HTMLElement>('.lights-count')?.focus();
     }
   });
   paint();

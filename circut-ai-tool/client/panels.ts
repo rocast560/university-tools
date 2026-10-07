@@ -256,6 +256,83 @@ function wireLive() {
   });
 }
 
+// The Export menu lives inside the toolbar, which is rebuilt on every state
+// change, so whether it is open (and where focus sits in it) is kept here.
+let exportOpen = false;
+/** Where focus goes after the next paint: -1 the Export button, n the nth item, null leave it. */
+let pendingFocus: number | null = null;
+let exportRepaint: (() => void) | null = null;
+let outsideWired = false;
+
+function setExport(open: boolean, focus: number | null) {
+  exportOpen = open;
+  pendingFocus = focus;
+  exportRepaint?.();
+}
+
+const exportItems = (toolbar: HTMLElement) => [...toolbar.querySelectorAll<HTMLElement>('.export-menu [role="menuitem"]')];
+
+/** Focus inside the menu (or on its button) before a repaint, so the repaint can give it back. */
+function exportFocusToKeep(toolbar: HTMLElement): number | null {
+  if (pendingFocus !== null) return pendingFocus;
+  const a = document.activeElement as HTMLElement | null;
+  if (!a || !toolbar.contains(a)) return null;
+  if (a.matches('[data-action="export"]')) return -1;
+  const i = exportItems(toolbar).indexOf(a);
+  return i >= 0 ? i : null;
+}
+
+function placeExportMenu(toolbar: HTMLElement, focus: number | null) {
+  pendingFocus = null;
+  const button = toolbar.querySelector<HTMLElement>('[data-action="export"]');
+  const menu = toolbar.querySelector<HTMLElement>('.export-menu');
+  if (button && menu) {
+    // Fixed, so a toolbar that scrolls sideways (compact full screen) cannot clip it.
+    const r = button.getBoundingClientRect();
+    menu.style.left = `${Math.max(8, Math.min(r.left, innerWidth - menu.offsetWidth - 8))}px`;
+    menu.style.top = `${r.bottom + 4}px`;
+  }
+  if (!outsideWired) {
+    outsideWired = true;
+    document.addEventListener('pointerdown', (e) => {
+      if (exportOpen && !(e.target as HTMLElement).closest?.('.export')) setExport(false, null);
+    });
+    addEventListener('resize', () => exportOpen && setExport(false, null));
+  }
+  if (focus === null) return;
+  if (focus < 0) button?.focus();
+  else exportItems(toolbar)[focus]?.focus();
+}
+
+function exportKey(e: KeyboardEvent, toolbar: HTMLElement) {
+  const t = e.target as HTMLElement;
+  const items = exportItems(toolbar);
+  if (t.closest('[data-action="export"]')) {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      setExport(!exportOpen, exportOpen ? -1 : 0);
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      setExport(true, e.key === 'ArrowDown' ? 0 : 3);
+    } else if (e.key === 'Escape' && exportOpen) {
+      e.preventDefault();
+      setExport(false, -1);
+    }
+    return;
+  }
+  const i = items.indexOf(t);
+  if (i < 0) return;
+  const go = (n: number) => (e.preventDefault(), items[(n + items.length) % items.length].focus());
+  if (e.key === 'ArrowDown') go(i + 1);
+  else if (e.key === 'ArrowUp') go(i - 1);
+  else if (e.key === 'Home') go(0);
+  else if (e.key === 'End') go(items.length - 1);
+  else if (e.key === 'Escape') {
+    e.preventDefault();
+    setExport(false, -1);
+  } else if (e.key === 'Tab') setExport(false, -1);
+}
+
 export function renderPanels(panels: HTMLElement, toolbar: HTMLElement, legend: HTMLElement, s: AppState) {
   const p = s.project;
   if (!p) return;
@@ -279,15 +356,28 @@ export function renderPanels(panels: HTMLElement, toolbar: HTMLElement, legend: 
   if (p.panel === 'sim') patchSim(panels, analog.latest(), p.running);
 
   const errs = p.doc.checks.filter((c) => c.level === 'error').length;
+  const wantFocus = exportFocusToKeep(toolbar);
+  const fs = !!document.fullscreenElement;
+  const square = p.sidecar.options.wireStyle === 'orthogonal';
   toolbar.innerHTML =
-    `<div class="tgroup run"><button type="button" class="btn ${p.running ? 'is-on' : ''}" data-action="${p.running ? 'stop' : 'run'}">${p.running ? '■ Stop' : '▶ Run'}</button><button type="button" class="btn" data-action="step" ${p.running ? 'disabled' : ''}>Step</button><button type="button" class="btn ghost" data-action="reset-sim">Reset</button><span class="simclock mono" data-live-clock>0.000 s</span></div>` +
-    `<div class="tgroup"><button type="button" class="btn" data-action="fit">Fit</button><button type="button" class="btn ${document.fullscreenElement ? 'is-on' : ''}" data-action="fullscreen">${document.fullscreenElement ? 'Exit full screen' : 'Full screen'}</button><button type="button" class="btn" data-action="print">Print</button><button type="button" class="btn ${p.sidecar.options.wireStyle === 'orthogonal' ? 'is-on' : ''}" data-action="wirestyle" title="curved arcs or square-cornered runs">${p.sidecar.options.wireStyle === 'orthogonal' ? 'Wires: square' : 'Wires: curved'}</button></div>` +
-    `<div class="tgroup"><button type="button" class="btn ${is3dOpen() ? 'is-on' : ''}" data-action="view3d">${is3dOpen() ? 'Exit 3D' : '3D'}</button></div>` +
-    `<div class="tgroup"><a class="btn" href="/api/projects/${p.id}/board.svg" download="${esc(p.name)}-breadboard.svg">SVG</a><a class="btn" href="/api/projects/${p.id}/board.png" download="${esc(p.name)}-breadboard.png">PNG</a><a class="btn" href="/api/projects/${p.id}/schematic.svg" target="_blank" rel="noopener">Schematic</a></div>` +
+    `<div class="tgroup run"><button type="button" class="btn primary ${p.running ? 'is-on' : ''}" data-action="${p.running ? 'stop' : 'run'}">${p.running ? '<span aria-hidden="true">■</span>Stop' : `${icon('run')}Run`}</button><button type="button" class="btn" data-action="step" ${p.running ? 'disabled' : ''}>${icon('step')}Step</button><button type="button" class="btn icon-only" data-action="reset-sim" title="Reset the simulation" aria-label="Reset the simulation">${icon('reset')}</button><span class="simclock mono" data-live-clock>0.000 s</span></div><span class="tsep" aria-hidden="true"></span>` +
+    `<div class="tgroup"><button type="button" class="btn icon-only" data-action="fit" title="Fit the board to the view" aria-label="Fit the board to the view">${icon('fit')}</button><button type="button" class="btn icon-only ${fs ? 'is-on' : ''}" data-action="fullscreen" title="${fs ? 'Exit full screen' : 'Full screen'}" aria-label="${fs ? 'Exit full screen' : 'Full screen'}">${icon('fullscreen')}</button><button type="button" class="btn ${square ? 'is-on' : ''}" data-action="wirestyle" aria-pressed="${square}" title="curved arcs or square-cornered runs">${icon('wires')}Square wires</button><button type="button" class="btn ${is3dOpen() ? 'is-on' : ''}" data-action="view3d">${icon('cube')}${is3dOpen() ? 'Exit 3D' : '3D'}</button></div><span class="tsep" aria-hidden="true"></span>` +
+    `<div class="export"><button type="button" class="btn" data-action="export" aria-haspopup="menu" aria-expanded="${exportOpen}" aria-controls="export-menu">${icon('export')}Export<span class="caret" aria-hidden="true">▾</span></button>${
+      exportOpen
+        ? `<div class="export-menu" id="export-menu" role="menu" aria-label="Export">` +
+          `<a role="menuitem" tabindex="-1" href="/api/projects/${p.id}/board.svg" download="${esc(p.name)}-breadboard.svg">Breadboard SVG</a>` +
+          `<a role="menuitem" tabindex="-1" href="/api/projects/${p.id}/board.png" download="${esc(p.name)}-breadboard.png">Breadboard PNG</a>` +
+          `<a role="menuitem" tabindex="-1" href="/api/projects/${p.id}/schematic.svg" target="_blank" rel="noopener">Schematic</a>` +
+          `<button type="button" role="menuitem" tabindex="-1" data-action="print">Print</button></div>`
+        : ''
+    }</div>` +
     (p.activeStep !== null ? '<button type="button" class="btn ghost" data-action="clear-step">Clear highlight</button>' : '') +
-    `<span class="statuschip"><b>${esc(p.doc.board.kind)} board</b><i class="dot"></i>${p.doc.wires.length} wires<i class="dot"></i><em class="errs ${errs ? 'is-bad' : 'is-ok'}">${errs} ${errs === 1 ? 'error' : 'errors'}</em></span>`;
+    `<span class="statuschip"><em class="errs ${errs ? 'is-bad' : 'is-ok'}">${errs ? '' : icon('check')}${errs} ${errs === 1 ? 'error' : 'errors'}</em><span>${p.doc.wires.length} wires</span><span>${esc(p.doc.board.kind)}</span></span>`;
+  placeExportMenu(toolbar, wantFocus);
+  exportRepaint = () => renderPanels(panels, toolbar, legend, store.get());
+  const floatEl = document.getElementById('boardfloat');
+  if (floatEl) floatEl.innerHTML = showBar(p.partGroup ?? null);
   legend.innerHTML =
-    showBar(p.partGroup ?? null) +
     `<b class="legend-label">${icon('chevron')}Nets</b>` +
     (() => {
       const order = flowOrder(p.doc);
@@ -396,8 +486,20 @@ export function renderPanels(panels: HTMLElement, toolbar: HTMLElement, legend: 
       toast((err as Error).message);
     }
   };
+  toolbar.onkeydown = (e) => exportKey(e, toolbar);
+  toolbar.onkeyup = (e) => {
+    // Space on the Export button is handled on keydown; keep the click it would add from toggling back.
+    if (e.key === ' ' && (e.target as HTMLElement).closest('[data-action="export"]')) e.preventDefault();
+  };
   toolbar.onclick = (e) => {
     const action = (e.target as HTMLElement).closest<HTMLElement>('[data-action]')?.dataset.action;
+    if (action === 'export') {
+      // A real click (keyboard activation is taken on keydown): toggle without moving focus.
+      setExport(!exportOpen, null);
+      return;
+    }
+    // Picking an item closes the menu once the browser has acted on it.
+    if ((e.target as HTMLElement).closest('[role="menuitem"]')) setTimeout(() => setExport(false, -1), 0);
     if (action === 'fit') fitView(document.getElementById('board')!);
     if (action === 'fullscreen') {
       // The whole card goes full screen, so the toolbar and legend stay in reach.
@@ -430,14 +532,29 @@ export function renderPanels(panels: HTMLElement, toolbar: HTMLElement, legend: 
       }
     }
   };
-  legend.onclick = async (e) => {
-    const show = (e.target as HTMLElement).closest<HTMLElement>('[data-show]');
-    if (show) {
+  // The Show filter floats over the board, outside the legend strip.
+  const floating = document.getElementById('boardfloat');
+  if (floating) {
+    floating.onclick = (e) => {
+      const show = (e.target as HTMLElement).closest<HTMLElement>('[data-show]');
+      if (!show) return;
       // Picking the same group again goes back to showing everything.
       const group = (show.dataset.show || null) as PartGroup | null;
       store.setProject({ partGroup: group === p.partGroup ? null : group });
-      return;
-    }
+    };
+    floating.onmouseover = (e) => {
+      // Hovering a Show button previews that group: rings and arrows on every part in it.
+      const show = (e.target as HTMLElement).closest<HTMLElement>('[data-show]')?.dataset.show;
+      if (show === undefined) return;
+      const hl: Highlight | null = show ? { group: show as PartGroup } : null;
+      // The bar is rebuilt on every change, so only a real change of highlight may set state.
+      if (p.activeStep === null && JSON.stringify(hl) !== JSON.stringify(p.highlight ?? null)) store.setProject({ highlight: hl });
+    };
+    floating.onmouseleave = () => {
+      if (p.activeStep === null && p.highlight) store.setProject({ highlight: null });
+    };
+  }
+  legend.onclick = async (e) => {
     const net = (e.target as HTMLElement).closest<HTMLElement>('[data-legend]')?.dataset.legend;
     if (!net) return;
     const input = document.createElement('input');
@@ -454,15 +571,12 @@ export function renderPanels(panels: HTMLElement, toolbar: HTMLElement, legend: 
     input.click();
   };
   legend.onmouseover = (e) => {
-    // Hovering a Show button previews that group: rings and arrows on every part in it.
-    const show = (e.target as HTMLElement).closest<HTMLElement>('[data-show]')?.dataset.show;
     // The legend is rebuilt on every change, so the pointer is "over" a fresh
     // element after each one: only a real change of highlight may set state,
     // or hovering would re-render forever.
     const set = (hl: Highlight | null) => {
       if (p.activeStep === null && JSON.stringify(hl) !== JSON.stringify(p.highlight ?? null)) store.setProject({ highlight: hl });
     };
-    if (show !== undefined) return set(show ? { group: show as PartGroup } : null);
     const net = (e.target as HTMLElement).closest<HTMLElement>('[data-legend]')?.dataset.legend;
     if (net) set({ net });
   };
