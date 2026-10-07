@@ -21,49 +21,54 @@
 :root {
   color-scheme: light;
 
-  /* Lab Bench, daylight: cool neutral chrome, one violet accent. Violet is
-     the one hue no jumper wire on the board uses, so anything the app wants
-     your eye on can never be mistaken for a wire. Contrast (WCAG): ink on
-     card 17.8:1, ink-2 6.1:1, accent text 6.2:1, white on accent 6.2:1. */
-  --bg: #f5f6f8;
-  --tint-a: rgba(109, 63, 217, 0.07);
-  --tint-b: rgba(10, 99, 194, 0.04);
+  /* Calm Console, daylight: neutral chrome with the Turtle palette. Teal is
+     the one strong accent; slate marks quiet "on" states. The light accent and
+     ok are darkened so text on them meets WCAG AA; test/ui-contrast.test.ts
+     checks every pair against this block and the dark one. */
+  --bg: #f6f7f7;
+  --tint-a: transparent;
+  --tint-b: transparent;
   --tint-c: transparent;
 
   /* content */
-  --ink: #16181d;
-  --ink-2: #5b6270;
-  --line: #d9dde3;
-  --line-soft: #e6e9ee;
+  --ink: #16191b;
+  --ink-2: #5b6268;
+  --line: #dde1e3;
+  --line-soft: #e8ebec;
   --card: #ffffff;
   --raised: #ffffff;
-  --sunken: #edeff3;
-  --accent: #6d3fd9;
-  --accent-hover: #5a2fc2;
-  --accent-soft: #f1ecfe;
+  --sunken: #edeff0;
+  --accent: #1f7c78;
+  --accent-hover: #186663;
+  --accent-soft: #e3f1f0;
   --accent-ink: #ffffff;
-  --focus: #8b5cf6;
+  --quiet: #557b83;
+  --ok: #2e7d53;
+  --highlight: #e5efc1;
+  --bad: #c21e36;
+  --warn: #a34e00;
+  --focus: #1f7c78;
   --btn: #ffffff;
-  --btn-hover: #f3f4f7;
-  --btn-line: #d9dde3;
+  --btn-hover: #f1f3f3;
+  --btn-line: #dde1e3;
 
   /* panels are solid; the names stay so older rules keep working */
   --glass: #ffffff;
-  --glass-strong: #f8f9fb;
-  --glass-border: #d9dde3;
-  --glass-highlight: rgba(255, 255, 255, 0);
+  --glass-strong: #ffffff;
+  --glass-border: #dde1e3;
+  --glass-highlight: transparent;
   --blur: 0px;
   --sat: 100%;
 
-  /* elevation: light uses soft shadows */
-  --shadow-1: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.08);
-  --shadow-2: 0 2px 4px rgba(16, 24, 40, 0.06), 0 4px 12px rgba(16, 24, 40, 0.08);
-  --shadow-3: 0 8px 24px rgba(16, 24, 40, 0.12);
+  /* no elevation except menus and toasts (--shadow-2). The no-op value is a
+     zero shadow, not "none", because rules list it next to other shadows. */
+  --shadow-1: 0 0 0 0 transparent;
+  --shadow-2: 0 4px 12px rgba(22, 25, 27, 0.12);
+  --shadow-3: 0 0 0 0 transparent;
 
   /* status: always paired with a word or icon, and kept off the board */
-  --done: #17784c;
-  --warn: #a34e00;
-  --err: #c21e36;
+  --done: var(--ok);
+  --err: var(--bad);
   --info: #0a63c2;
   --done-soft: #e7f4ec;
   --warn-soft: #fdf0e3;
@@ -96,50 +101,51 @@
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  /* Lab Bench, night: near-black but never pure black, elevation shown by
-     lighter surfaces rather than shadows, and a desaturated violet.
-     Contrast: ink on card 14.5:1, ink-2 6.9:1, accent 6.5:1. */
-  --bg: #0f1115;
-  --tint-a: rgba(169, 139, 255, 0.06);
-  --tint-b: rgba(94, 176, 255, 0.03);
+  /* Calm Console, night: neutral dark gray (no blue tint), teal accent. */
+
+  --bg: #18191b;
+  --tint-a: transparent;
+  --tint-b: transparent;
   --tint-c: transparent;
 
-  --ink: #e8eaee;
-  --ink-2: #9ba3b1;
-  --line: #2c313b;
-  --line-soft: #232831;
-  --card: #171a20;
-  --raised: #1e222a;
-  --sunken: #0b0d10;
-  --accent: #a98bff;
-  --accent-hover: #bca5ff;
-  --accent-soft: #2a2344;
-  --accent-ink: #130b2e;
-  --focus: #b69cff;
-  --btn: #1e222a;
-  --btn-hover: #252a33;
-  --btn-line: #2c313b;
+  --ink: #e8e9eb;
+  --ink-2: #8b8f96;
+  --line: #2c2e31;
+  --line-soft: #26282b;
+  --card: #1f2022;
+  --raised: #1f2022;
+  --sunken: #141516;
+  --accent: #39aea9;
+  --accent-hover: #45bfba;
+  --accent-soft: #1f2b2b;
+  --accent-ink: #0d1f1e;
+  --quiet: #557b83;
+  --ok: #a2d5ab;
+  --highlight: #e5efc1;
+  --bad: #e8636f;
+  --warn: #e7b14d;
+  --focus: #39aea9;
+  --btn: #1f2022;
+  --btn-hover: #26282b;
+  --btn-line: #2c2e31;
 
-  --glass: #171a20;
-  --glass-strong: #1e222a;
-  --glass-border: #2c313b;
-  --glass-highlight: rgba(255, 255, 255, 0.04);
-  --blur: 0px;
-  --sat: 100%;
+  --glass: #1f2022;
+  --glass-strong: #1f2022;
+  --glass-border: #2c2e31;
+  --glass-highlight: transparent;
 
-  --shadow-1: inset 0 1px 0 rgba(255, 255, 255, 0.04);
-  --shadow-2: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 4px 12px rgba(0, 0, 0, 0.35);
-  --shadow-3: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-1: 0 0 0 0 transparent;
+  --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-3: 0 0 0 0 transparent;
 
-  --done: #3fcf8e;
-  --warn: #f2a93b;
-  --err: #ff6b6b;
+  --done: var(--ok);
+  --err: var(--bad);
   --info: #5eb0ff;
-  --done-soft: #12291f;
-  --warn-soft: #33250f;
-  --err-soft: #3a1a1e;
-  --info-soft: #10243a;
-  --on-status: #0f1115;
+  --done-soft: #1b2a22;
+  --warn-soft: #2e2718;
+  --err-soft: #2e1d1f;
+  --info-soft: #1c2630;
+  --on-status: #18191b;
 }
 
 /* Correct shell before the JS module boots (the inline guard in index.html
@@ -147,45 +153,50 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --bg: #0f1115;
-    --tint-a: rgba(169, 139, 255, 0.06);
-    --tint-b: rgba(94, 176, 255, 0.03);
+
+    --bg: #18191b;
+    --tint-a: transparent;
+    --tint-b: transparent;
     --tint-c: transparent;
 
-    --ink: #e8eaee;
-    --ink-2: #9ba3b1;
-    --line: #2c313b;
-    --line-soft: #232831;
-    --card: #171a20;
-    --raised: #1e222a;
-    --sunken: #0b0d10;
-    --accent: #a98bff;
-    --accent-hover: #bca5ff;
-    --accent-soft: #2a2344;
-    --accent-ink: #130b2e;
-    --focus: #b69cff;
-    --btn: #1e222a;
-    --btn-hover: #252a33;
-    --btn-line: #2c313b;
+    --ink: #e8e9eb;
+    --ink-2: #8b8f96;
+    --line: #2c2e31;
+    --line-soft: #26282b;
+    --card: #1f2022;
+    --raised: #1f2022;
+    --sunken: #141516;
+    --accent: #39aea9;
+    --accent-hover: #45bfba;
+    --accent-soft: #1f2b2b;
+    --accent-ink: #0d1f1e;
+    --quiet: #557b83;
+    --ok: #a2d5ab;
+    --highlight: #e5efc1;
+    --bad: #e8636f;
+    --warn: #e7b14d;
+    --focus: #39aea9;
+    --btn: #1f2022;
+    --btn-hover: #26282b;
+    --btn-line: #2c2e31;
 
-    --glass: #171a20;
-    --glass-strong: #1e222a;
-    --glass-border: #2c313b;
-    --glass-highlight: rgba(255, 255, 255, 0.04);
+    --glass: #1f2022;
+    --glass-strong: #1f2022;
+    --glass-border: #2c2e31;
+    --glass-highlight: transparent;
 
-    --shadow-1: inset 0 1px 0 rgba(255, 255, 255, 0.04);
-    --shadow-2: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 4px 12px rgba(0, 0, 0, 0.35);
-    --shadow-3: 0 8px 24px rgba(0, 0, 0, 0.5);
+    --shadow-1: 0 0 0 0 transparent;
+    --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.4);
+    --shadow-3: 0 0 0 0 transparent;
 
-    --done: #3fcf8e;
-    --warn: #f2a93b;
-    --err: #ff6b6b;
+    --done: var(--ok);
+    --err: var(--bad);
     --info: #5eb0ff;
-    --done-soft: #12291f;
-    --warn-soft: #33250f;
-    --err-soft: #3a1a1e;
-    --info-soft: #10243a;
-    --on-status: #0f1115;
+    --done-soft: #1b2a22;
+    --warn-soft: #2e2718;
+    --err-soft: #2e1d1f;
+    --info-soft: #1c2630;
+    --on-status: #18191b;
   }
 }
 
