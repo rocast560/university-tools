@@ -2,7 +2,8 @@
 // plus the cloud-access toggle that exposes this server through a tunnel.
 
 import { api, type TunnelStatus } from './api.ts';
-import { esc, h, toast } from './main.ts';
+import { appBar, esc, h, toast, wireAppBar } from './main.ts';
+import { store } from './state.ts';
 import { placeLights } from './lights.ts';
 
 /** Which status light a connect snippet belongs to. */
@@ -29,7 +30,8 @@ function cloudCard(t: TunnelStatus): string {
 }
 
 export async function renderConnect(root: HTMLElement) {
-  root.replaceChildren(h('<main class="connect"><header><a href="#/" class="back">← projects</a><h1>Connect an assistant</h1></header><p class="muted">Loading…</p></main>'));
+  root.replaceChildren(h(`<main class="connect">${appBar(store.get().theme, { title: 'Connect an assistant', current: 'connect' })}<p class="muted">Loading…</p></main>`));
+  wireAppBar(root.querySelector<HTMLElement>('header.appbar')!);
   try {
     const info = await api.connect();
     const main = root.querySelector('main')!;
@@ -67,8 +69,10 @@ export async function renderConnect(root: HTMLElement) {
       wireTunnel();
     }
 
+    const bar = main.querySelector<HTMLElement>('header.appbar')!;
+    bar.querySelector('.spacer')!.before(h(`<span class="path">MCP ${esc(info.mcpUrl)}</span>`));
     main.replaceChildren(
-      h(`<header><a href="#/" class="back">← projects</a><h1>Connect an assistant</h1><span class="path">MCP ${esc(info.mcpUrl)}</span></header>`),
+      bar,
       h(`<p>Tools: <code>${info.tools.map(esc).join('</code>, <code>')}</code></p>`),
       h(cloudCard(info.tunnel)),
       ...info.snippets.map((s) => {

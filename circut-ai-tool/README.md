@@ -112,7 +112,7 @@ The interface uses flat surfaces on a neutral dark gray (`#18191B` page,
 | teal | `#39AEA9` | primary buttons, the selected tab, focus rings, progress |
 | mint | `#A2D5AB` | success text, "on" states, 0 errors |
 | slate | `#557B83` | outlines of toggled-on buttons, secondary marks |
-| cream | `#E5EFC1` | rare emphasis, such as notices |
+| cream | `#E5EFC1` | the outline of toast notices |
 
 Light mode (the moon/sun button in the app bar) uses the same layout on an
 off-white page with white cards. Teal and mint are darkened there

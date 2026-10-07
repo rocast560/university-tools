@@ -126,7 +126,7 @@ function tick() {
  */
 export function placeLights() {
   if (!root) return;
-  const header = document.querySelector<HTMLElement>('header.appbar, main.home > header, main.connect > header');
+  const header = document.querySelector<HTMLElement>('header.appbar');
   if (!header) return;
   if (settings.corner === 'top-left') {
     const after = header.querySelector('.path, h1');

@@ -9,6 +9,7 @@
 
 import { analog } from '../analog.ts';
 import { api } from '../api.ts';
+import { wheelScrollX } from '../wheelscroll.ts';
 import type { Board3D } from '../board3d.ts';
 import type { ModelSet } from '../models.ts';
 import { cachedModels } from './modelcache.ts';
@@ -351,16 +352,7 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
     legend.addEventListener('mouseover', (e) => board.setHover((e.target as HTMLElement).closest<HTMLElement>('[data-legend]')?.dataset.legend ?? null));
     legend.addEventListener('mouseleave', () => board.setHover(null));
     // A plain mouse wheel over the net row scrolls it sideways.
-    const nets = legend.querySelector<HTMLElement>('.ws-nets')!;
-    nets.addEventListener(
-      'wheel',
-      (e) => {
-        if (Math.abs(e.deltaY) <= Math.abs(e.deltaX) || nets.scrollWidth <= nets.clientWidth) return;
-        nets.scrollLeft += e.deltaY;
-        e.preventDefault();
-      },
-      { passive: false },
-    );
+    wheelScrollX(legend.querySelector<HTMLElement>('.ws-nets')!);
 
     // Keys: later tasks register handlers; these are the shell's own, tried last.
     const onKey = (e: KeyboardEvent) => {

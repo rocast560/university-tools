@@ -1140,6 +1140,29 @@ const SCENARIOS: Record<string, (page: CDP, id: string) => Promise<void>> = {
     await page.until(`!document.querySelector('[role=menu]')`, 'Esc to close the menu');
     if (!(await page.eval<boolean>(`document.activeElement === document.querySelector('[data-action=export]')`))) throw new Error('focus did not return to the Export button');
     if (!(await page.eval<boolean>(`document.querySelector('[data-action=export]').getAttribute('aria-expanded') === 'false'`))) throw new Error('aria-expanded is not false');
+    if (await page.eval<boolean>(`document.querySelector('[data-action=export]').hasAttribute('aria-controls')`)) throw new Error('aria-controls is set while the menu is closed');
+  },
+  async 'Export menu advertises aria-controls only while open, and Tab on the button closes it'(page) {
+    await page.eval(`document.querySelector('[data-action=export]').focus()`);
+    await page.key('Enter', 'Enter');
+    await page.until(`document.querySelector('[data-action=export]').getAttribute('aria-controls') === 'export-menu' && document.getElementById('export-menu')`, 'aria-controls while open');
+    await page.eval(`document.querySelector('[data-action=export]').focus()`);
+    await page.key('Tab', 'Tab');
+    await page.until(`!document.querySelector('[role=menu]')`, 'Tab on the Export button to close the menu');
+  },
+  async 'the theme button keeps keyboard focus when it switches the theme'(page) {
+    const state = () => page.eval<{ theme: string; focused: boolean; n: number }>(`({ theme: document.documentElement.dataset.theme, focused: document.activeElement && document.activeElement.id === 'theme', n: document.querySelectorAll('#theme').length })`);
+    await page.eval(`document.getElementById('theme').focus()`);
+    const before = await state();
+    await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', text: '\r', windowsVirtualKeyCode: 13 });
+    await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+    await page.until(`document.documentElement.dataset.theme !== '${before.theme}'`, 'Enter on the theme button to switch the theme');
+    const after = await state();
+    if (!after.focused) throw new Error('the theme button lost keyboard focus');
+    if (after.n !== 1) throw new Error(`expected one #theme, found ${after.n}`);
+    // Put it back so later scenarios see the original theme.
+    await page.eval(`document.getElementById('theme').click()`);
+    await page.until(`document.documentElement.dataset.theme === '${before.theme}'`, 'the theme to switch back');
   },
   async 'Export menu stays open and on screen in compact full screen'(page) {
     const centre = (sel: string) => page.eval<{ x: number; y: number }>(`(() => { const r = document.querySelector('${sel}').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);

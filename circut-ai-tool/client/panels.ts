@@ -291,7 +291,7 @@ function placeExportMenu(toolbar: HTMLElement, focus: number | null) {
     // Fixed, so a toolbar that scrolls sideways (compact full screen) cannot clip it.
     const r = button.getBoundingClientRect();
     menu.style.left = `${Math.max(8, Math.min(r.left, innerWidth - menu.offsetWidth - 8))}px`;
-    // Upward when there is no room below: in full screen the toolbar sits at the bottom edge.
+    // Upward when there is no room below, for example a board card scrolled near the window bottom.
     const below = r.bottom + 4 + menu.offsetHeight <= innerHeight - 8;
     menu.style.top = `${below ? r.bottom + 4 : Math.max(8, r.top - 4 - menu.offsetHeight)}px`;
   }
@@ -328,7 +328,7 @@ function exportKey(e: KeyboardEvent, toolbar: HTMLElement) {
     } else if (e.key === 'Escape' && exportOpen) {
       e.preventDefault();
       setExport(false, -1);
-    }
+    } else if (e.key === 'Tab' && exportOpen) setExport(false, -1);
     return;
   }
   const i = items.indexOf(t);
@@ -389,7 +389,7 @@ export function renderPanels(panels: HTMLElement, toolbar: HTMLElement, legend: 
   toolbar.innerHTML =
     `<div class="tgroup run"><button type="button" class="btn primary ${p.running ? 'is-on' : ''}" data-action="${p.running ? 'stop' : 'run'}">${p.running ? '<span aria-hidden="true">■</span>Stop' : `${icon('run')}Run`}</button><button type="button" class="btn" data-action="step" ${p.running ? 'disabled' : ''}>${icon('step')}Step</button><button type="button" class="btn icon-only" data-action="reset-sim" title="Reset the simulation" aria-label="Reset the simulation">${icon('reset')}</button><span class="simclock mono" data-live-clock>0.000 s</span></div><span class="tsep" aria-hidden="true"></span>` +
     `<div class="tgroup"><button type="button" class="btn icon-only" data-action="fit" title="Fit the board to the view" aria-label="Fit the board to the view">${icon('fit')}</button><button type="button" class="btn icon-only ${fs ? 'is-on' : ''}" data-action="fullscreen" title="${fs ? 'Exit full screen' : 'Full screen'}" aria-label="${fs ? 'Exit full screen' : 'Full screen'}">${icon('fullscreen')}</button><button type="button" class="btn ${square ? 'is-on' : ''}" data-action="wirestyle" aria-pressed="${square}" title="curved arcs or square-cornered runs">${icon('wires')}Square wires</button><button type="button" class="btn ${is3dOpen() ? 'is-on' : ''}" data-action="view3d">${icon('cube')}${is3dOpen() ? 'Exit 3D' : '3D'}</button></div><span class="tsep" aria-hidden="true"></span>` +
-    `<div class="export"><button type="button" class="btn" data-action="export" aria-haspopup="menu" aria-expanded="${exportOpen}" aria-controls="export-menu">${icon('export')}Export<span class="caret" aria-hidden="true">▾</span></button>${
+    `<div class="export"><button type="button" class="btn" data-action="export" aria-haspopup="menu" aria-expanded="${exportOpen}"${exportOpen ? ' aria-controls="export-menu"' : ''}>${icon('export')}Export<span class="caret" aria-hidden="true">▾</span></button>${
       exportOpen
         ? `<div class="export-menu" id="export-menu" role="menu" aria-label="Export">` +
           `<a role="menuitem" tabindex="-1" href="/api/projects/${p.id}/board.svg" download="${esc(p.name)}-breadboard.svg">Breadboard SVG</a>` +
@@ -410,7 +410,7 @@ export function renderPanels(panels: HTMLElement, toolbar: HTMLElement, legend: 
   const floatEl = document.getElementById('boardfloat');
   if (floatEl) floatEl.innerHTML = showBar(p.partGroup ?? null);
   legend.innerHTML =
-    `<b class="legend-label">${icon('chevron')}Nets</b>` +
+    `<b class="legend-label">Nets</b>` +
     (() => {
       const order = flowOrder(p.doc);
       return order

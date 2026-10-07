@@ -71,19 +71,6 @@ export function mountFullscreenChrome(card: HTMLElement): void {
     if (s) apply(s as ChromeSize);
   });
 
-  // In compact the legend is one row: a plain mouse wheel scrolls it sideways.
-  card.addEventListener(
-    'wheel',
-    (e) => {
-      if (card.dataset.chrome !== 'compact' || document.fullscreenElement !== card) return;
-      const row = (e.target as HTMLElement).closest<HTMLElement>('#legend');
-      if (!row || Math.abs(e.deltaY) <= Math.abs(e.deltaX) || row.scrollWidth <= row.clientWidth) return;
-      row.scrollLeft += e.deltaY;
-      e.preventDefault();
-    },
-    { passive: false },
-  );
-
   document.addEventListener('keydown', (e) => {
     if (document.fullscreenElement !== card || !card.isConnected) return;
     if (e.key !== 'h' && e.key !== 'H') return;

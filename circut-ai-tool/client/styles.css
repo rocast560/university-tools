@@ -43,7 +43,7 @@
   --accent-soft: #e3f1f0;
   --accent-ink: #ffffff;
   --quiet: #557b83;
-  --ok: #2e7d53;
+  --ok: #26704a;
   --highlight: #e5efc1;
   --bad: #c21e36;
   --warn: #a34e00;
@@ -663,19 +663,6 @@ header .back:hover {
   font-size: 12.5px;
 }
 
-.statuschip b {
-  font-weight: 600;
-  color: var(--ink);
-}
-
-.statuschip .dot {
-  width: 3px;
-  height: 3px;
-  border-radius: 50%;
-  background: currentColor;
-  opacity: 0.45;
-}
-
 .statuschip .errs {
   font-style: normal;
   font-weight: 600;
@@ -1018,7 +1005,7 @@ th.mono {
 
 /* ---------- home ---------- */
 
-.home header {
+.home .hero {
   display: block;
   margin-bottom: 22px;
 }
@@ -1245,9 +1232,6 @@ th.mono {
     max-width: 100%;
     order: 9;
   }
-  .tabs {
-    grid-template-columns: repeat(2, 1fr);
-  }
   .statuschip {
     margin-left: 0;
   }
@@ -1339,7 +1323,7 @@ th.mono {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
-  .legend span {
+  .legend > span[data-legend] {
     border: 1px solid #bbb;
   }
   /* on screen the legend is one scrolling row; paper has no scrollbar */
@@ -2006,7 +1990,7 @@ tr:hover td {
 
 /* ----- home ----- */
 
-.home header {
+.home .hero {
   margin-bottom: 28px;
 }
 
@@ -2019,7 +2003,7 @@ tr:hover td {
   gap: 12px;
 }
 
-.home header .sub {
+.home .hero .sub {
   font-size: 15px;
   max-width: 60ch;
   margin-top: 8px;
@@ -2116,7 +2100,8 @@ tr:hover td {
 .toast {
   background: var(--ink);
   color: var(--bg);
-  border-color: transparent;
+  /* the cream accent: the one place it appears, so a notice stands out from the page */
+  border-color: var(--highlight);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-2);
   font-size: 13px;
@@ -2724,9 +2709,6 @@ body.ws-open { overflow: hidden; }
 .ws-card-hint { margin: 8px 0 0; font-size: 11px; color: var(--ink-2); }
 .ws-card-warn { margin: 0 0 8px; color: var(--warn); }
 /* The wordmark: "Mate" in the accent, so the name reads as two words. */
-.home h1 .brand-mate {
-  color: var(--accent);
-}
 
 /* Parts list: a small picture of each part beside its line. */
 .partslist {
@@ -2828,16 +2810,8 @@ body.ws-open { overflow: hidden; }
   flex: none;
 }
 .board-card:fullscreen[data-chrome='compact'] #legend {
-  display: flex;
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  overflow-y: hidden;
   margin-top: 4px;
   padding-bottom: 2px;
-  scrollbar-width: thin;
-}
-.board-card:fullscreen[data-chrome='compact'] #legend > * {
-  flex: none;
 }
 
 /* Hidden: the board, and only the board. */
@@ -2906,15 +2880,8 @@ header.appbar .brand .i {
   height: 18px;
   color: var(--accent);
 }
-header.appbar .brand-mate,
-.home h1 .i {
+header.appbar .brand-mate {
   color: var(--accent);
-}
-.home h1 .i {
-  width: 26px;
-  height: 26px;
-  margin-right: 8px;
-  vertical-align: -4px;
 }
 header.appbar .proj-name {
   /* Block, not flex: text-overflow only applies to a block's own line. */
@@ -2927,6 +2894,10 @@ header.appbar .proj-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+header.appbar .btn[aria-current='page'] {
+  background: var(--accent-soft);
+  color: var(--ok);
 }
 header.appbar .btn {
   height: 28px;

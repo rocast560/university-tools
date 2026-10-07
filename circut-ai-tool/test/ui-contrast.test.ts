@@ -14,7 +14,7 @@ describe('contrast()', () => {
 for (const mode of [':root', ':root[data-theme="dark"]'] as const) {
   describe(`tokens ${mode}`, () => {
     const t = parseTokens(css, mode);
-    const text: [string, string][] = [['--ink', '--card'], ['--ink-2', '--card'], ['--ink', '--bg'], ['--accent-ink', '--accent'], ['--bad', '--card']];
+    const text: [string, string][] = [['--ink', '--card'], ['--ink-2', '--card'], ['--ink', '--bg'], ['--accent-ink', '--accent'], ['--bad', '--card'], ['--ok', '--card'], ['--ok', '--bg'], ['--ok', '--accent-soft']];
     for (const [fg, bg] of text) test(`${fg} on ${bg} is at least 4.5:1`, () => expect(contrast(t[fg], t[bg])).toBeGreaterThanOrEqual(4.5));
     const ui: [string, string][] = [['--accent', '--card'], ['--ok', '--card'], ['--line', '--bg']];
     for (const [fg, bg] of ui) test(`${fg} on ${bg} is at least 3:1 (UI)`, () => expect(contrast(t[fg], t[bg])).toBeGreaterThanOrEqual(fg === '--line' ? 1.2 : 3));

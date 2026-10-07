@@ -4,6 +4,7 @@
 // Bundled, so the type never depends on a CDN (the app runs offline in Docker).
 import { mountFullscreenChrome } from './fschrome.ts';
 import { icon } from './icons.ts';
+import { wheelScrollX } from './wheelscroll.ts';
 import '@fontsource-variable/geist';
 import '@fontsource-variable/geist-mono';
 import { normalizeSidecar } from '../src/layout/types.ts';
@@ -95,12 +96,13 @@ async function renderHome() {
   // The header is rebuilt below; the lights follow it once it exists.
   queueMicrotask(placeLights);
   setTimeout(placeLights, 300);
-  app.replaceChildren(h(`<main class="home"><header><h1>${icon('brand')}<span>Bench<span class="brand-mate">Mate</span></span></h1><p class="sub">Open a KiCad schematic and get a breadboard wiring diagram, a build guide, checks and a logic simulator.</p></header>
+  app.replaceChildren(h(`<main class="home">${appBar(store.get().theme)}<header class="hero"><h1>Open a schematic</h1><p class="sub">Open a KiCad schematic and get a breadboard wiring diagram, a build guide, checks and a logic simulator.</p></header>
     <section class="open"><div id="drop" class="dropzone"><b>Drop a .kicad_sch here</b><span class="muted">or</span><button class="primary" type="button" id="pick">Import…</button><input type="file" id="file" accept=".kicad_sch" hidden></div>
       <form id="open-form"><label>Or open one in place <input name="path" placeholder="absolute path to a .kicad_sch" required></label><button type="submit" class="primary">Open</button></form></section>
     <section><h2>Lab 3 · BCD to 7-segment</h2><p>L3 Auxiliary supplies inverted inputs and segments a–d. This example completes e–g with gates and a common-anode display. W is the 8-bit weight; Z is the 1-bit weight. A low output lights a segment.</p><button type="button" id="lab3-example">Create Lab 3 prelab example</button><p class="muted">Header numbers follow the instructor’s board labels, not its internal IC. Inputs 10–15 are don’t-care cases. The electrical model is approximate.</p></section>
     <section class="organizer"><h2>Projects</h2><div id="organizer"><p class="muted">Loading…</p></div></section>
     <footer><a href="#/connect">Connect Claude, ChatGPT or Claude Code</a> · <a href="/openapi.json">OpenAPI</a></footer></main>`));
+  wireAppBar(app.querySelector<HTMLElement>('header.appbar')!);
   app.querySelector<HTMLButtonElement>('#lab3-example')!.addEventListener('click', async (event) => {
     const button = event.currentTarget as HTMLButtonElement;
     button.disabled = true;
@@ -165,6 +167,39 @@ function themeButton(theme: AppState['theme']): string {
   return `<button type="button" id="theme" class="btn icon-only" title="Switch to ${to} theme" aria-label="Switch to ${to} theme">${icon(theme === 'dark' ? 'moon' : 'sun')}</button>`;
 }
 
+/** The one app bar every page wears: brand, an optional title, Connect, theme. `current` marks the page you are on. */
+export function appBar(theme: AppState['theme'], opts: { title?: string; titleHint?: string; current?: 'connect' } = {}): string {
+  const title = opts.title ? `<h1 class="proj-name" title="${esc(opts.titleHint ?? opts.title)}">${esc(opts.title)}</h1>` : '';
+  const here = opts.current === 'connect' ? ' aria-current="page"' : '';
+  return `<header class="appbar"><a href="#/" class="brand" title="All projects" aria-label="BenchMate, all projects">${icon('brand')}<span>Bench<span class="brand-mate">Mate</span></span></a>${title}<div class="spacer"></div><a class="btn" href="#/connect"${here}>${icon('connect')}Connect</a>${themeButton(theme)}</header>`;
+}
+
+/** Make #theme in this app bar switch the theme (and remember it). */
+export function wireAppBar(bar: HTMLElement) {
+  bar.addEventListener('click', (e) => {
+    if (!(e.target as HTMLElement).closest('#theme')) return;
+    const theme = store.get().theme === 'dark' ? 'light' : 'dark';
+    try {
+      localStorage.setItem('theme', theme);
+    } catch {
+      /* ignore */
+    }
+    store.set({ theme });
+  });
+}
+
+/** Update the theme button where it stands, so keyboard focus stays on it. */
+function syncThemeButton(theme: AppState['theme']) {
+  const btn = document.getElementById('theme');
+  if (!btn) return;
+  const to = theme === 'dark' ? 'light' : 'dark';
+  const label = `Switch to ${to} theme`;
+  if (btn.getAttribute('aria-label') === label) return;
+  btn.innerHTML = icon(theme === 'dark' ? 'moon' : 'sun');
+  btn.title = label;
+  btn.setAttribute('aria-label', label);
+}
+
 let boardUnmount: (() => void) | null = null;
 
 function renderProject(s: AppState) {
@@ -179,24 +214,13 @@ function renderProject(s: AppState) {
     // with it or its renderer keeps running against a detached canvas.
     close3d();
     app.replaceChildren(h(`<main class="project" data-id="${p.id}">
-      <header class="appbar"><a href="#/" class="brand" title="All projects" aria-label="BenchMate, all projects">${icon('brand')}<span>Bench<span class="brand-mate">Mate</span></span></a><h1 class="proj-name" title="${esc(p.path)}">${esc(p.name)}</h1><div class="spacer"></div><a class="btn" href="#/connect">${icon('connect')}Connect</a>${themeButton(s.theme)}</header>
+      ${appBar(s.theme, { title: p.name, titleHint: p.path })}
       <div class="layout ${localStorage.getItem('panelsCollapsed') === '1' ? 'collapsed' : ''}"><section class="boardcol"><div class="board-card"><div id="toolbar" class="toolbar"></div><div class="board-stage"><div id="board"></div><div id="boardfloat" class="board-float" role="group" aria-label="Show"></div></div><div id="legend" class="legend"></div></div></section><aside id="panels" class="panels"></aside></div></main>`));
     boardUnmount = mountBoard(app.querySelector('#board')!);
     mountFullscreenChrome(app.querySelector<HTMLElement>('.board-card')!);
-    // The button is swapped on each render (its icon follows the theme), so the click is delegated.
-    app.querySelector('header.appbar')!.addEventListener('click', (e) => {
-      if (!(e.target as HTMLElement).closest('#theme')) return;
-      const theme = store.get().theme === 'dark' ? 'light' : 'dark';
-      try {
-        localStorage.setItem('theme', theme);
-      } catch {
-        /* ignore */
-      }
-      store.set({ theme });
-    });
+    wheelScrollX(app.querySelector<HTMLElement>('#legend')!);
+    wireAppBar(app.querySelector<HTMLElement>('header.appbar')!);
   }
-  const themeBtn = app.querySelector('#theme')!;
-  if (!themeBtn.getAttribute('aria-label')?.includes(s.theme === 'dark' ? 'light' : 'dark')) themeBtn.outerHTML = themeButton(s.theme);
   renderPanels(app.querySelector('#panels')!, app.querySelector('#toolbar')!, app.querySelector('#legend')!, s);
   placeLights();
 }
@@ -207,13 +231,10 @@ function render(s: AppState) {
   if (s.toast) document.body.append(h(`<div id="toast" class="toast">${esc(s.toast)}</div>`));
   if (s.route.name === 'home') {
     if (!app.querySelector('main.home')) void renderHome();
-    return;
-  }
-  if (s.route.name === 'connect') {
+  } else if (s.route.name === 'connect') {
     if (!app.querySelector('main.connect')) void renderConnect(app);
-    return;
-  }
-  renderProject(s);
+  } else renderProject(s);
+  syncThemeButton(s.theme);
 }
 
 store.subscribe(render);
