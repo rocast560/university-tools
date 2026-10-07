@@ -263,6 +263,7 @@ let exportOpen = false;
 let pendingFocus: number | null = null;
 let exportRepaint: (() => void) | null = null;
 let outsideWired = false;
+let exportProject: string | null = null;
 
 function setExport(open: boolean, focus: number | null) {
   exportOpen = open;
@@ -298,10 +299,18 @@ function placeExportMenu(toolbar: HTMLElement, focus: number | null) {
       if (exportOpen && !(e.target as HTMLElement).closest?.('.export')) setExport(false, null);
     });
     addEventListener('resize', () => exportOpen && setExport(false, null));
+    // The menu is fixed to where the button was, so any scroll (capture: scroll does not bubble) closes it.
+    document.addEventListener('scroll', (e) => {
+      if (exportOpen && !(e.target as HTMLElement).closest?.('.export-menu')) setExport(false, null);
+    }, true);
   }
   if (focus === null) return;
   if (focus < 0) button?.focus();
-  else exportItems(toolbar)[focus]?.focus();
+  else {
+    // Infinity means the last item (ArrowUp on the closed button).
+    const items = exportItems(toolbar);
+    items[Math.min(focus, items.length - 1)]?.focus();
+  }
 }
 
 function exportKey(e: KeyboardEvent, toolbar: HTMLElement) {
@@ -313,7 +322,7 @@ function exportKey(e: KeyboardEvent, toolbar: HTMLElement) {
       setExport(!exportOpen, exportOpen ? -1 : 0);
     } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
-      setExport(true, e.key === 'ArrowDown' ? 0 : 3);
+      setExport(true, e.key === 'ArrowDown' ? 0 : Infinity);
     } else if (e.key === 'Escape' && exportOpen) {
       e.preventDefault();
       setExport(false, -1);
@@ -355,6 +364,14 @@ export function renderPanels(panels: HTMLElement, toolbar: HTMLElement, legend: 
   panels.querySelector<HTMLElement>('.panelbody')!.innerHTML = body;
   if (p.panel === 'sim') patchSim(panels, analog.latest(), p.running);
 
+  // A newly opened project never starts with the Export menu open.
+  if (exportProject !== p.id) {
+    exportProject = p.id;
+    exportOpen = false;
+    pendingFocus = null;
+  }
+  // Opening or closing the menu repaints just the toolbar, so the panel keeps its scroll and open details.
+  const paintToolbar = () => {
   const errs = p.doc.checks.filter((c) => c.level === 'error').length;
   const wantFocus = exportFocusToKeep(toolbar);
   const fs = !!document.fullscreenElement;
@@ -374,7 +391,12 @@ export function renderPanels(panels: HTMLElement, toolbar: HTMLElement, legend: 
     (p.activeStep !== null ? '<button type="button" class="btn ghost" data-action="clear-step">Clear highlight</button>' : '') +
     `<span class="statuschip"><em class="errs ${errs ? 'is-bad' : 'is-ok'}">${errs ? '' : icon('check')}${errs} ${errs === 1 ? 'error' : 'errors'}</em><span>${p.doc.wires.length} wires</span><span>${esc(p.doc.board.kind)}</span></span>`;
   placeExportMenu(toolbar, wantFocus);
-  exportRepaint = () => renderPanels(panels, toolbar, legend, store.get());
+  };
+  paintToolbar();
+  exportRepaint = () => {
+    const cur = store.get().project;
+    if (cur && cur.id === p.id) paintToolbar();
+  };
   const floatEl = document.getElementById('boardfloat');
   if (floatEl) floatEl.innerHTML = showBar(p.partGroup ?? null);
   legend.innerHTML =

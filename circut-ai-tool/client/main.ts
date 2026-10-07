@@ -159,7 +159,7 @@ async function renderHome() {
   }
 }
 
-/** Moon in the dark theme, sun in the light one: the icon shows what a click switches to. */
+/** Moon in the dark theme, sun in the light one: the icon shows the current theme; the label names what a click switches to. */
 function themeButton(theme: AppState['theme']): string {
   const to = theme === 'dark' ? 'light' : 'dark';
   return `<button type="button" id="theme" class="btn icon-only" title="Switch to ${to} theme" aria-label="Switch to ${to} theme">${icon(theme === 'dark' ? 'moon' : 'sun')}</button>`;
