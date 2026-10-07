@@ -73,7 +73,7 @@ Dark (default):
 | `--quiet` | `#557B83` | outlines of toggled-on buttons, secondary marks |
 | `--ok` | `#A2D5AB` | success text, "on" text, 0 errors |
 | `--highlight` | `#E5EFC1` | rare emphasis (wordmark detail, notices) |
-| `--bad` | `#E0525F` | errors, badges |
+| `--bad` | `#E8636F` | errors, badges (was `#E0525F`, which measured 4.30:1 on `--card` and failed §5's 4.5:1) |
 | `--warn` | `#E7B14D` | warnings |
 | `--focus` | `#39AEA9` | focus ring |
 

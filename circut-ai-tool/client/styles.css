@@ -754,6 +754,8 @@ header .back:hover {
 }
 
 .legend span > span {
+  /* Block, not the inline-flex of `.legend span`, so the ellipsis shows. */
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -862,7 +864,10 @@ header .back:hover {
 
 .steps li {
   display: grid;
-  grid-template-columns: auto auto 1fr;
+  /* minmax(0, ...) and anywhere-wrapping: a long net name in a step wraps
+     instead of widening the whole list past the panel. */
+  grid-template-columns: auto auto minmax(0, 1fr);
+  overflow-wrap: anywhere;
   gap: 10px;
   align-items: start;
   padding: 7px 8px;
@@ -1366,13 +1371,17 @@ th.mono {
 .panel.sim ul.sources, .panel.sim ul.ledcolours { list-style: none; margin: 0; padding: 0; }
 .panel.sim ul.sources li, .panel.sim ul.ledcolours li {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 8px;
   align-items: center;
   padding: 4px 0;
   border-bottom: 1px solid var(--line-soft);
 }
-.panel.sim ul.sources label { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+.panel.sim ul.sources label { display: flex; gap: 6px; align-items: center; cursor: pointer; min-width: 0; }
+/* A long net name is cut with an ellipsis; its title carries the whole name. */
+.panel.sim ul.sources label b,
+.panel.sim ul.ledcolours li > b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.panel.sim ul.sources li > .muted { white-space: nowrap; }
 .panel.sim ul.ledcolours select { font: inherit; padding: 2px 4px; }
 .panel.sim .testpick { display: flex; gap: 6px; align-items: center; }
 .panel.sim .testpick select { flex: 1; min-width: 0; font: inherit; padding: 3px 4px; }
@@ -2554,9 +2563,11 @@ body.ws-open { overflow: hidden; }
   --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.4);
   --done: var(--ok);
   --err: var(--bad);
+  --info: #5eb0ff;
   --done-soft: #1b2a22;
   --warn-soft: #2e2718;
   --err-soft: #2e1d1f;
+  --info-soft: #1c2630;
   --on-status: #18191b;
   /* the renderer's clear colour (client/board3d.ts), so a resize never flashes */
   --scene: #070910;
@@ -2841,12 +2852,17 @@ body.ws-open { overflow: hidden; }
   }
 }
 
-/* The Show filter in the 3D workspace's legend. */
+/* The Show filter in the 3D workspace's legend. It sits on a card of its own:
+   bare, the "Show" label was gray text on the light breadboard. */
 .ws-legend .showbar {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   margin-right: 6px;
+  padding: 0 0 0 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--card);
   pointer-events: auto;
 }
 .ws-legend .showbar .btn {
@@ -2884,6 +2900,9 @@ header.appbar .brand-mate,
   vertical-align: -4px;
 }
 header.appbar .proj-name {
+  /* Block, not flex: text-overflow only applies to a block's own line. */
+  display: block;
+  min-width: 0;
   font-size: 13px;
   font-weight: 500;
   color: var(--ink-2);
@@ -3037,9 +3056,16 @@ header.appbar .btn {
   background: var(--sunken);
 }
 
-/* The Show filter floats over the board's bottom-left corner. */
+/* The Show filter floats over the board's bottom-left corner. The well gets a
+   strip of its own below the board for it, so it never covers holes or parts. */
 .board-stage {
   position: relative;
+}
+.board-stage #board {
+  padding-bottom: 48px;
+}
+.board-card:fullscreen[data-chrome='hidden'] .board-stage #board {
+  padding-bottom: 6px;
 }
 .board-card:fullscreen .board-stage {
   flex: 1;
@@ -3095,5 +3121,8 @@ header.appbar .btn {
   .board-float,
   .export-menu {
     display: none !important;
+  }
+  .board-stage #board {
+    padding-bottom: 6px;
   }
 }

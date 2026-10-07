@@ -26,9 +26,12 @@ test('the 3D workspace (.ws) carries exactly the dark token values, so it stays 
   const m = css.match(/\n\.ws \{([\s\S]*?)\r?\n\}/);
   expect(m).not.toBeNull();
   // --scene is the renderer's clear colour and has no page counterpart
-  const own = [...m![1].matchAll(/(--[\w-]+):\s*(#[0-9a-fA-F]{6})\s*;/g)].filter(([, name]) => name !== '--scene');
-  for (const name of ['--bg', '--card', '--sunken', '--ink', '--ink-2', '--line', '--accent', '--accent-ink', '--ok', '--bad', '--warn']) expect(own.some(([, n]) => n === name)).toBe(true);
-  for (const [, name, val] of own) expect(`${name}: ${val.toLowerCase()}`).toBe(`${name}: ${dark[name]?.toLowerCase()}`);
+  const own = new Map([...m![1].matchAll(/(--[\w-]+):\s*(#[0-9a-fA-F]{6})\s*;/g)].filter(([, name]) => name !== '--scene').map(([, name, val]) => [name, val.toLowerCase()]));
+  // Every hex token of the dark theme is present in .ws with the same value...
+  expect(Object.keys(dark).length).toBeGreaterThan(20);
+  for (const [name, val] of Object.entries(dark)) expect(`${name}: ${own.get(name)}`).toBe(`${name}: ${val.toLowerCase()}`);
+  // ...and .ws defines no hex token the dark theme lacks.
+  for (const [name, val] of own) expect(`${name}: ${val}`).toBe(`${name}: ${dark[name]?.toLowerCase()}`);
 });
 
 test('the prefers-color-scheme dark block matches the explicit dark block', () => {

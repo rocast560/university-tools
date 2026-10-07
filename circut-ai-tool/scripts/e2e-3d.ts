@@ -1141,6 +1141,39 @@ const SCENARIOS: Record<string, (page: CDP, id: string) => Promise<void>> = {
     if (!(await page.eval<boolean>(`document.activeElement === document.querySelector('[data-action=export]')`))) throw new Error('focus did not return to the Export button');
     if (!(await page.eval<boolean>(`document.querySelector('[data-action=export]').getAttribute('aria-expanded') === 'false'`))) throw new Error('aria-expanded is not false');
   },
+  async 'Export menu stays open and on screen in compact full screen'(page) {
+    const centre = (sel: string) => page.eval<{ x: number; y: number }>(`(() => { const r = document.querySelector('${sel}').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+    try {
+      // Narrow, so the one-line toolbar has to scroll sideways.
+      await page.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 600, deviceScaleFactor: 1, mobile: false });
+      await page.eval(`document.querySelector('[data-action=fullscreen]').scrollIntoView({ block: 'center' })`);
+      await sleep(200);
+      // A real click: requestFullscreen needs a user gesture.
+      const fs = await centre('[data-action=fullscreen]');
+      await click(page, fs.x, fs.y);
+      await page.until(`document.fullscreenElement`, 'full screen');
+      await page.eval(`document.querySelector('[data-fs-size=compact]').click()`);
+      await page.until(`document.querySelector('.board-card').dataset.chrome === 'compact'`, 'compact controls');
+      await page.until(`(() => { const t = document.getElementById('toolbar'); const r = t.getBoundingClientRect(); return t.scrollWidth > t.clientWidth + 20 && r.top > innerHeight / 2 && r.bottom <= innerHeight; })()`, 'a one-line toolbar wider than the screen, under the board');
+      await page.eval(`(() => { const t = document.getElementById('toolbar'); t.scrollLeft = t.scrollWidth; })()`);
+      await sleep(300);
+      const scrolled = await page.eval<number>(`document.getElementById('toolbar').scrollLeft`);
+      if (scrolled <= 0) throw new Error('the toolbar did not scroll');
+      const ex = await centre('[data-action=export]');
+      await click(page, ex.x, ex.y);
+      await page.until(`document.querySelector('.export-menu')`, 'the Export menu');
+      await sleep(400);
+      const st = await page.eval<{ open: boolean; left: number; top: number; right: number; bottom: number; scroll: number }>(
+        `(() => { const m = document.querySelector('.export-menu'); const r = m ? m.getBoundingClientRect() : { left: 0, top: 0, right: 0, bottom: 0 }; return { open: !!m, left: r.left, top: r.top, right: r.right, bottom: r.bottom, scroll: document.getElementById('toolbar').scrollLeft }; })()`,
+      );
+      if (!st.open) throw new Error('the menu closed itself');
+      if (st.scroll !== scrolled) throw new Error(`opening the menu moved the toolbar from ${scrolled} to ${st.scroll}`);
+      if (st.left < 0 || st.top < 0 || st.right > 640 || st.bottom > 600) throw new Error(`the menu is off screen: ${JSON.stringify(st)}`);
+    } finally {
+      await page.eval(`document.fullscreenElement && document.exitFullscreen()`).catch(() => {});
+      await page.send('Emulation.clearDeviceMetricsOverride');
+    }
+  },
 };
 
 void main();

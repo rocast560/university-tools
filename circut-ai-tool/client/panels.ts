@@ -35,7 +35,7 @@ function sim(p: ProjectState): string {
   const parts = p.doc.parts.filter((x) => x.style === 'R' || x.style === 'LED' || x.style === 'D');
   const nets = Object.keys(p.doc.nets).sort((a, b) => displayName(a).localeCompare(displayName(b), undefined, { numeric: true }));
   const controls = inputs.length
-    ? `<ul class="sources">${inputs.map((i) => `<li><label><input type="checkbox" data-sw="${esc(i.key)}" ${p.switches[i.key] ? 'checked' : ''}> <b class="mono">${esc(i.name)}</b></label><span class="muted">${esc(i.control)}</span><span class="mono" data-live-net="${esc(displayName(i.net))}">—</span></li>`).join('')}</ul>`
+    ? `<ul class="sources">${inputs.map((i) => `<li><label><input type="checkbox" data-sw="${esc(i.key)}" ${p.switches[i.key] ? 'checked' : ''}> <b class="mono" title="${esc(i.name)}">${esc(i.name)}</b></label><span class="muted">${esc(i.control)}</span><span class="mono" data-live-net="${esc(displayName(i.net))}">—</span></li>`).join('')}</ul>`
     : '<p class="muted">No switches on this board, so there is nothing to drive by hand.</p>';
   const colours = leds.length
     ? `<h3>LED colour</h3><ul class="ledcolours">${leds.map((l) => `<li><b class="mono">${esc(l.id)}</b><select data-ledcolour="${esc(l.id)}">${LED_COLOURS.map(([k, label]) => `<option value="${k}" ${ledColourOf(p, l.id) === k ? 'selected' : ''}>${label}</option>`).join('')}</select><span class="mono" data-live-i="${esc(l.id)}">—</span></li>`).join('')}</ul>`
@@ -291,7 +291,9 @@ function placeExportMenu(toolbar: HTMLElement, focus: number | null) {
     // Fixed, so a toolbar that scrolls sideways (compact full screen) cannot clip it.
     const r = button.getBoundingClientRect();
     menu.style.left = `${Math.max(8, Math.min(r.left, innerWidth - menu.offsetWidth - 8))}px`;
-    menu.style.top = `${r.bottom + 4}px`;
+    // Upward when there is no room below: in full screen the toolbar sits at the bottom edge.
+    const below = r.bottom + 4 + menu.offsetHeight <= innerHeight - 8;
+    menu.style.top = `${below ? r.bottom + 4 : Math.max(8, r.top - 4 - menu.offsetHeight)}px`;
   }
   if (!outsideWired) {
     outsideWired = true;
