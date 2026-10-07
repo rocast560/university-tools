@@ -8,7 +8,7 @@ import type { ResistorKind } from '../src/parts/resistor.ts';
 import type { Highlight, PartGroup } from '../src/render/index.ts';
 import { partIcon } from './part-icons.ts';
 import { showBar } from './showbar.ts';
-import { icon } from './icons.ts';
+import { icon, type IconName } from './icons.ts';
 import { shortNet } from '../src/ui/netname.ts';
 import type { AnalogState } from '../src/sim/analog/simulator.ts';
 import { runTest, switchesForTest, type SimTest } from '../src/sim/tests.ts';
@@ -20,7 +20,7 @@ import { flowOrder } from './floworder.ts';
 import { esc, toast } from './main.ts';
 import { saveDone, store, type AppState, type ProjectState } from './state.ts';
 
-const TABS: [ProjectState['panel'], string][] = [['guide', 'Guide'], ['sim', 'Simulate'], ['parts', 'Parts'], ['pinouts', 'Pinouts'], ['checks', 'Checks'], ['truth', 'Truth table'], ['options', 'Options']];
+const TABS: [ProjectState['panel'], string, IconName, string][] = [['guide', 'Guide', 'guide', 'Guide'], ['sim', 'Simulate', 'simulate', 'Simulate'], ['parts', 'Parts', 'parts', 'Parts'], ['pinouts', 'Pinouts', 'pinouts', 'Pinouts'], ['checks', 'Checks', 'checks', 'Checks'], ['truth', 'Truth', 'truth', 'Truth table'], ['options', 'Options', 'options', 'Options']];
 
 const LED_COLOURS: [LedColour, string][] = [['red', 'Red'], ['orange', 'Orange'], ['yellow', 'Yellow'], ['green', 'Green'], ['blue', 'Blue'], ['white', 'White'], ['uv', 'UV']];
 
@@ -349,17 +349,25 @@ export function renderPanels(panels: HTMLElement, toolbar: HTMLElement, legend: 
   const body = { guide, sim, parts, pinouts, checks, truth, options }[p.panel](p);
   // The tab bar is built once and kept: replacing it on every state change
   // killed the active-pill transition and reset the panel's scroll position.
-  const warn = p.doc.checks.some((c) => c.level === 'error');
+  const flagged = p.doc.checks.filter((c) => c.level === 'error' || c.level === 'warning').length;
   let tabs = panels.querySelector<HTMLElement>('.tabs');
   if (!tabs) {
-    panels.innerHTML = `<button type="button" class="panels-toggle" data-collapse title="hide or show this panel"><span class="when-open">Hide panel ▸</span><span class="when-closed">◂ Guide</span></button><div class="tabs" role="tablist">${TABS.map(([id, label]) => `<button type="button" role="tab" data-tab="${id}">${label}<span class="tabwarn" hidden>⚠</span></button>`).join('')}</div><div class="panelbody"></div>`;
+    const tab = ([id, label, ic, tip]: (typeof TABS)[number], cls = '') => `<button type="button" role="tab"${cls ? ` class="${cls}"` : ''} data-tab="${id}" title="${tip}" aria-label="${tip}">${icon(ic)}<span class="tl">${label}</span>${id === 'checks' ? '<span class="tab-badge" hidden></span>' : ''}</button>`;
+    panels.innerHTML = `<button type="button" class="panels-toggle" data-collapse title="hide or show this panel"><span class="when-open">Hide panel ▸</span><span class="when-closed">◂ Guide</span></button><nav class="tabs" role="tablist" aria-label="Side panel">${TABS.slice(0, -1).map((t) => tab(t)).join('')}<span class="tabs-gap" aria-hidden="true"></span>${tab(TABS[TABS.length - 1], 'util')}</nav><div class="panelbody"></div>`;
     tabs = panels.querySelector<HTMLElement>('.tabs')!;
   }
   for (const b of tabs.querySelectorAll<HTMLButtonElement>('[data-tab]')) {
     const on = b.dataset.tab === p.panel;
     b.classList.toggle('active', on);
     b.setAttribute('aria-selected', String(on));
-    if (b.dataset.tab === 'checks') b.querySelector('.tabwarn')!.toggleAttribute('hidden', !warn);
+    if (b.dataset.tab === 'checks') {
+      const badge = b.querySelector<HTMLElement>('.tab-badge')!;
+      badge.textContent = String(flagged);
+      badge.toggleAttribute('hidden', !flagged);
+      const tip = flagged ? `Checks, ${flagged} to review` : 'Checks';
+      b.title = tip;
+      b.setAttribute('aria-label', tip);
+    }
   }
   panels.querySelector<HTMLElement>('.panelbody')!.innerHTML = body;
   if (p.panel === 'sim') patchSim(panels, analog.latest(), p.running);

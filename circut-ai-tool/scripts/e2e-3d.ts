@@ -305,6 +305,20 @@ async function click(page: CDP, x: number, y: number) {
 }
 
 const SCENARIOS: Record<string, (page: CDP, id: string) => Promise<void>> = {
+  async 'the side-panel tabs stay on one row at 900px wide'(page) {
+    try {
+      await page.send('Emulation.setDeviceMetricsOverride', { width: 900, height: 800, deviceScaleFactor: 1, mobile: false });
+      await page.until(`document.querySelectorAll('[role=tab]').length === 7`, 'the tabs');
+      const tops = await page.eval<number[]>(`[...document.querySelectorAll('[role=tab]')].map((b) => b.offsetTop)`);
+      if (new Set(tops).size !== 1) throw new Error(`tabs sit on different rows: ${tops.join()}`);
+      // One row is not enough if the row scrolls sideways: every tab must be visible, with its icon above its label.
+      const fit = await page.eval<{ over: boolean; icons: number }>(`(() => { const t = document.querySelector('.tabs'); return { over: t.scrollWidth > t.clientWidth + 1, icons: t.querySelectorAll('[role=tab] > svg + .tl').length }; })()`);
+      if (fit.over) throw new Error('the tab row scrolls sideways');
+      if (fit.icons !== 7) throw new Error(`${fit.icons} of 7 tabs have an icon over a label`);
+    } finally {
+      await page.send('Emulation.clearDeviceMetricsOverride');
+    }
+  },
   async 'the editor opens with the kit models loaded'(page) {
     await open3d(page);
     const keys = await page.eval<string[]>(`__e3d.modelKeys().slice().sort()`);

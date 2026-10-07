@@ -809,11 +809,6 @@ header .back:hover {
   box-shadow: var(--shadow-1);
 }
 
-.tabs .tabwarn {
-  color: var(--err);
-  margin-left: 4px;
-}
-
 .panel {
   padding: 14px 16px;
 }
@@ -1709,35 +1704,49 @@ input[type="checkbox"]:checked {
   gap: 10px;
 }
 
-/* Underline tabs in one scrollable row: seven tabs read as a list of
-   places, not as seven equally loud buttons. */
+/* Icon-over-label tabs: the seven places sit on one row; Options is set
+   apart at the right. Under 380px of panel width the labels drop out and the
+   title / aria-label carry the name. */
 .tabs {
   display: flex;
+  justify-content: space-between;
+  align-items: stretch;
   gap: 0;
   padding: 0 4px;
   flex: none;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.tabs::-webkit-scrollbar {
-  display: none;
+  container: tabs / inline-size;
 }
 
 .tabs button {
-  height: 42px;
-  flex: 1 0 auto;
-  padding: 0 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 0;
+  height: 52px;
+  flex: 1 1 0;
+  padding: 0 4px;
   border: 0;
   border-radius: 0;
   background: transparent;
   box-shadow: none;
   text-transform: none;
   letter-spacing: 0;
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 500;
   color: var(--ink-2);
   position: relative;
+  white-space: nowrap;
+}
+
+.tabs button .i {
+  width: 18px;
+  height: 18px;
+}
+
+.tabs .tl {
+  line-height: 1;
 }
 
 .tabs button::after {
@@ -1753,20 +1762,66 @@ input[type="checkbox"]:checked {
 }
 
 .tabs button:hover {
-  background: transparent;
+  background: var(--sunken);
   border: 0;
   color: var(--ink);
 }
 
 .tabs button.active {
   background: transparent;
-  color: var(--ink);
+  color: var(--accent);
+  font-weight: 700;
   box-shadow: none;
   border: 0;
 }
 
 .tabs button.active::after {
   background: var(--accent);
+}
+
+.tabs-gap {
+  flex: 0 0 9px;
+  position: relative;
+}
+
+.tabs-gap::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 10px;
+  bottom: 10px;
+  width: 1px;
+  background: var(--line);
+}
+
+.tab-badge {
+  position: absolute;
+  top: 5px;
+  left: calc(50% + 6px);
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--bad);
+  color: var(--accent-ink);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+
+.tab-badge[hidden] {
+  display: none;
+}
+
+@container tabs (max-width: 379px) {
+  .tabs .tl {
+    display: none;
+  }
+
+  .tabs button {
+    height: 42px;
+  }
 }
 
 .panel {
