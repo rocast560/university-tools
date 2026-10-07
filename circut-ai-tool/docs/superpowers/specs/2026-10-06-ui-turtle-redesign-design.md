@@ -79,7 +79,7 @@ Dark (default):
 
 Light mode: off-white page `#F6F7F7`, white cards, `#DDE1E3` lines, ink
 `#16191B`, secondary `#5B6268`, accent darkened to `#1F7C78` so text and
-white-on-accent meet WCAG AA (≥ 4.5:1), `--ok` `#2E7D53`, `--quiet` `#557B83`.
+white-on-accent meet WCAG AA (≥ 4.5:1), `--ok` `#26704A`, `--quiet` `#557B83`.
 Exact contrast ratios are checked by a test (§5).
 
 Shape and spacing: radius 6px controls, 8px cards; 1px borders; no drop

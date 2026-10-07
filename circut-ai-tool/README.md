@@ -116,7 +116,7 @@ The interface uses flat surfaces on a neutral dark gray (`#18191B` page,
 
 Light mode (the moon/sun button in the app bar) uses the same layout on an
 off-white page with white cards. Teal and mint are darkened there
-(`#1F7C78`, `#2E7D53`) so text on them stays readable. Printing always uses
+(`#1F7C78`, `#26704A`) so text on them stays readable. Printing always uses
 a white page. The 3D editor stays dark in both modes.
 
 - Colour tokens live in `client/styles.css`: the `:root` block (light), the
