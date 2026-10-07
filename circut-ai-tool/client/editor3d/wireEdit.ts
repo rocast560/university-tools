@@ -23,6 +23,7 @@ import type { LayoutDoc } from '../../src/pipeline.ts';
 import { P } from '../../src/render/geometry.ts';
 import { planLength, planToPath, shapePlan, takenNodes, wireKey, type Point, type Taken } from '../../src/render/route3d.ts';
 import { api } from '../api.ts';
+import { icon } from '../icons.ts';
 import { esc, toast } from '../main.ts';
 import { store } from '../state.ts';
 import { history, type Command } from './history.ts';
@@ -190,10 +191,10 @@ export function attachWireEdit(ws: Workspace): WireEdit {
     card.hidden = false;
     card.dataset.wire = selected!;
     card.innerHTML =
-      `<header><b>${esc(c.p.doc.nets[c.wire.net]?.name ?? c.wire.net)}</b><span>${esc(holeKey(c.wire.a))} to ${esc(holeKey(c.wire.b))}</span><button type="button" class="ws-card-x" data-wire="close" title="Deselect (Esc)">×</button></header>` +
+      `<header><b>${esc(c.p.doc.nets[c.wire.net]?.name ?? c.wire.net)}</b><span>${esc(holeKey(c.wire.a))} to ${esc(holeKey(c.wire.b))}</span><button type="button" class="ws-card-x" data-wire="close" title="Deselect (Esc)" aria-label="Deselect">${icon('close')}</button></header>` +
       `<p class="ws-card-note">${about}${saved ? ' · shaped by hand' : ''}${c.route?.warning ? ` · ${esc(c.route.warning)}` : ''}</p>` +
       (c.square && c.fallback ? `<p class="ws-card-warn">${esc(FALLBACK_HELP)}</p>` : '') +
-      `<div class="ws-swatches">${WIRE_COLOURS.map((col, i) => `<button type="button" data-colour="${col}" title="${i + 1}" style="background:${col}"${col.toLowerCase() === colour ? ' class="is-on"' : ''}></button>`).join('')}</div>` +
+      `<div class="ws-swatches">${WIRE_COLOURS.map((col, i) => `<button type="button" data-colour="${col}" title="${i + 1}" aria-label="Wire colour ${i + 1}" style="background:${col}"${col.toLowerCase() === colour ? ' class="is-on"' : ''}></button>`).join('')}</div>` +
       `<footer>${c.square && (saved || c.fallback) ? '<button type="button" data-wire="reroute" title="Forget this wire\'s hand shape and route it again">Re-route</button>' : ''}${c.square && shaped ? '<button type="button" data-wire="tidy" title="Forget every hand shape">Tidy all wires</button>' : ''}</footer>` +
       `<p class="ws-card-hint">${c.square && !c.fallback ? 'drag a handle to reshape · double-click to add or remove a bend · 1-9 colour' : 'switch Wires to square to reshape · 1-9 colour'}</p>`;
     placed = '';

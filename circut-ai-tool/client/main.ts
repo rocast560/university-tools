@@ -97,7 +97,7 @@ async function renderHome() {
   setTimeout(placeLights, 300);
   app.replaceChildren(h(`<main class="home"><header><h1>${icon('brand')}<span>Bench<span class="brand-mate">Mate</span></span></h1><p class="sub">Open a KiCad schematic and get a breadboard wiring diagram, a build guide, checks and a logic simulator.</p></header>
     <section class="open"><div id="drop" class="dropzone"><b>Drop a .kicad_sch here</b><span class="muted">or</span><button class="primary" type="button" id="pick">Import…</button><input type="file" id="file" accept=".kicad_sch" hidden></div>
-      <form id="open-form"><label>Or open one in place <input name="path" placeholder="absolute path to a .kicad_sch" required></label><button type="submit">Open</button></form></section>
+      <form id="open-form"><label>Or open one in place <input name="path" placeholder="absolute path to a .kicad_sch" required></label><button type="submit" class="primary">Open</button></form></section>
     <section><h2>Lab 3 · BCD to 7-segment</h2><p>L3 Auxiliary supplies inverted inputs and segments a–d. This example completes e–g with gates and a common-anode display. W is the 8-bit weight; Z is the 1-bit weight. A low output lights a segment.</p><button type="button" id="lab3-example">Create Lab 3 prelab example</button><p class="muted">Header numbers follow the instructor’s board labels, not its internal IC. Inputs 10–15 are don’t-care cases. The electrical model is approximate.</p></section>
     <section class="organizer"><h2>Projects</h2><div id="organizer"><p class="muted">Loading…</p></div></section>
     <footer><a href="#/connect">Connect Claude, ChatGPT or Claude Code</a> · <a href="/openapi.json">OpenAPI</a></footer></main>`));

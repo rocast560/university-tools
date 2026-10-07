@@ -21,6 +21,16 @@ for (const mode of [':root', ':root[data-theme="dark"]'] as const) {
   });
 }
 
+test('the 3D workspace (.ws) carries exactly the dark token values, so it stays dark in light mode', () => {
+  const dark = parseTokens(css, ':root[data-theme="dark"]');
+  const m = css.match(/\n\.ws \{([\s\S]*?)\r?\n\}/);
+  expect(m).not.toBeNull();
+  // --scene is the renderer's clear colour and has no page counterpart
+  const own = [...m![1].matchAll(/(--[\w-]+):\s*(#[0-9a-fA-F]{6})\s*;/g)].filter(([, name]) => name !== '--scene');
+  for (const name of ['--bg', '--card', '--sunken', '--ink', '--ink-2', '--line', '--accent', '--accent-ink', '--ok', '--bad', '--warn']) expect(own.some(([, n]) => n === name)).toBe(true);
+  for (const [, name, val] of own) expect(`${name}: ${val.toLowerCase()}`).toBe(`${name}: ${dark[name]?.toLowerCase()}`);
+});
+
 test('the prefers-color-scheme dark block matches the explicit dark block', () => {
   const dark = parseTokens(css, ':root[data-theme="dark"]');
   const m = css.match(/@media \(prefers-color-scheme: dark\) \{\s*:root:not\(\[data-theme="light"\]\) \{([\s\S]*?)\r?\n  \}\r?\n\}/);

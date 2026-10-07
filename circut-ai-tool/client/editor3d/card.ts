@@ -8,6 +8,7 @@
 
 import { flipDip, rotateLead2, validatePlacement } from '../../src/edit/placement.ts';
 import { api } from '../api.ts';
+import { icon } from '../icons.ts';
 import { esc, loadProject, toast } from '../main.ts';
 import { store } from '../state.ts';
 import { duplicatePart } from './duplicate.ts';
@@ -45,7 +46,7 @@ export function attachCard(ws: Workspace): () => void {
     card.dataset.ref = ref;
     card.hidden = false;
     card.innerHTML =
-      `<header><b>${esc(ref)}</b><span>${esc(pkg?.name ?? part?.style ?? comp?.part ?? '')}</span><button type="button" class="ws-card-x" data-card="close" title="Deselect (Esc)">×</button></header>` +
+      `<header><b>${esc(ref)}</b><span>${esc(pkg?.name ?? part?.style ?? comp?.part ?? '')}</span><button type="button" class="ws-card-x" data-card="close" title="Deselect (Esc)" aria-label="Deselect">${icon('close')}</button></header>` +
       `<label>Value <input name="value" value="${esc(comp?.value ?? part?.value ?? '')}" spellcheck="false"></label>` +
       `<ul class="ws-card-pins">${pins.map(([pin, h]) => {
         const net = comp?.pins.get(pin)?.net ?? '';
@@ -55,8 +56,8 @@ export function attachCard(ws: Workspace): () => void {
       (part?.kind === 'lead2' ? '<button type="button" data-card="rotate" title="R">Rotate</button>' : '') +
       (pkg?.kind === 'dip' ? '<button type="button" data-card="flip" title="Shift+R">Flip</button>' : '') +
       '<button type="button" data-card="focus" title="F">Focus</button>' +
-      '<button type="button" data-card="duplicate" title="D">Duplicate</button>' +
-      '<button type="button" data-card="delete" class="danger" title="Delete">Delete</button>' +
+      `<button type="button" data-card="duplicate" title="D">${icon('duplicate')}Duplicate</button>` +
+      `<button type="button" data-card="delete" class="danger" title="Delete">${icon('trash')}Delete</button>` +
       '</footer><div class="ws-card-confirm" hidden>Remove ' + esc(ref) + ' from the schematic? A backup is kept. <button type="button" data-card="confirm" class="danger">Remove</button><button type="button" data-card="cancel">Keep</button></div>';
     last = '';
   };

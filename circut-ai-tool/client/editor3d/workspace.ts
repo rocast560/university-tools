@@ -18,6 +18,7 @@ import { showBar } from '../showbar.ts';
 import type { PartGroup } from '../../src/render/index.ts';
 import { flowOrder } from '../floworder.ts';
 import { esc, toast } from '../main.ts';
+import { icon, type IconName } from '../icons.ts';
 import { simState } from '../simstate.ts';
 import { store } from '../state.ts';
 import { history as editHistory } from './history.ts';
@@ -69,6 +70,9 @@ const saveDetail = (d: Detail) => {
 let dropHook: ModelKey[] = [];
 const getModels = cachedModels(() => import('../models.ts').then((m) => m.loadModels('/models/', undefined, dropHook)));
 
+/** A toolbar button's face: its icon, then a label that changes with the state. */
+const btnLabel = (name: IconName, text: string) => `${icon(name)}${esc(text)}`;
+
 const typing = (t: EventTarget | null) => {
   const el = t as HTMLElement | null;
   return !!el && (el.isContentEditable || /^(input|textarea|select)$/i.test(el.tagName));
@@ -86,13 +90,16 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
   root.innerHTML =
     '<div class="ws-tray" aria-label="Parts tray"></div>' +
     '<div class="ws-bar">' +
-    '<button type="button" class="ws-btn" data-ws="exit" title="Close the 3D editor (Esc)">← Exit</button>' +
-    '<button type="button" class="ws-btn" data-ws="fly" title="Fly through (F with nothing selected)">Fly through</button>' +
-    '<button type="button" class="ws-btn" data-ws="prev" title="previous build step">◀</button><span class="ws-step"></span><button type="button" class="ws-btn" data-ws="next" title="next build step">▶</button>' +
-    '<button type="button" class="ws-btn" data-ws="wires" title="curved arcs or square-cornered runs">Wires: curved</button>' +
-    '<button type="button" class="ws-btn" data-ws="detail" title="Real part models or simple shapes">Detail: high</button>' +
-    '<button type="button" class="ws-btn" data-ws="wire" title="Draw a jumper from one hole to another (W)">Wire</button>' +
-    '<button type="button" class="ws-btn" data-ws="undo" title="Undo (Ctrl+Z)" disabled>Undo</button><button type="button" class="ws-btn" data-ws="redo" title="Redo (Ctrl+Shift+Z)" disabled>Redo</button>' +
+    `<button type="button" class="ws-btn" data-ws="exit" title="Close the 3D editor (Esc)">${icon('exit')}Exit</button>` +
+    `<button type="button" class="ws-btn" data-ws="fly" title="Fly through (F with nothing selected)">${icon('eye')}Fly through</button>` +
+    '<span class="tsep" aria-hidden="true"></span>' +
+    `<button type="button" class="ws-btn icon-only" data-ws="prev" title="Previous build step" aria-label="Previous build step">${icon('chevron', 'i flip')}</button><span class="ws-step"></span><button type="button" class="ws-btn icon-only" data-ws="next" title="Next build step" aria-label="Next build step">${icon('chevron')}</button>` +
+    '<span class="tsep" aria-hidden="true"></span>' +
+    `<button type="button" class="ws-btn" data-ws="wires" title="curved arcs or square-cornered runs">${btnLabel('wires', 'Wires: curved')}</button>` +
+    `<button type="button" class="ws-btn" data-ws="detail" title="Real part models or simple shapes">${btnLabel('cube', 'Detail: high')}</button>` +
+    `<button type="button" class="ws-btn" data-ws="wire" title="Draw a jumper from one hole to another (W)">${icon('wire')}Wire</button>` +
+    '<span class="tsep" aria-hidden="true"></span>' +
+    `<button type="button" class="ws-btn icon-only" data-ws="undo" title="Undo (Ctrl+Z)" aria-label="Undo" disabled>${icon('undo')}</button><button type="button" class="ws-btn icon-only" data-ws="redo" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled>${icon('redo')}</button>` +
     '<span class="ws-hint"></span></div>' +
     '<div class="ws-canvas"></div>' +
     `<div class="ws-legend">${showBar(p.partGroup ?? null)}${flowOrder(p.doc).map((net) => `<span data-legend="${esc(net)}" title="click to follow this net"><i style="background:${esc(p.doc.nets[net].color)}"></i><span>${esc(p.doc.nets[net].name)}</span></span>`).join('')}</div>`;
@@ -102,7 +109,7 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
   const hintEl = root.querySelector<HTMLElement>('.ws-hint')!;
   const stepEl = root.querySelector<HTMLElement>('.ws-step')!;
   const detailBtn = root.querySelector<HTMLButtonElement>('[data-ws=detail]')!;
-  detailBtn.textContent = `Detail: ${readDetail()}`;
+  detailBtn.innerHTML = btnLabel('cube', `Detail: ${readDetail()}`);
   const wiresBtn = root.querySelector<HTMLButtonElement>('[data-ws=wires]')!;
 
   const dismantle = () => {
@@ -268,7 +275,8 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
       for (const chip of root.querySelectorAll<HTMLElement>('[data-legend]')) chip.classList.toggle('is-on', q.highlight?.net === chip.dataset.legend);
       for (const b of root.querySelectorAll<HTMLElement>('.ws-legend [data-show]')) b.classList.toggle('is-on', (b.dataset.show || null) === (q.partGroup ?? null));
       const square = q.sidecar.options.wireStyle === 'orthogonal';
-      wiresBtn.textContent = square ? 'Wires: square' : 'Wires: curved';
+      const wiresText = square ? 'Wires: square' : 'Wires: curved';
+      if (wiresBtn.textContent !== wiresText) wiresBtn.innerHTML = btnLabel('wires', wiresText);
       wiresBtn.classList.toggle('is-on', square);
       const n = q.doc.steps.length;
       const step = q.activeStep !== null ? q.doc.steps.find((x) => x.n === q.activeStep) : undefined;
@@ -309,7 +317,7 @@ export async function openWorkspace(onClosed: () => void, signal?: AbortSignal):
       if (what === 'detail') {
         detail = detail === 'high' ? 'simple' : 'high';
         saveDetail(detail);
-        detailBtn.textContent = `Detail: ${detail}`;
+        detailBtn.innerHTML = btnLabel('cube', `Detail: ${detail}`);
         const want = detail;
         (want === 'high' ? getModels() : Promise.resolve(null)).then((set) => {
           // Toggled again, or closed, while the models were loading.

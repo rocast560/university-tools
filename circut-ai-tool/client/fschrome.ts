@@ -3,6 +3,8 @@
 // the legend scrolled sideways) or hidden, from a small switcher floating in
 // the board's corner or with H. The choice is remembered.
 
+import { icon } from './icons.ts';
+
 export type ChromeSize = 'full' | 'compact' | 'hidden';
 const SIZES: readonly ChromeSize[] = ['full', 'compact', 'hidden'];
 const KEY = 'fullscreenControls';
@@ -42,7 +44,7 @@ export function mountFullscreenChrome(card: HTMLElement): void {
   bar.setAttribute('role', 'group');
   bar.setAttribute('aria-label', 'Controls under the board');
   bar.title = 'Controls under the board · H hides or shows them';
-  bar.innerHTML = `<span>Controls</span>${LABELS.map(([s, label]) => `<button type="button" data-fs-size="${s}">${label}</button>`).join('')}`;
+  bar.innerHTML = `<span>${icon('options')}Controls</span>${LABELS.map(([s, label]) => `<button type="button" data-fs-size="${s}">${label}</button>`).join('')}`;
   card.appendChild(bar);
 
   const apply = (next: ChromeSize) => {
@@ -72,7 +74,7 @@ export function mountFullscreenChrome(card: HTMLElement): void {
     'wheel',
     (e) => {
       if (card.dataset.chrome !== 'compact' || document.fullscreenElement !== card) return;
-      const row = (e.target as HTMLElement).closest<HTMLElement>('#legend, .view3d-legend');
+      const row = (e.target as HTMLElement).closest<HTMLElement>('#legend');
       if (!row || Math.abs(e.deltaY) <= Math.abs(e.deltaX) || row.scrollWidth <= row.clientWidth) return;
       row.scrollLeft += e.deltaY;
       e.preventDefault();
