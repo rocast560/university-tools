@@ -16,6 +16,8 @@ export interface ChipSpec {
   decoder: '7447' | '7448' | null;
   /** 3-to-8 line decoder with active-low outputs (74138). */
   demux?: boolean;
+  /** 8-to-1 data selector with true and complement outputs (74151). */
+  mux?: boolean;
   /** 4-bit binary full adder with carry (74283). */
   adder?: boolean;
   vcc: number;
@@ -49,6 +51,7 @@ export const CHIPS: Record<string, ChipSpec> = {
   '48': { code: '48', description: 'BCD to 7-segment decoder, active-high outputs (common-cathode display)', kind: null, gates: [], decoder: '7448', vcc: 16, gnd: 8, iccMax: 76e-3, pins: 16 },
   '283': { code: '283', description: '4-bit binary full adder with fast carry', kind: null, gates: [], decoder: null, adder: true, vcc: 16, gnd: 8, iccMax: 39e-3, pins: 16 },
   '138': { code: '138', description: '3-to-8 line decoder, active-low outputs', kind: null, gates: [], decoder: null, demux: true, vcc: 16, gnd: 8, iccMax: 10e-3, pins: 16 },
+  '151': { code: '151', description: '8-to-1 line data selector/multiplexer', kind: null, gates: [], decoder: null, mux: true, vcc: 16, gnd: 8, iccMax: 10e-3, pins: 16 },
 };
 
 /** 74138 pinout: select A0-A2, enables E1 and E2 (active low) and E3 (active high), outputs O0-O7. */
@@ -64,6 +67,21 @@ export function demuxOutputs(select: number[], enableLow: number[], enableHigh: 
   const on = enableLow.every((v) => v === 0) && enableHigh === 1;
   const line = select[0] + 2 * select[1] + 4 * select[2];
   return DEMUX_PINS.outputs.map((_, i) => (on && i === line ? 0 : 1));
+}
+
+/** 74151 pinout: data D0-D7, select S0-S2, strobe (active low), Z and its complement W. */
+export const MUX_PINS = {
+  data: [4, 3, 2, 1, 15, 14, 13, 12],
+  select: [11, 10, 9],
+  strobe: 7,
+  z: 5,
+  w: 6,
+};
+
+/** Outputs of a 74151: Z is the selected data input while the strobe is low; a high strobe holds Z low. */
+export function muxOutputs(data: number[], select: number[], strobe: number): { z: 0 | 1; w: 0 | 1 } {
+  const z: 0 | 1 = strobe === 0 && data[select[0] + 2 * select[1] + 4 * select[2]] === 1 ? 1 : 0;
+  return { z, w: z === 1 ? 0 : 1 };
 }
 
 /** 74283 pinout, bit 0 first: A1-A4, B1-B4, sums S1-S4, carry in C0 and carry out C4. */

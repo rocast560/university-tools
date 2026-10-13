@@ -12,7 +12,7 @@ import { connectivity, holeNode, supplyVolts } from '../../checks/index.ts';
 import type { EngineResult } from '../../layout/engine.ts';
 import type { Hole } from '../../layout/types.ts';
 import type { Design } from '../../netlist.ts';
-import { DECODER_PINS, DEMUX_PINS, icInfo, type GateKind } from '../../parts/gates.ts';
+import { DECODER_PINS, DEMUX_PINS, icInfo, MUX_PINS, type GateKind } from '../../parts/gates.ts';
 import { parseFarads, parseHenries, parseOhms } from '../../parts/values.ts';
 import type { Device } from './dc.ts';
 import type { Family } from './digital.ts';
@@ -44,6 +44,15 @@ export interface AnalogDemux {
   outputs: (string | undefined)[];
 }
 
+/** A 74151 8-to-1 multiplexer, pins resolved to nodes; undefined where a pin is not placed. */
+export interface AnalogMux {
+  data: (string | undefined)[];
+  select: (string | undefined)[];
+  strobe: string | undefined;
+  z: string | undefined;
+  w: string | undefined;
+}
+
 /** A logic chip placed on the board, as the mixed solver sees it. */
 export interface AnalogChip {
   ref: string;
@@ -54,6 +63,7 @@ export interface AnalogChip {
   gates: AnalogGate[];
   decoder: AnalogDecoder | null;
   demux?: AnalogDemux | null;
+  mux?: AnalogMux | null;
   /** Every input pin of the chip, for the input load. */
   inputNodes: string[];
   iccMax: number;
@@ -221,7 +231,14 @@ export function buildAnalogModel(design: Design, res: EngineResult, switches: Re
         demux = { select: p.select.map(pin), enableLow: p.enableLow.map(pin), enableHigh: pin(p.enableHigh), outputs: p.outputs.map(pin) };
         inputNodes.push(...demux.select, ...demux.enableLow, demux.enableHigh);
       }
-      chips.push({ ref, code: spec.code, family: info.family, vccNode, gndNode, gates, decoder, demux, inputNodes: inputNodes.filter(Boolean), iccMax: spec.iccMax });
+      let mux: AnalogMux | null = null;
+      if (spec.mux) {
+        const p = MUX_PINS;
+        const pin = (n: number) => at(String(n));
+        mux = { data: p.data.map(pin), select: p.select.map(pin), strobe: pin(p.strobe), z: pin(p.z), w: pin(p.w) };
+        inputNodes.push(...[...mux.data, ...mux.select, mux.strobe].filter((n): n is string => n !== undefined));
+      }
+      chips.push({ ref, code: spec.code, family: info.family, vccNode, gndNode, gates, decoder, demux, mux, inputNodes: inputNodes.filter(Boolean), iccMax: spec.iccMax });
     } else if (fp.kind === 'dipswitch') {
       // Each way is its own switch, keyed the way the board and the boolean
       // simulator key it, so flipping one slider reaches the solver and only

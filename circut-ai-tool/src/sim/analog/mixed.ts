@@ -9,7 +9,7 @@
 // is a Thevenin source, an input is a resistance to Vcc - so the nonlinear
 // solver underneath needs to know nothing about logic at all.
 
-import { demuxOutputs } from '../../parts/gates.ts';
+import { demuxOutputs, muxOutputs } from '../../parts/gates.ts';
 import { SEGMENT_DIGITS, evalGate } from '../index.ts';
 import { driveOf, inputLoad, initialLevel, readLevel } from './digital.ts';
 import type { Device } from './dc.ts';
@@ -159,6 +159,14 @@ function driveNodes(chip: AnalogChip, level: (node: string) => 0 | 1): { ref: st
     dm.outputs.forEach((node, i) => {
       if (node !== undefined) out.push({ ref: `${chip.ref}.O${i}`, node, level: levels[i] });
     });
+  }
+  // An unplaced input pin is open, and open TTL reads high.
+  const read = (node: string | undefined): 0 | 1 => (node === undefined ? 1 : level(node));
+  const mx = chip.mux;
+  if (mx) {
+    const res = muxOutputs(mx.data.map(read), mx.select.map(read), read(mx.strobe));
+    if (mx.z !== undefined) out.push({ ref: `${chip.ref}.Z`, node: mx.z, level: res.z });
+    if (mx.w !== undefined) out.push({ ref: `${chip.ref}.W`, node: mx.w, level: res.w });
   }
   return out;
 }
