@@ -138,6 +138,36 @@ function revealIn(view: EditorView, from: number, to: number, focus: boolean): v
     effects: EditorView.scrollIntoView(anchor, { y: 'center' }),
   });
   if (focus) view.focus();
+  settleReveal(view, anchor, 0);
+}
+
+/**
+ * A long jump in a wrapped document scrolls by height *estimates* for lines
+ * that were never measured, so the first scroll can stop far short (seen:
+ * ~180 lines above the viewport on a 23-page report; a web font swapping in
+ * after the first measure makes it worse). Once the view has measured, check
+ * where the target really is and scroll again if it is outside the scroller.
+ * At most two corrective passes: enough for the estimate to converge, and it
+ * can never loop.
+ *
+ * The check runs two frames later, after CodeMirror has measured *and*
+ * rendered. Checking from inside its own measure cycle (requestMeasure) read
+ * the same estimate that caused the miss, judged the target visible and never
+ * corrected: in the real app every jump after the first stayed off screen.
+ */
+function settleReveal(view: EditorView, anchor: number, pass: number): void {
+  if (pass >= 2) return;
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    // The user moved the caret (or another reveal ran) in the meantime: leave it alone.
+    if (view.state.selection.main.anchor !== anchor) return;
+    const at = view.coordsAtPos(anchor);
+    const box = view.scrollDOM.getBoundingClientRect();
+    // No coordinates means the line is not even laid out: certainly off screen.
+    const off = !at || at.bottom < box.top || at.top > box.bottom;
+    if (!off) return;
+    view.dispatch({ effects: EditorView.scrollIntoView(anchor, { y: 'center' }) });
+    settleReveal(view, anchor, pass + 1);
+  }));
 }
 
 /** Insert `text` at the caret, replacing any selection. */

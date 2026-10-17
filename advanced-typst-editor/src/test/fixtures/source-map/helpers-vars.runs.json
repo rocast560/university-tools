@@ -1,0 +1,49 @@
+{
+ "pages": [
+  [
+   "Acme Corp internal review",
+   "Draft 3",
+   "Design Review Summary",
+   "Owner: {{TEAM_NAME}}, reviewer {{REVIEWER}}, due {{DUE_DATE}}",
+   "Overview",
+   "The {{TEAM_NAME}} group reviewed the storage design with {{REVIEWER}} on ",
+   "{{DUE_DATE}}. The review covered the rack layout, the cabling plan and the backup ",
+   "schedule.",
+   "Decision needed",
+   "Approve the rack layout before the order closes.",
+   "Status",
+   "Approved",
+   " Rack layout.",
+   "Blocked",
+   " Cabling plan, waiting on the vendor quote.",
+   "In review",
+   " Backup schedule.",
+   "2.1",
+   "Action items",
+   "•",
+   "Order the rack",
+   "•",
+   "Confirm the cable lengths",
+   "•",
+   "Test the restore",
+   "2.2",
+   "Diagrams",
+   "[ {{TODO: Insert screenshot here}} ]",
+   "Figure 1: Rack layout, front view"
+  ],
+  [
+   "Acme Corp internal review",
+   "Draft 3",
+   "[ {{TODO: Insert screenshot here}} ]",
+   "Figure 2: Cable run between racks",
+   "Risk",
+   "The vendor quote may change the cable lengths.",
+   "Notes",
+   "Remember that the {{TEAM_NAME}} group meets on Thursdays. The {{REVIEWER}} ",
+   "role rotates every quarter, so confirm the name before the next review.",
+   "Total budget: Lorem ipsum dolor sit amet, consectetur adipiscing elit.",
+   "The summary above is generated, but the closing line is plain text that the author ",
+   "typed by hand."
+  ]
+ ]
+}

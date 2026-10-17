@@ -11,7 +11,7 @@ Date: 2026-10-17. Scope: the rendered pages in the studio preview. The exported 
    - Choose the match by context, not by a raw count.
    - Use the same machinery for multi-run selections.
 
-   It is pure TypeScript, adds no bundle weight, and fits the lazy per-page preview. The ceiling is roughly 90-95% on prose and a few tables. Generated text such as `#let` helpers, `{{PLACEHOLDER}}` variables and `#include`d content will stay fuzzy.
+   It is pure TypeScript, adds no bundle weight, and fits the lazy per-page preview. Measured on the Phase 1 corpus (see "Phase 1 results"): 98.7% of 226 hand-labelled clicks land on the right source line, against 86.7% for the old search. Generated text such as `#let` helpers, `{{PLACEHOLDER}}` variables and `#include`d content will stay fuzzy.
 3. **Treat exact spans as a separate, optional project (Phase 3).** The route is a custom build of `typst-ts-web-compiler` that exports glyph spans from the document, plus a small span-to-offset resolver. The Rust source and the cause of the no-op debug flag were not read (see "What I did not verify"). Do it only if Phase 1 accuracy is not enough. Don't upgrade to 0.8.0-rc3 for this, because it gains nothing here.
 
 ## Options at a glance
@@ -105,8 +105,26 @@ Test document: a small page with a heading, a `#let who = "Alice"` helper, a `--
 - Why the flag is a no-op (a build-time feature flag or an unimplemented path). I did not read the typst.ts Rust source (the one URL I tried returned 404).
 - Whether a custom wasm build would work, its size, or its build effort. The effort and risk for option C are estimates from the architecture.
 - tinymist and typst-preview behaviour is from reading `jump.rs` and `preview.rs` summaries (via fetch), not from running them.
-- Accuracy figures for the alignment approach (the "90-95%" ceiling) are an estimate, not measured. A Phase 1 corpus test should replace it with real numbers.
+- ~~Accuracy figures for the alignment approach (the "90-95%" ceiling) are an estimate, not measured.~~ Measured on 2026-10-17, see "Phase 1 results".
 - I did not test the alignment algorithm. Only the inputs it relies on (the `tsel` run structure and `getAst`) were checked.
+
+## Phase 1 results
+
+Measured 2026-10-17 by `src/test/typst-source-map-corpus.test.ts`, which replaced the earlier "90-95%" estimate. The corpus is six fixture documents written for this (`src/test/fixtures/source-map/`: a pentest report with repeated finding blocks, a lab report with math, a prose page with quotes and dashes, a helpers-and-variables page, a multi-page report with a contents list, and a 25-heading report with uppercase headings, repeated sub-headings and a generated contents list), rendered once with the project's typst.ts 0.7 (`scripts/gen-source-map-fixtures.mjs`), and 226 hand-labelled clicks, many of them deliberately hard. A hit means the returned range lies on the expected source line.
+
+| fixture | clicks | old (candidate search) | new (alignment, then the same fallback) |
+|---|---|---|---|
+| helpers-vars | 31 | 26 (83.9%) | 31 (100.0%) |
+| lab-report | 35 | 31 (88.6%) | 33 (94.3%) |
+| long-report | 50 | 43 (86.0%) | 50 (100.0%) |
+| pentest-report | 32 | 20 (62.5%) | 32 (100.0%) |
+| prose-quotes | 28 | 27 (96.4%) | 27 (96.4%) |
+| toc-report | 50 | 49 (98.0%) | 50 (100.0%) |
+| **overall** | **226** | **196 (86.7%)** | **223 (98.7%)** |
+
+Caveats: the thresholds were tuned against this same corpus, so treat 99% as an upper bound for real documents and spot-check in the browser. The three misses are the known weak spots: a math digit (`2` inside `$f_c = 1 / (2 pi R C)$`, math projects as one wildcard), a page number whose only source is `numbering:` in `#set page` (no text to align), and a footnote marker whose footnote text sits elsewhere in the source than where the marker renders. The old search's 62.5% on the pentest fixture is mostly "Severity" and "Open" repeated in every finding table.
+
+Cost, on the 8-page, 724-run, 7.9K-character multi-page fixture: median 0.4 ms, p95 1.5 ms, max 2.8 ms per click once the projection exists (budget: under 5 ms, asserted under 25). The projection plus gram index is built once per source text on the first click (about 15 ms for 79K characters). A stress copy ten times larger, whose ten copies are identical so every click widens its window, takes a median of 4.5 ms and a worst case of about 37 ms.
 
 ## Phased plan
 

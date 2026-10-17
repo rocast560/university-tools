@@ -18,7 +18,7 @@ import {
   revealTypstRange, getTypstCaret, setTypstSearchRequest, setTypstEditorContent, setTypstDocKey,
 } from './typst-editor-bridge';
 import { DiskChangeBar } from './DiskChangeBar';
-import { TypstPreview, type SourceCandidate } from './TypstPreview';
+import { TypstPreview } from './TypstPreview';
 import { TypstAssetsPanel } from './TypstAssetsPanel';
 
 // CodeMirror and its Typst grammar are ~500 KB -- most of this tab's
@@ -40,7 +40,7 @@ import { resolveAssetBytes } from '@/lib/typst-assets';
 import { collectMounts } from '@/lib/typst-mount';
 import { switchTrace } from '@/lib/perf';
 import { matchAssetByHref } from '@/lib/asset-folders';
-import { findSourceRange, type SourceRange } from '@/lib/typst-source-map';
+import { resolveSourceClick, type SourceClick, type SourceRange } from '@/lib/typst-source-map';
 import {
   clampPaneWidth,
   fitPanes,
@@ -246,13 +246,13 @@ function TypstWorkspaceView({ workspaceId }: { workspaceId: string }) {
     [revealRange],
   );
 
-  const revealSource = useCallback((candidates: SourceCandidate[]) => {
-    let hit: SourceRange | null = null;
-    for (const c of candidates) {
-      hit = findSourceRange(sourceRef.current, c.text, c.occurrence);
-      if (hit) break;
-    }
+  // Click-to-source: align the clicked run (with its neighbours as context)
+  // against the source, falling back to the old text search. Returns the range
+  // so the preview can pass it back as a position prior for the next click.
+  const revealSource = useCallback((click: SourceClick): SourceRange | null => {
+    const hit = resolveSourceClick(sourceRef.current, click);
     if (hit) revealRange(hit.from, hit.to);
+    return hit;
   }, [revealRange]);
 
   // Assets panel: full-tab mode, and click-to-reveal from the preview

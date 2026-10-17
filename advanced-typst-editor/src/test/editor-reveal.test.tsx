@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { StrictMode } from 'react';
-import { render } from '@testing-library/react';
+import { render, waitFor } from '@testing-library/react';
 import { EditorView } from '@codemirror/view';
 import { TypstEditor } from '@/components/typst/TypstEditor';
 import {
@@ -69,5 +69,43 @@ describe('reveal into a not-yet-mounted editor', () => {
 
     const sel = viewIn(container).state.selection.main;
     expect([sel.anchor, sel.head]).toEqual([0, 0]);
+  });
+});
+
+/**
+ * A long jump in a wrapped document lands on height estimates for lines that
+ * were never measured, so the first scroll can stop hundreds of lines short
+ * (seen on a 23-page report: ~180 lines above the viewport). After the view
+ * has measured, the reveal checks where the target really is and scrolls
+ * again, at most twice.
+ */
+describe('reveal correction after measuring', () => {
+  const mountLive = () => {
+    setTypstDocKey('ws:live.typ');
+    const { container } = render(<TypstEditor value={DOC} onChange={() => {}} docKey="ws:live.typ" />);
+    return viewIn(container);
+  };
+  const frames = () => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+
+  it('re-issues the scroll, at most twice, while the target is outside the scroller', async () => {
+    const view = mountLive();
+    vi.spyOn(view.scrollDOM, 'getBoundingClientRect').mockReturnValue({ top: 0, bottom: 300, left: 0, right: 400, width: 400, height: 300, x: 0, y: 0, toJSON() { return {}; } });
+    vi.spyOn(view, 'coordsAtPos').mockReturnValue({ top: -3828, bottom: -3810, left: 0, right: 5 });
+    const dispatch = vi.spyOn(view, 'dispatch');
+    expect(revealTypstRange(FROM, TO)).toBe(true);
+    await waitFor(() => expect(dispatch).toHaveBeenCalledTimes(3));
+    await frames(); await frames(); await frames();
+    // One dispatch for the reveal itself plus two corrective scrolls.
+    expect(dispatch).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not scroll again when the target is already visible', async () => {
+    const view = mountLive();
+    vi.spyOn(view.scrollDOM, 'getBoundingClientRect').mockReturnValue({ top: 0, bottom: 300, left: 0, right: 400, width: 400, height: 300, x: 0, y: 0, toJSON() { return {}; } });
+    vi.spyOn(view, 'coordsAtPos').mockReturnValue({ top: 140, bottom: 158, left: 0, right: 5 });
+    const dispatch = vi.spyOn(view, 'dispatch');
+    revealTypstRange(FROM, TO);
+    await frames(); await frames();
+    expect(dispatch).toHaveBeenCalledTimes(1);
   });
 });

@@ -22,6 +22,7 @@ Paths are relative to `advanced-typst-editor/`. Tests live in `server/*.test.ts`
 | [Dockerfile](../Dockerfile), [docker-compose.yml](../docker-compose.yml) | image and container; see [environment](environment.md) |
 | [scripts/fonts.ts](../scripts/fonts.ts) | stages the 17 default fonts into `public/fonts` |
 | [scripts/build-sidecar.ts](../scripts/build-sidecar.ts) | compiles the server to an exe for the `launcher` app |
+| [scripts/gen-source-map-fixtures.mjs](../scripts/gen-source-map-fixtures.mjs) | compiles `src/test/fixtures/source-map/*.typ` with the project's typst.ts in Node and writes `*.runs.json` (Node, not Bun; needs jsdom) |
 | [public/fonts/](../public/fonts) | the default font files (gitignored, restaged by `bun run fonts`) |
 | `data/` | the user's workspaces and `settings.json`. Private; gitignored |
 
@@ -66,7 +67,7 @@ Pure logic; most files have a test of the same name.
 | [typst-compiler.ts](../src/lib/typst-compiler.ts), [.worker.ts](../src/lib/typst-compiler.worker.ts), [.driver.ts](../src/lib/typst-compiler.driver.ts), [-types.ts](../src/lib/typst-compiler-types.ts) | browser compile client, worker, wasm driver, shared types | `typst-compiler-client.test.ts` |
 | [typst-default-fonts.ts](../src/lib/typst-default-fonts.ts) | the 17 default font file names | `fonts-manifest.test.ts` |
 | [typst-pages.ts](../src/lib/typst-pages.ts) | split the SVG per page; shared style and defs reconcile | `typst-pages.test.ts`, `typst-shared-defs.test.ts` |
-| [typst-source-map.ts](../src/lib/typst-source-map.ts) | preview click to source range by text search | `typst-source-map.test.ts` |
+| [typst-source-map.ts](../src/lib/typst-source-map.ts) | preview click to source range: source projection, windowed alignment, then the old text search as fallback | `typst-source-map.test.ts`, `typst-source-align.test.ts`, `typst-source-map-corpus.test.ts` |
 | [typst-placeholders.ts](../src/lib/typst-placeholders.ts) | figure slots: find, add, set path and height, retarget asset paths | `typst-placeholders.test.ts` |
 | [typst-assets.ts](../src/lib/typst-assets.ts) | upload, fetch, crop, blur, mount into the compiler | `typst-assets.test.ts` |
 | [typst-mount.ts](../src/lib/typst-mount.ts) | which files a document sees; plain-file byte cache | `typst-mount.test.ts` |

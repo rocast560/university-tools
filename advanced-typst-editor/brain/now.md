@@ -38,7 +38,7 @@ Theme picker artifact: https://claude.ai/artifact/USQrvguth7bWyqGrdy5KeU (picks 
 ## Next steps
 
 1. **Answer the open questions**: JetBrains Mono bundle, logos/settings in backups, a trash restore button, the brain hook ([open questions](open-questions.md)).
-2. **Preview-to-source mapping, phase 1** (context-aware text alignment) from the research doc, when the user wants it.
+2. **Preview-to-source mapping, phase 1** is built (uncommitted, 2026-10-17: `typst-source-map.ts`, `TypstPreview.tsx`, `TypstView.tsx`, fixtures, tests); next is a browser check on real documents, then phase 2 (selection to range) when the user wants it.
 
 ## Watch-outs
 

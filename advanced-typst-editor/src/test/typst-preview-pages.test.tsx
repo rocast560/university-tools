@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import { render, act, fireEvent } from '@testing-library/react';
 
 // The compiler is wasm + fonts: far outside jsdom. Stub it to hand back
@@ -9,8 +9,9 @@ vi.mock('@/lib/typst-compiler', () => ({
   typstErrorMessage: (e: unknown) => String(e),
 }));
 
-import { TypstPreview } from '@/components/typst/TypstPreview';
+import { TypstPreview, type SourceClick } from '@/components/typst/TypstPreview';
 import { clearWorkspaceCaches, renderCache } from '@/lib/workspace-cache';
+import type { SourceRange } from '@/lib/typst-source-map';
 
 type IoCallback = (entries: Array<{ isIntersecting: boolean; target: Element }>, observer: unknown) => void;
 
@@ -196,36 +197,104 @@ describe('TypstPreview page virtualization', () => {
     expect(shadow(container)!.querySelector('#lone')).not.toBeNull();
   });
 
-  it('counts click-to-source occurrences across earlier pages, mounted or not', async () => {
-    // "dup" appears on pages 1, 2 and 3; clicking the run on page 3 must report
-    // occurrence 2 even though page 2 is not mounted at the time.
-    compileTypstSvg.mockResolvedValue({
-      svg: doc([page(1, 100, 'dup'), page(2, 100, 'dup'), page(3, 100, 'dup'), page(4, 100, 'other')]),
-      diagnostics: [],
-    });
-    const onRevealSource = vi.fn();
-    const { container } = render(<TypstPreview source="a" onRevealSource={onRevealSource} />);
+  /** Mount page 3 of four (page 2 scrolled out) and give its run a box, so the hit-test finds it. */
+  async function clickPageThree(onRevealSource: Mock<(click: SourceClick) => SourceRange | null | void>, svg: string) {
+    compileTypstSvg.mockResolvedValue({ svg, diagnostics: [] });
+    const view = render(<TypstPreview source="a" docKey="w:main.typ" onRevealSource={onRevealSource} />);
     await settle();
-
-    const all = cards(container);
+    const all = cards(view.container);
     const second = all[1]!;
     const third = all[2]!;
-    // Scroll page 2 out and page 3 in.
     const io2 = FakeIntersectionObserver.instances.find((i) => i.targets.has(second))!;
     const io3 = FakeIntersectionObserver.instances.find((i) => i.targets.has(third))!;
     act(() => io2.cb([{ isIntersecting: false, target: second }], io2));
     act(() => io3.cb([{ isIntersecting: true, target: third }], io3));
     expect(mountedSvg(second)).toBeNull();
     expect(mountedSvg(third)).not.toBeNull();
-
-    // jsdom has no layout: give the run on page 3 a real box so the hit-test finds it.
     const run = third.querySelector('foreignObject')!;
     const box = { left: 0, top: 0, right: 50, bottom: 20, width: 50, height: 20, x: 0, y: 0, toJSON() { return {}; } };
     vi.spyOn(run, 'getBoundingClientRect').mockReturnValue(box as DOMRect);
+    return { ...view, run };
+  }
+
+  const DUP_DOC = doc([page(1, 100, 'dup'), page(2, 100, 'dup'), page(3, 100, 'dup'), page(4, 100, 'other')]);
+
+  it('hands the mapper the clicked page and run, and lazily the old occurrence count across unmounted pages', async () => {
+    // "dup" appears on pages 1, 2 and 3; clicking the run on page 3 must report
+    // occurrence 2 even though page 2 is not mounted at the time.
+    const onRevealSource = vi.fn<(click: SourceClick) => SourceRange | null | void>();
+    const { run } = await clickPageThree(onRevealSource, DUP_DOC);
 
     fireEvent.click(run, { clientX: 10, clientY: 10 });
     expect(onRevealSource).toHaveBeenCalledTimes(1);
-    const candidates = onRevealSource.mock.calls[0]![0] as Array<{ text: string; occurrence: number }>;
-    expect(candidates[0]).toEqual({ text: 'dup', occurrence: 2 });
+    const click = onRevealSource.mock.calls[0]![0] as SourceClick;
+    expect(click.target).toMatchObject({ page: 2, run: 0, pageCount: 4 });
+    expect(click.target.runsOf(2)).toEqual(['dup']);
+    expect(click.target.runsOf(1)).toEqual(['dup']); // the unmounted page, from its cached fragment
+    expect(click.hint).toBeNull();
+    expect(click.candidates()[0]).toEqual({ text: 'dup', occurrence: 2 });
+  });
+
+  it('passes the previous match back as the hint, and forgets it for another document', async () => {
+    const onRevealSource = vi.fn<(click: SourceClick) => SourceRange | null | void>().mockReturnValue({ from: 7, to: 10 });
+    const { run, rerender, container } = await clickPageThree(onRevealSource, DUP_DOC);
+
+    fireEvent.click(run, { clientX: 10, clientY: 10 });
+    fireEvent.click(run, { clientX: 10, clientY: 10 });
+    expect((onRevealSource.mock.calls[0]![0] as SourceClick).hint).toBeNull();
+    expect((onRevealSource.mock.calls[1]![0] as SourceClick).hint).toEqual({ page: 2, run: 0, from: 7 });
+
+    // Same pages under another document key: offsets of the old source mean nothing.
+    rerender(<TypstPreview source="a" docKey="other:main.typ" onRevealSource={onRevealSource} />);
+    await settle();
+    const first = cards(container)[0]!.querySelector('foreignObject')!;
+    const box = { left: 0, top: 0, right: 50, bottom: 20, width: 50, height: 20, x: 0, y: 0, toJSON() { return {}; } };
+    vi.spyOn(first, 'getBoundingClientRect').mockReturnValue(box as DOMRect);
+    fireEvent.click(first, { clientX: 10, clientY: 10 });
+    expect(onRevealSource).toHaveBeenCalledTimes(3);
+    expect((onRevealSource.mock.calls[2]![0] as SourceClick).hint).toBeNull();
+  });
+
+  // Revealing a range selects it in the editor, and CodeMirror mirrors that into the
+  // document's native selection. The guard that lets a text-drag stay a drag must not
+  // mistake that for a selection in the preview, or every click after the first is dropped.
+  it('still reveals when the document selection is in the editor, not in the preview', async () => {
+    const onRevealSource = vi.fn<(click: SourceClick) => SourceRange | null | void>();
+    const { run, container } = await clickPageThree(onRevealSource, DUP_DOC);
+    const outside = document.createElement('div');
+    document.body.appendChild(outside);
+    const host = container.querySelector('[data-testid="preview-shadow-host"]')!;
+    const spy = vi.spyOn(window, 'getSelection');
+
+    // A selection whose anchor is in the editor pane.
+    spy.mockReturnValue({ toString: () => 'KEY AREAS FOR IMPROVEMENT', anchorNode: outside, focusNode: outside } as unknown as Selection);
+    fireEvent.click(run, { clientX: 10, clientY: 10 });
+    expect(onRevealSource).toHaveBeenCalledTimes(1);
+
+    // A selection inside the preview (a drag over page text) still suppresses the jump.
+    spy.mockReturnValue({ toString: () => 'dup', anchorNode: host, focusNode: host } as unknown as Selection);
+    fireEvent.click(run, { clientX: 10, clientY: 10 });
+    expect(onRevealSource).toHaveBeenCalledTimes(1);
+  });
+
+  // Chrome gives ShadowRoot a getSelection(), and while the selection lives in the
+  // editor it reports type "None" with no anchor yet still stringifies to the
+  // editor's selected text (seen in the real app on 2026-10-17). Its mere existence
+  // must not make every later click count as a preview drag.
+  it('still reveals in Chrome, where the shadow root selection stringifies the editor text', async () => {
+    const onRevealSource = vi.fn<(click: SourceClick) => SourceRange | null | void>();
+    const { run, container } = await clickPageThree(onRevealSource, DUP_DOC);
+    const shadow = container.querySelector('[data-testid="preview-shadow-host"]')!.shadowRoot! as ShadowRoot & { getSelection?: () => unknown };
+    const editorSel = { toString: () => 'KEY AREAS FOR IMPROVEMENT', anchorNode: null, focusNode: null, isCollapsed: true, type: 'None' };
+    shadow.getSelection = () => editorSel;
+    vi.spyOn(window, 'getSelection').mockReturnValue(editorSel as unknown as Selection);
+    fireEvent.click(run, { clientX: 10, clientY: 10 });
+    expect(onRevealSource).toHaveBeenCalledTimes(1);
+
+    // A real drag over page text: Chrome anchors the shadow selection inside the shadow tree.
+    const text = run.querySelector('.tsel')!.firstChild!;
+    shadow.getSelection = () => ({ toString: () => 'dup', anchorNode: text, focusNode: text, isCollapsed: false, type: 'Range' });
+    fireEvent.click(run, { clientX: 10, clientY: 10 });
+    expect(onRevealSource).toHaveBeenCalledTimes(1);
   });
 });
