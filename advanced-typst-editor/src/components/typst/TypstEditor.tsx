@@ -40,7 +40,7 @@ const editorTheme = EditorView.theme(
     },
     '&.cm-focused': { outline: 'none' },
     '.cm-scroller': {
-      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+      fontFamily: 'var(--font-mono)',
       lineHeight: '1.6',
       overflow: 'auto',
     },
@@ -83,7 +83,7 @@ const editorTheme = EditorView.theme(
       borderRadius: '4px',
       padding: '2px 6px',
       fontSize: '11px',
-      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+      fontFamily: 'var(--font-mono)',
     },
     '.cm-panel.cm-search input[type=text]:focus': {
       outline: 'none',

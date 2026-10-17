@@ -93,3 +93,41 @@ describe.skipIf(!have)('createCompiler', () => {
     await expect(compile.exportPdf(w.id, undefined, undefined)).rejects.toThrow(/cannot be baked/);
   });
 });
+
+describe('exportPdf target rules', () => {
+  function setup() {
+    const dataDir = tmpDir(); dirs.push(dataDir);
+    const settings = createSettingsStore(dataDir);
+    const service = createWorkspaceService({ settings, bus: createEventBus(), watcher: null, dataDir, workspacesDir: path.join(dataDir, 'workspaces'), template: '' });
+    const compile = createCompiler({ settings, service, typstCli: have ? TYPST_CLI : null, dataDir });
+    const w = service.create({ name: 'R', group: null, source: '= Hi\nHello' });
+    return { compile, dataDir, w };
+  }
+
+  it('refuses a target that is not a .pdf, and leaves the file alone', async () => {
+    const { compile, dataDir, w } = setup();
+    const json = path.join(dataDir, 'settings.json');
+    const before = fs.readFileSync(json, 'utf8');
+    await expect(compile.exportPdf(w.id, undefined, json)).rejects.toMatchObject({ status: 400, message: expect.stringMatching(/\.pdf/) });
+    await expect(compile.exportPdf(w.id, undefined, path.join(dataDir, 'out.txt'))).rejects.toMatchObject({ status: 400 });
+    await expect(compile.exportPdf(w.id, undefined, path.join(dataDir, 'noext'))).rejects.toMatchObject({ status: 400 });
+    expect(fs.readFileSync(json, 'utf8')).toBe(before);
+  });
+
+  it('refuses a target inside the app trash', async () => {
+    const { compile, dataDir, w } = setup();
+    const inTrash = path.join(dataDir, 'trash', '2026-01-01', 'x.pdf');
+    fs.mkdirSync(path.dirname(inTrash), { recursive: true });
+    await expect(compile.exportPdf(w.id, undefined, inTrash)).rejects.toMatchObject({ status: 400, message: expect.stringMatching(/trash/) });
+    expect(fs.existsSync(inTrash)).toBe(false);
+  });
+
+  it.skipIf(!have)('still overwrites an existing .pdf', async () => {
+    const { compile, dataDir, w } = setup();
+    const to = path.join(dataDir, 'again.pdf');
+    fs.writeFileSync(to, 'old');
+    const out = await compile.exportPdf(w.id, undefined, to);
+    expect(out.path).toBe(to);
+    expect(Buffer.from(fs.readFileSync(to).subarray(0, 4)).toString()).toBe('%PDF');
+  });
+});

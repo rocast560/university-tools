@@ -5,6 +5,7 @@ import type { EventBus } from './events';
 import { ensureDir, isDir, safeDirName, stamp, uniqueDirName } from './fsx';
 import { HttpError } from './http';
 import { MAX_FOLDER_DEPTH, depth, descendantsOf, folderName, isDescendant, joinPath, parentPath, sanitiseSegment } from '../src/lib/folder-tree';
+import { nestError } from '../src/lib/workspace-nesting';
 import type { FolderMeta } from '../src/types';
 import type { SettingsStore } from './settings';
 import type { Watcher } from './watcher';
@@ -35,7 +36,12 @@ export interface WorkspaceService {
   create(input: { name: string; group: string | null; source: string | undefined }): WorkspaceEntry;
   openFolder(absPath: string, name: string | undefined): WorkspaceEntry;
   rename(id: string, name: string): WorkspaceEntry;
+  /** Files the document in a folder (null = top level), un-nests it, and moves its nested documents along. */
   setGroup(id: string, group: string | null): WorkspaceEntry;
+  /** Nests the document under another (adopting that one's folder), or un-nests it with `null`. Throws 400 for a cycle or a fifth level. */
+  setParent(id: string, parent: string | null): WorkspaceEntry;
+  /** Merges icon/colour/logo into the document's row appearance; an explicit `null` clears that field. */
+  setAppearance(id: string, patch: FolderMeta): WorkspaceEntry;
   remove(id: string): void;
   listGroups(): string[];
   folderMeta(): Record<string, FolderMeta>;
@@ -81,7 +87,7 @@ export function createWorkspaceService(deps: ServiceDeps): WorkspaceService {
   const liveFs = (id: string): WorkspaceFs => {
     const e = entry(id);
     if (!isDir(e.path)) throw new HttpError(409, `workspace folder is missing: ${e.path}`);
-    return openWorkspace(e.path, { now });
+    return openWorkspace(e.path, { now, trash: { dir: path.join(deps.dataDir, 'trash'), name: path.basename(e.path) } });
   };
   const status = (e: WorkspaceEntry): WorkspaceStatus => ({ ...e, status: isDir(e.path) ? 'ok' : 'missing' });
   const registryChanged = () => bus.emit({ type: 'workspaces.changed' });
@@ -194,7 +200,32 @@ export function createWorkspaceService(deps: ServiceDeps): WorkspaceService {
     },
     setGroup(id, group) {
       entry(id);
-      const out = settings.patchWorkspace(id, { group: group?.trim() || null })!;
+      // Filing a document in a folder takes it out of any nesting, and its nested documents go with it.
+      const out = settings.moveWorkspace(id, group, null)!;
+      registryChanged();
+      return out;
+    },
+    setParent(id, parent) {
+      const e = entry(id);
+      if (parent === null) {
+        if (!e.parent) return e;
+        const out = settings.moveWorkspace(id, e.group, null)!;
+        registryChanged();
+        return out;
+      }
+      const p = settings.getWorkspace(parent);
+      if (!p) throw new HttpError(404, `workspace not found: ${parent}`);
+      if (e.parent === parent) return e;
+      const problem = nestError(settings.listWorkspaces(), id, parent);
+      if (problem) throw new HttpError(400, problem);
+      // A child always lives in its parent's folder.
+      const out = settings.moveWorkspace(id, p.group, parent)!;
+      registryChanged();
+      return out;
+    },
+    setAppearance(id, patch) {
+      entry(id);
+      const out = settings.setWorkspaceAppearance(id, patch)!;
       registryChanged();
       return out;
     },

@@ -768,7 +768,7 @@ export const TypstAssetsPanel = memo(function TypstAssetsPanel({
 
   return (
     <div
-      className="relative flex h-full flex-col border-l border-[hsl(var(--border))] bg-[hsl(var(--card))]"
+      className="relative flex h-full flex-col bg-[hsl(var(--card))]"
       onDragOver={(e) => {
         if (e.dataTransfer.types.includes(ASSET_DRAG) || e.dataTransfer.types.includes(FOLDER_DRAG)) return;
         e.preventDefault();

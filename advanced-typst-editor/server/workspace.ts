@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { AssetFolder, FileEntry, TypstAsset, TypstAssetKind, WorkspaceJson } from '../src/types';
 import { countAssetReferences, retargetAssetPath } from '../src/lib/typst-placeholders';
 import { ALLOWED_EXTENSIONS, extensionOf, mimeFor, MAX_ASSET_BYTES, reconcileImageName, sanitizeFilename, sanitizeStem, uniqueFilename, validateBlurs, validateCrop } from './assets';
-import { readJson, writeAtomic } from './fsx';
+import { readJson, safeDirName, stamp, writeAtomic } from './fsx';
 import { HttpError } from './http';
 import { normalizeRel, resolveInside } from './paths';
 
@@ -109,9 +109,29 @@ export function normaliseMeta(raw: Partial<WorkspaceJson>): WorkspaceJson {
   };
 }
 
-export function openWorkspace(root: string, opts: { now?: () => number } = {}): WorkspaceFs {
+/** Where deleted files go: `<dir>/<stamp>/<name>/<relative path>`. `dir` is the app's `data/trash`. */
+export interface WorkspaceTrash { dir: string; name: string }
+
+export function openWorkspace(root: string, opts: { now?: () => number; trash?: WorkspaceTrash } = {}): WorkspaceFs {
   const now = opts.now ?? (() => Date.now());
   const rootAbs = path.resolve(root);
+
+  /** Move a workspace file into the app trash, keeping its relative path. Never unlinks. */
+  const toTrash = (rel: string, src: string): void => {
+    if (!opts.trash) throw new HttpError(500, 'no trash folder configured, refusing to delete permanently');
+    const dest = path.join(opts.trash.dir, stamp(now()), safeDirName(opts.trash.name), ...rel.split('/'));
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    let target = dest;
+    const ext = path.extname(dest);
+    for (let n = 2; fs.existsSync(target); n++) target = `${dest.slice(0, dest.length - ext.length)} (${n})${ext}`;
+    try {
+      fs.renameSync(src, target);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EXDEV') throw err;
+      fs.copyFileSync(src, target); // trash on another drive: copy first, remove the original only after
+      fs.unlinkSync(src);
+    }
+  };
 
   const abs = (rel: string): string => {
     const n = normalizeRel(rel);
@@ -294,7 +314,7 @@ export function openWorkspace(root: string, opts: { now?: () => number } = {}): 
 
   const deleteAsset: WorkspaceFs['deleteAsset'] = (id) => {
     const asset = getAsset(id);
-    fs.unlinkSync(path.join(rootAbs, ...asset.id.split('/')));
+    toTrash(asset.id, path.join(rootAbs, ...asset.id.split('/')));
     const meta = readMeta();
     delete meta.assets[id];
     delete meta.fonts[id];
@@ -409,7 +429,9 @@ export function openWorkspace(root: string, opts: { now?: () => number } = {}): 
     },
     deleteFile(rel) {
       const a = abs(rel);
-      try { fs.unlinkSync(a); return true; } catch { return false; }
+      if (!fs.existsSync(a)) return false;
+      toTrash(normalizeRel(rel) as string, a);
+      return true;
     },
     readMeta,
     writeMeta(meta) { writeAtomic(path.join(rootAbs, META_FILE), JSON.stringify(normaliseMeta(meta), null, 2)); },

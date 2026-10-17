@@ -4,6 +4,8 @@ import type { BackupState, DirListing, McpStatus, SnapshotInfo, CompileResult, D
 import type { EventBus } from './events';
 import { HttpError, json, optionalString, readJsonObject, requireString } from './http';
 import { folderName, joinPath, parentPath } from '../src/lib/folder-tree';
+import { LOGO_TYPES, MAX_LOGO_BYTES, isLogoName, logoContentType } from '../src/lib/logo';
+import { createLogoStore } from './logos';
 import type { SettingsStore } from './settings';
 import type { WorkspaceService } from './service';
 import { serveStatic } from './static';
@@ -78,8 +80,27 @@ async function readBody(req: Request): Promise<Uint8Array> {
   return buf;
 }
 
+/**
+ * The icon / colour / logo fields of `src`, each a string or null (null clears).
+ * `prefix` names the field in a 400: "" for a folder PATCH body, "appearance."
+ * for a document's nested object. Only the keys present are returned.
+ */
+function parseAppearance(src: Record<string, unknown>, prefix: string): FolderMeta {
+  const out: FolderMeta = {};
+  for (const key of ['icon', 'color', 'logo'] as const) {
+    if (!(key in src)) continue;
+    const v = src[key];
+    if (v === null) { out[key] = null; continue; }
+    if (typeof v !== 'string') throw new HttpError(400, `${prefix}${key} must be a string or null`);
+    if (key === 'logo' && !isLogoName(v)) throw new HttpError(400, `${prefix}logo must be a file name returned by POST /api/logos`);
+    out[key] = v;
+  }
+  return out;
+}
+
 export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Response> {
   const { service } = deps;
+  const logos = createLogoStore(deps.dataDir);
   const need = <T>(v: T | null, what: string): T => { if (!v) throw new HttpError(503, `${what} not available`); return v; };
 
   async function route(req: Request, url: URL): Promise<Response> {
@@ -99,6 +120,33 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
     if (seg[1] === 'health' && seg.length === 2) return json(200, { ok: true, version: '0.1.0' });
     if (seg[1] === 'events' && seg.length === 2 && method === 'GET') return openEventStream(deps.bus);
 
+    if (seg[1] === 'logos') {
+      if (seg.length === 2 && method === 'POST') {
+        // Refuse on the declared size first, so a huge body is never read into memory.
+        if (Number(req.headers.get('content-length') ?? 0) > MAX_LOGO_BYTES + 1024) throw new HttpError(413, `A logo can be at most ${MAX_LOGO_BYTES / 1024} KB.`);
+        const type = (req.headers.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase();
+        if (!(type in LOGO_TYPES)) throw new HttpError(415, 'A logo must be a PNG, JPEG, WebP or SVG image.');
+        const bytes = new Uint8Array(await req.arrayBuffer());
+        return json(201, { logo: logos.save(bytes, type) });
+      }
+      if (seg.length === 3 && (method === 'GET' || method === 'HEAD') && isLogoName(seg[2])) {
+        const bytes = logos.read(seg[2]);
+        if (!bytes) return json(404, { error: 'logo not found' });
+        // Names are random and never reused, so the bytes behind one never change. The
+        // sandbox and nosniff headers keep an SVG's scripts from ever running if it is opened directly.
+        return new Response(method === 'HEAD' ? null : new Uint8Array(bytes), {
+          status: 200,
+          headers: {
+            'content-type': logoContentType(seg[2]),
+            'x-content-type-options': 'nosniff',
+            'content-security-policy': 'sandbox',
+            'cache-control': 'public, max-age=31536000, immutable',
+          },
+        });
+      }
+      return json(404, { error: 'logo not found' });
+    }
+
     if (seg[1] === 'groups') {
       const state = () => ({ groups: service.listGroups(), folderMeta: service.folderMeta() });
       if (seg.length === 2) {
@@ -117,10 +165,8 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
           if ('name' in body && 'parent' in body) throw new HttpError(400, 'send either name or parent, not both');
           if ('name' in body) service.renameGroup(path, requireString(body, 'name'));
           else if ('parent' in body) service.moveGroup(path, body.parent === null ? null : requireString(body, 'parent'));
-          const appearance: FolderMeta = {};
-          if ('icon' in body) appearance.icon = body.icon === null ? null : requireString(body, 'icon');
-          if ('color' in body) appearance.color = body.color === null ? null : requireString(body, 'color');
-          if ('icon' in body || 'color' in body) {
+          const appearance = parseAppearance(body, '');
+          if ('icon' in body || 'color' in body || 'logo' in body) {
             // A rename or move above relocated the folder, so apply appearance at its new path.
             const at = 'name' in body
               ? joinPath(parentPath(path), requireString(body, 'name'))
@@ -167,7 +213,18 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
           if ('group' in body) {
             const g = body.group;
             if (g !== null && typeof g !== 'string') throw new HttpError(400, 'group must be a string or null');
+            if (typeof body.parent === 'string') throw new HttpError(400, 'send either group or parent, not both');
             entry = service.setGroup(id, g as string | null);
+          }
+          if ('parent' in body) {
+            const p = body.parent;
+            if (p !== null && typeof p !== 'string') throw new HttpError(400, 'parent must be a string or null');
+            entry = service.setParent(id, p as string | null);
+          }
+          if ('appearance' in body) {
+            const a = body.appearance;
+            if (!a || typeof a !== 'object' || Array.isArray(a)) throw new HttpError(400, 'appearance must be an object');
+            entry = service.setAppearance(id, parseAppearance(a as Record<string, unknown>, 'appearance.'));
           }
           return json(200, { workspace: entry });
         }

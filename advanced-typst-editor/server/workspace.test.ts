@@ -23,6 +23,16 @@ function fixture(): string {
   return d;
 }
 
+/** A trash folder inside a temp dir, so deletes never touch the real data/. */
+function withTrash(): { trash: { dir: string; name: string }; trashDir: string } {
+  const trashDir = path.join(tmpDir(), 'trash'); dirs.push(path.dirname(trashDir));
+  return { trash: { dir: trashDir, name: 'Rep' }, trashDir };
+}
+const trashed = (trashDir: string, ...rel: string[]): string => {
+  const [stampDir] = fs.readdirSync(trashDir);
+  return path.join(trashDir, stampDir!, 'Rep', ...rel);
+};
+
 describe('workspace files', () => {
   it('lists every file except hidden, node_modules and workspace.json', () => {
     const ws = openWorkspace(fixture());
@@ -32,7 +42,7 @@ describe('workspace files', () => {
   });
 
   it('reads with an etag and writes atomically', () => {
-    const ws = openWorkspace(fixture());
+    const ws = openWorkspace(fixture(), withTrash());
     const r = ws.readFile('main.typ')!;
     expect(Buffer.from(r.bytes).toString()).toContain('= Hi');
     expect(r.etag).toMatch(/^\d+-\d+$/);
@@ -144,10 +154,46 @@ describe('workspace assets', () => {
 
   it('deletes an asset and its meta', () => {
     const d = fixture();
-    const ws = openWorkspace(d);
+    const ws = openWorkspace(d, withTrash());
     ws.deleteAsset('assets/cover.png');
     expect(fs.existsSync(path.join(d, 'assets/cover.png'))).toBe(false);
     expect(ws.readMeta().assets['assets/cover.png']).toBeUndefined();
     expect(() => ws.deleteAsset('assets/cover.png')).toThrow(/not found/);
+  });
+
+  it('moves a deleted asset into trash/<stamp>/<workspace>/<relative path>', () => {
+    const d = fixture();
+    const { trash, trashDir } = withTrash();
+    const ws = openWorkspace(d, { trash });
+    ws.deleteAsset('assets/findings/login.png');
+    expect(fs.existsSync(path.join(d, 'assets/findings/login.png'))).toBe(false);
+    expect(fs.readFileSync(trashed(trashDir, 'assets', 'findings', 'login.png')).equals(PNG_1x1)).toBe(true);
+  });
+
+  it('moves a deleted file into trash instead of unlinking it', () => {
+    const d = fixture();
+    const { trash, trashDir } = withTrash();
+    const ws = openWorkspace(d, { trash });
+    expect(ws.deleteFile('chapters/intro.typ')).toBe(true);
+    expect(fs.existsSync(path.join(d, 'chapters/intro.typ'))).toBe(false);
+    expect(fs.readFileSync(trashed(trashDir, 'chapters', 'intro.typ'), 'utf8')).toBe('intro');
+  });
+
+  it('keeps both copies when the same file is deleted twice in one instant', () => {
+    const d = fixture();
+    const { trash, trashDir } = withTrash();
+    const ws = openWorkspace(d, { trash, now: () => 1000 });
+    ws.deleteFile('refs.bib');
+    put(d, 'refs.bib', 'second');
+    ws.deleteFile('refs.bib');
+    const [stampDir] = fs.readdirSync(trashDir);
+    expect(fs.readdirSync(path.join(trashDir, stampDir!, 'Rep')).sort()).toEqual(['refs (2).bib', 'refs.bib']);
+  });
+
+  it('refuses to delete when no trash is configured', () => {
+    const d = fixture();
+    const ws = openWorkspace(d);
+    expect(() => ws.deleteFile('refs.bib')).toThrow(/trash/);
+    expect(fs.existsSync(path.join(d, 'refs.bib'))).toBe(true);
   });
 });

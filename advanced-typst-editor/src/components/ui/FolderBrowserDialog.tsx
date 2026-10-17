@@ -17,7 +17,7 @@ export function FolderBrowserDialog({ title, confirmLabel = 'Use this folder', o
   return (
     <Portal>
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
-        <div className="flex h-[70vh] w-[640px] flex-col rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--popover))] shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex h-[70vh] w-[640px] flex-col pop-shadow rounded-lg bg-[hsl(var(--popover))]" onClick={(e) => e.stopPropagation()}>
           <div className="flex items-center justify-between border-b border-[hsl(var(--border))] px-4 py-2">
             <span className="text-sm font-semibold">{title}</span>
             <button type="button" onClick={onClose} className="rounded p-1 hover:bg-[hsl(var(--accent))]"><X size={14} /></button>

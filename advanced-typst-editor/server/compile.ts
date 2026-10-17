@@ -66,7 +66,16 @@ function run(cli: string, args: string[], cwd: string): Promise<{ code: number; 
   });
 }
 
-export function createCompiler(deps: { settings: SettingsStore; service: WorkspaceService; typstCli: string | null }): CompileApi {
+/** Refuse export targets that could clobber app data: only `.pdf` files, never inside `data/trash`. */
+function checkExportTarget(to: string, dataDir: string | undefined): void {
+  if (!to.toLowerCase().endsWith('.pdf')) throw new HttpError(400, `to must end in .pdf (got "${path.basename(to)}"); export_pdf only writes PDF files so it cannot overwrite settings or workspace files`);
+  if (dataDir && path.isAbsolute(to)) {
+    const rel = path.relative(path.resolve(dataDir, 'trash'), path.resolve(to));
+    if (rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))) throw new HttpError(400, 'to must not be inside the app trash folder');
+  }
+}
+
+export function createCompiler(deps: { settings: SettingsStore; service: WorkspaceService; typstCli: string | null; dataDir?: string }): CompileApi {
   const cli = () => resolveTypstCli(deps.typstCli, deps.settings.get().typstCli);
   const requireCli = () => { const c = cli(); if (!c) throw new HttpError(409, 'typst CLI not found: set TYPST_CLI or Settings > Typst CLI'); return c; };
 
@@ -115,6 +124,7 @@ export function createCompiler(deps: { settings: SettingsStore; service: Workspa
       }
     },
     async exportPdf(workspaceId, file, to) {
+      if (to !== undefined) checkExportTarget(to, deps.dataDir);
       const ws = deps.service.fs(workspaceId);
       const f = entryFile(file);
       const meta = ws.readMeta();

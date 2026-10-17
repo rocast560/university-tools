@@ -39,6 +39,9 @@ const wsUrl = (id: string) => `/api/workspaces/${enc(id)}`;
 const fileUrl = (id: string, p: string) => `${wsUrl(id)}/files/${p.split('/').map(enc).join('/')}`;
 const assetUrl = (id: string, a: string) => `${wsUrl(id)}/assets/${a.split('/').map(enc).join('/')}`;
 
+/** Where an uploaded logo is served from. */
+export const logoUrl = (name: string) => `/api/logos/${enc(name)}`;
+
 /** Every folder route answers with the whole folder state, so one call resyncs both. */
 export interface GroupState { groups: string[]; folderMeta: Record<string, FolderMeta> }
 
@@ -53,8 +56,19 @@ export const api = {
   deleteGroup: (path: string) => req<GroupState>('DELETE', `/api/groups/${enc(path)}`),
   createWorkspace: (input: { name: string; group?: string | null; source?: string }) => req<{ workspace: WorkspaceEntry }>('POST', '/api/workspaces', input).then((r) => r.workspace),
   openFolder: (path: string, name?: string) => req<{ workspace: WorkspaceEntry }>('POST', '/api/workspaces/open', { path, name }).then((r) => r.workspace),
-  patchWorkspace: (id: string, patch: { name?: string; group?: string | null }) => req<{ workspace: WorkspaceEntry }>('PATCH', wsUrl(id), patch).then((r) => r.workspace),
+  /** `parent`: nest under that document (null un-nests). `appearance`: icon/colour/logo of the row; a null field clears it. */
+  patchWorkspace: (id: string, patch: { name?: string; group?: string | null; parent?: string | null; appearance?: FolderMeta }) => req<{ workspace: WorkspaceEntry }>('PATCH', wsUrl(id), patch).then((r) => r.workspace),
   deleteWorkspace: (id: string) => req<{ ok: true }>('DELETE', wsUrl(id)),
+  /** Uploads an image to use as a sidebar logo; resolves to the stored file name (see `logoUrl`). The server enforces type and size. */
+  async uploadLogo(file: Blob): Promise<string> {
+    const res = await fetch('/api/logos', { method: 'POST', headers: { 'x-client-id': CLIENT_ID, 'content-type': file.type }, body: file });
+    if (!res.ok) {
+      let msg = `Upload failed (${res.status})`;
+      try { msg = ((await res.json()) as { error?: string }).error ?? msg; } catch { /* keep */ }
+      throw new ApiError(res.status, msg);
+    }
+    return ((await res.json()) as { logo: string }).logo;
+  },
   /**
    * The workspace detail, or null when `ifNoneMatch` (the etag of the copy the
    * caller already holds, unquoted) still matches and the server answered 304.

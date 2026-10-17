@@ -24,10 +24,23 @@ export const PANE_MIN = {
   preview: 280,
 } as const;
 
+/**
+ * Width of the gap between two panes, which is also the resize handle
+ * (PaneDivider). Must equal --pane-gap in src/index.css. Every visible side
+ * rail has exactly one divider next to it, so the room the panes share is the
+ * container minus one gap per visible rail (see paneRoom).
+ */
+export const PANE_GAP = 8;
+
 export const PANE_DEFAULT = {
   editor: 520,
   assets: 240,
 } as const;
+
+/** Width left for the panes themselves once the dividers are taken out. */
+export function paneRoom(containerWidth: number, visibleRails: number): number {
+  return containerWidth - PANE_GAP * visibleRails;
+}
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.min(Math.max(n, lo), hi);
@@ -51,7 +64,9 @@ export function clampPaneWidth(
   otherWidth: number,
 ): number {
   const min = PANE_MIN[which];
-  const max = containerWidth - otherWidth - PANE_MIN.preview;
+  // This pane's divider always exists; the other's only when it is visible
+  // (a hidden rail reports width 0).
+  const max = paneRoom(containerWidth, otherWidth > 0 ? 2 : 1) - otherWidth - PANE_MIN.preview;
   return clamp(proposed, min, Math.max(min, max));
 }
 
@@ -73,7 +88,7 @@ export function fitPanes(
   let editor = editorVisible ? widths.editor : 0;
   let assets = assetsVisible ? widths.assets : 0;
 
-  const available = containerWidth - PANE_MIN.preview;
+  const available = paneRoom(containerWidth, (editorVisible ? 1 : 0) + (assetsVisible ? 1 : 0)) - PANE_MIN.preview;
   const used = editor + assets;
 
   if (used > available && used > 0) {

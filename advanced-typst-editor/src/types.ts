@@ -58,6 +58,10 @@ export interface WorkspaceEntry {
   library: boolean;
   createdAt: number;
   openedAt: number;
+  /** The document this one is nested under in the sidebar (never on disk). Always in the same `group` as its parent. */
+  parent?: ID | null;
+  /** Icon, colour and logo of this document's sidebar row. */
+  appearance?: FolderMeta;
 }
 export interface WorkspaceStatus extends WorkspaceEntry { status: 'ok' | 'missing' }
 export interface FileEntry { path: string; size: number; mtime: number }
@@ -84,8 +88,12 @@ export interface SnapshotInfo { destinationId: ID; name: string; createdAt: numb
 
 export interface RedactionDefaults { style: BlurStyle; strength: number }
 
-/** Appearance of one sidebar folder, keyed by its path in Settings.folderMeta. */
-export interface FolderMeta { icon?: string | null; color?: string | null }
+/**
+ * Appearance of one sidebar row: a folder (keyed by its path in
+ * Settings.folderMeta) or a document (`WorkspaceEntry.appearance`). `logo` is
+ * the file name of an uploaded image in `data/logos/`; it wins over `icon`.
+ */
+export interface FolderMeta { icon?: string | null; color?: string | null; logo?: string | null }
 
 export interface Settings {
   version: 1;

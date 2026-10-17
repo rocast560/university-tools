@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { clampPaneWidth, fitPanes, PANE_MIN } from '@/lib/pane-resize';
+import { clampPaneWidth, fitPanes, PANE_GAP, PANE_MIN } from '@/lib/pane-resize';
 
 const BOTH = { editor: 520, assets: 240 };
 const BOTH_VISIBLE = { editor: true, assets: true };
@@ -15,11 +15,11 @@ describe('clampPaneWidth', () => {
   });
 
   it('reserves room for the preview', () => {
-    expect(clampPaneWidth('editor', 99999, 1600, 240)).toBe(1600 - 240 - PANE_MIN.preview);
+    expect(clampPaneWidth('editor', 99999, 1600, 240)).toBe(1600 - 240 - 2 * PANE_GAP - PANE_MIN.preview);
   });
 
   it('lets a rail expand into a hidden sibling\'s space', () => {
-    expect(clampPaneWidth('editor', 99999, 1600, 0)).toBe(1600 - PANE_MIN.preview);
+    expect(clampPaneWidth('editor', 99999, 1600, 0)).toBe(1600 - PANE_GAP - PANE_MIN.preview);
   });
 
   it('prefers the pane\'s minimum over the preview\'s when space runs out', () => {
@@ -30,6 +30,24 @@ describe('clampPaneWidth', () => {
 
   it('never returns NaN for a degenerate container', () => {
     expect(Number.isFinite(clampPaneWidth('assets', 300, 0, 0))).toBe(true);
+  });
+});
+
+describe('dividers take room from the panes', () => {
+  it('editor + gaps + preview + assets never exceed the container', () => {
+    const w = 1200;
+    const editor = clampPaneWidth('editor', 99999, w, 240);
+    expect(editor + 240 + 2 * PANE_GAP + PANE_MIN.preview).toBeLessThanOrEqual(w);
+  });
+
+  it('fitPanes leaves at least the preview minimum after both gaps', () => {
+    const w = 900;
+    const f = fitPanes(BOTH, BOTH_VISIBLE, w);
+    expect(f.editor + f.assets + 2 * PANE_GAP + PANE_MIN.preview).toBeLessThanOrEqual(w);
+  });
+
+  it('one visible rail costs one gap, not two', () => {
+    expect(clampPaneWidth('assets', 99999, 1000, 0)).toBe(1000 - PANE_GAP - PANE_MIN.preview);
   });
 });
 

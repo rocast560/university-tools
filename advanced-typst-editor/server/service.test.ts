@@ -267,3 +267,22 @@ describe('workspace service', () => {
     ]);
   });
 });
+
+describe('workspace service deletes go to the app trash', () => {
+  it('moves a deleted file and a deleted asset under data/trash/<stamp>/<workspace>/', () => {
+    const { svc, dataDir, events } = setup();
+    const w = svc.create({ name: 'Keep', group: null, source: '= One\n' });
+    svc.writeFile(w.id, 'notes.txt', Buffer.from('note'), null);
+    put(w.path, 'assets/shot.png', PNG_1x1);
+    expect(svc.deleteFile(w.id, 'notes.txt', null)).toBe(true);
+    svc.deleteAsset(w.id, 'assets/shot.png', null);
+    expect(fs.existsSync(path.join(w.path, 'notes.txt'))).toBe(false);
+    expect(fs.existsSync(path.join(w.path, 'assets', 'shot.png'))).toBe(false);
+    const trash = path.join(dataDir, 'trash');
+    const [stampDir] = fs.readdirSync(trash);
+    const base = path.join(trash, stampDir!, path.basename(w.path));
+    expect(fs.readFileSync(path.join(base, 'notes.txt'), 'utf8')).toBe('note');
+    expect(fs.existsSync(path.join(base, 'assets', 'shot.png'))).toBe(true);
+    expect(changes(events).length).toBeGreaterThan(0);
+  });
+});

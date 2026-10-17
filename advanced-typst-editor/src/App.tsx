@@ -27,7 +27,7 @@ export default function App() {
     return () => { disconnect(); cancelPrefetch?.(); };
   }, []);
   return (
-    <div className="flex h-screen overflow-hidden bg-[hsl(var(--background))] text-[hsl(var(--foreground))]">
+    <div className="flex h-screen gap-[var(--pane-gap)] overflow-hidden bg-[hsl(var(--background))] p-[var(--pane-gap)] text-[hsl(var(--foreground))]">
       <Sidebar />
       <main data-ui="main" className="min-w-0 flex-1">
         <Suspense fallback={<div className="p-4 text-xs text-[hsl(var(--muted-foreground))]">Loading…</div>}><TypstView /></Suspense>

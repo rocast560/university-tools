@@ -232,3 +232,43 @@ describe('settings store', () => {
     expect(fresh.folderMeta()).toEqual({ CPTC: { icon: 'shield' } });
   });
 });
+
+describe('settings store data safety', () => {
+  const corruptFiles = (d: string) => fs.readdirSync(d).filter((n) => n.startsWith('settings.json.corrupt-'));
+  const quiet = <T,>(fn: () => T): { out: T; warned: string[] } => {
+    const warned: string[] = [];
+    const orig = console.warn;
+    console.warn = (...a: unknown[]) => { warned.push(a.map(String).join(' ')); };
+    try { return { out: fn(), warned }; } finally { console.warn = orig; }
+  };
+
+  it('keeps a corrupt settings.json aside before falling back', () => {
+    const d = tmpDir(); dirs.push(d);
+    fs.writeFileSync(path.join(d, 'settings.json'), '{not json');
+    const { out, warned } = quiet(() => createSettingsStore(d).get());
+    expect(out).toEqual(DEFAULT_SETTINGS);
+    const kept = corruptFiles(d);
+    expect(kept).toHaveLength(1);
+    expect(fs.readFileSync(path.join(d, kept[0]!), 'utf8')).toBe('{not json');
+    expect(warned.join('\n')).toContain(kept[0]!);
+  });
+
+  it('leaves a .bak of the previous registry on every write', () => {
+    const d = tmpDir(); dirs.push(d);
+    const s = createSettingsStore(d);
+    s.update((x) => ({ ...x, groups: ['One'] }));
+    s.update((x) => ({ ...x, groups: ['One', 'Two'] }));
+    expect(JSON.parse(fs.readFileSync(path.join(d, 'settings.json.bak'), 'utf8')).groups).toEqual(['One']);
+  });
+
+  it('recovers from settings.json.bak when the main file is corrupt', () => {
+    const d = tmpDir(); dirs.push(d);
+    const s1 = createSettingsStore(d);
+    s1.update((x) => ({ ...x, groups: ['Keep'] }));
+    s1.update((x) => ({ ...x, groups: ['Keep', 'Later'] }));
+    fs.writeFileSync(path.join(d, 'settings.json'), '{broken');
+    const { out } = quiet(() => createSettingsStore(d).get().groups);
+    expect(out).toEqual(['Keep']);
+    expect(corruptFiles(d)).toHaveLength(1);
+  });
+});

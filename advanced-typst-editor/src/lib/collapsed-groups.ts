@@ -21,6 +21,14 @@ export function saveCollapsedGroups(groups: Set<string>, storage: Storage | null
   try { storage?.setItem(COLLAPSED_GROUPS_KEY, JSON.stringify([...groups])); } catch { /* private mode, quota: a preference is not worth an error */ }
 }
 
+/**
+ * The key a collapsed document is stored under. The prefix keeps it apart from
+ * folder paths, which share this set, so a folder can never read as a document.
+ */
+export function docKey(id: string): string {
+  return `ws:${id}`;
+}
+
 /** A new set with `group` flipped; the input is left untouched. */
 export function toggleGroup(groups: Set<string>, group: string): Set<string> {
   const next = new Set(groups);

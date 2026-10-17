@@ -10,8 +10,9 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 import { useState, useEffect, useMemo, useRef, useCallback, lazy, Suspense } from 'react';
-import { PanelLeftClose, PanelLeftOpen, FileDown, Image, FileText, Images, Search } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen, FileDown, Image, FileText, Images, Search, Lock, LockOpen, ChevronDown } from 'lucide-react';
 import { useAppStore } from '@/stores';
+import { isLocked } from '@/lib/preview-lock';
 import { useWorkspaceFile } from '@/hooks/use-workspace-file';
 import {
   revealTypstRange, getTypstCaret, setTypstSearchRequest, setTypstEditorContent, setTypstDocKey,
@@ -145,6 +146,23 @@ function TypstWorkspaceView({ workspaceId }: { workspaceId: string }) {
     defaultedForRef.current = workspaceId;
     setFile(typFiles.includes('main.typ') || typFiles.length === 0 ? 'main.typ' : typFiles[0]!);
   }, [workspaceId, detail, typFiles]);
+
+  // Preview lock: clicks on the preview stop jumping to the code or assets.
+  // It only gates those jumps; the code pane, editor, search, assets and MCP
+  // are untouched.
+  const previewLock = useAppStore((s) => s.previewLock);
+  const toggleWorkspaceLock = useAppStore((s) => s.toggleWorkspaceLock);
+  const setAllLocked = useAppStore((s) => s.setAllLocked);
+  const locked = isLocked(previewLock, workspaceId);
+  // Anchor of the "all documents" menu (null = closed): fixed-position, like
+  // the sidebar's context menus, so the header's overflow never clips it.
+  const [lockMenu, setLockMenu] = useState<{ x: number; y: number } | null>(null);
+  useEffect(() => {
+    if (!lockMenu) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setLockMenu(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [lockMenu]);
 
   const typstAssets = useAppStore((s) => s.typstAssets);
   // Ref mirror so the preview's click callback stays stable across renders.
@@ -439,9 +457,9 @@ function TypstWorkspaceView({ workspaceId }: { workspaceId: string }) {
   }, [source, file, detailName]);
 
   return (
-    <div className="flex h-full flex-col">
-      {/* Header */}
-      <div data-ui="toolbar" className="flex h-9 shrink-0 items-center justify-between border-b border-[hsl(var(--border))] bg-[hsl(var(--card))] px-3">
+    <div className="flex h-full flex-col gap-[var(--pane-gap)]">
+      {/* Header: its own floating bar */}
+      <div data-ui="toolbar" className="pane-card flex h-9 shrink-0 items-center justify-between px-3">
         <div className="flex items-center gap-2">
           <FileText size={13} className="text-[hsl(var(--status-purple))]" />
           <span className="text-[11px] font-bold uppercase tracking-widest text-[hsl(var(--foreground))]">Typst</span>
@@ -457,22 +475,44 @@ function TypstWorkspaceView({ workspaceId }: { workspaceId: string }) {
           <button
             onClick={togglePane('editor')}
             title={showEditor ? 'Hide code editor' : 'Show code editor'}
-            className="flex items-center gap-1 rounded-md px-2 py-1 text-[10px] uppercase tracking-wide hover:bg-[hsl(var(--accent))]"
+            className="flex items-center gap-1 rounded-md px-2 py-1 text-xs hover:bg-[hsl(var(--accent))]"
           >
             {showEditor ? <PanelLeftClose size={13} /> : <PanelLeftOpen size={13} />}
             Code
           </button>
+          <div className="flex items-center">
+            <button
+              onClick={() => toggleWorkspaceLock(workspaceId)}
+              title={locked ? "Unlock: clicking the preview jumps to the code" : "Lock this document: clicking the preview won't open the code"}
+              aria-pressed={locked}
+              className={`flex items-center gap-1 rounded-l-md px-2 py-1 text-xs hover:bg-[hsl(var(--accent))] ${
+                locked ? 'bg-[hsl(var(--accent))] text-[hsl(var(--foreground))]' : 'text-[hsl(var(--muted-foreground))]'
+              }`}
+            >
+              {locked ? <Lock size={13} /> : <LockOpen size={13} />}
+              {locked ? 'Locked' : 'Lock'}
+            </button>
+            <button
+              onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setLockMenu({ x: r.left, y: r.bottom + 4 }); }}
+              title="Lock or unlock all documents"
+              aria-label="Lock or unlock all documents"
+              aria-haspopup="menu"
+              className={`rounded-r-md px-1 py-1 hover:bg-[hsl(var(--accent))] ${locked ? 'bg-[hsl(var(--accent))]' : 'text-[hsl(var(--muted-foreground))]'}`}
+            >
+              <ChevronDown size={11} />
+            </button>
+          </div>
           <button
             onClick={openSearch}
             title="Search the document (Ctrl/⌘+F)"
-            className="flex items-center gap-1 rounded-md px-2 py-1 text-[10px] uppercase tracking-wide hover:bg-[hsl(var(--accent))]"
+            className="flex items-center gap-1 rounded-md px-2 py-1 text-xs hover:bg-[hsl(var(--accent))]"
           >
             <Search size={13} /> Find
           </button>
           <button
             onClick={togglePane('assets')}
             title={showAssets ? 'Hide assets panel' : 'Show assets panel'}
-            className={`flex items-center gap-1 rounded-md px-2 py-1 text-[10px] uppercase tracking-wide hover:bg-[hsl(var(--accent))] ${
+            className={`flex items-center gap-1 rounded-md px-2 py-1 text-xs hover:bg-[hsl(var(--accent))] ${
               showAssets ? 'text-[hsl(var(--foreground))]' : 'text-[hsl(var(--muted-foreground))]'
             }`}
           >
@@ -483,7 +523,7 @@ function TypstWorkspaceView({ workspaceId }: { workspaceId: string }) {
             onClick={exportSvg}
             disabled={exporting}
             title="Export SVG"
-            className="flex items-center gap-1 rounded-md px-2 py-1 text-[10px] uppercase tracking-wide hover:bg-[hsl(var(--accent))] disabled:opacity-40"
+            className="flex items-center gap-1 rounded-md px-2 py-1 text-xs hover:bg-[hsl(var(--accent))] disabled:opacity-40"
           >
             <Image size={13} /> SVG
           </button>
@@ -491,14 +531,14 @@ function TypstWorkspaceView({ workspaceId }: { workspaceId: string }) {
             onClick={exportPdf}
             disabled={exporting}
             title="Export PDF"
-            className="flex items-center gap-1 rounded-md px-2 py-1 text-[10px] uppercase tracking-wide hover:bg-[hsl(var(--accent))] disabled:opacity-40"
+            className="flex items-center gap-1 rounded-md px-2 py-1 text-xs hover:bg-[hsl(var(--accent))] disabled:opacity-40"
           >
             <FileDown size={13} /> PDF
           </button>
         </div>
       </div>
       {exportError && (
-        <div className="flex shrink-0 items-center gap-3 border-b border-[hsl(var(--status-red))]/30 bg-[hsl(var(--status-red))]/10 px-3 py-1.5 text-xs text-[hsl(var(--status-red))]">
+        <div className="flex shrink-0 items-center gap-3 rounded-[var(--pane-radius)] bg-[hsl(var(--status-red))]/10 px-3 py-1.5 text-xs text-[hsl(var(--status-red))]">
           <span className="min-w-0 flex-1 truncate" title={exportError}>{exportError}</span>
           <button type="button" onClick={() => setExportError(null)} className="shrink-0 rounded-md px-2 py-0.5 hover:bg-[hsl(var(--status-red))]/15">Dismiss</button>
         </div>
@@ -514,7 +554,7 @@ function TypstWorkspaceView({ workspaceId }: { workspaceId: string }) {
           <>
             <div
               ref={editorPaneRef}
-              className="relative min-w-0 shrink-0 overflow-hidden"
+              className="pane-card relative min-w-0 shrink-0"
               style={{ width: `${layout.editor}px`, contain: 'layout paint' }}
             >
               {searchOpen && !loading && (
@@ -540,8 +580,8 @@ function TypstWorkspaceView({ workspaceId }: { workspaceId: string }) {
           </>
         )}
 
-        <div className="min-w-0 flex-1 overflow-hidden" style={{ contain: 'layout paint' }}>
-          <TypstPreview source={source} revision={assetRevision} mainPath={`/${file}`} docKey={docKey} ready={!loading && assetsReady} onRevealSource={revealSource} onRevealImage={revealImage} />
+        <div className="pane-card min-w-0 flex-1" style={{ contain: 'layout paint' }}>
+          <TypstPreview locked={locked} source={source} revision={assetRevision} mainPath={`/${file}`} docKey={docKey} ready={!loading && assetsReady} onRevealSource={revealSource} onRevealImage={revealImage} />
         </div>
 
         {showAssets && !assetsMax && (
@@ -549,7 +589,7 @@ function TypstWorkspaceView({ workspaceId }: { workspaceId: string }) {
             <PaneDivider onPointerDown={startResize('assets')} onDoubleClick={resetPane('assets')} />
             <div
               ref={assetsPaneRef}
-              className="min-w-0 shrink-0 overflow-hidden"
+              className="pane-card min-w-0 shrink-0"
               style={{ width: `${layout.assets}px`, contain: 'layout paint' }}
             >
               <TypstAssetsPanel
@@ -567,7 +607,7 @@ function TypstWorkspaceView({ workspaceId }: { workspaceId: string }) {
         {/* Full-tab asset browser: an overlay, so the editor stays mounted
             and its caret and undo history survive. */}
         {showAssets && assetsMax && (
-          <div className="absolute inset-0 z-20 bg-[hsl(var(--card))]">
+          <div className="pane-card absolute inset-0 z-20">
             <TypstAssetsPanel
               source={source}
               onSourceChange={applySource}
@@ -579,6 +619,15 @@ function TypstWorkspaceView({ workspaceId }: { workspaceId: string }) {
           </div>
         )}
       </div>
+
+      {lockMenu && (
+        <div className="fixed inset-0 z-40" onClick={() => setLockMenu(null)} onContextMenu={(e) => { e.preventDefault(); setLockMenu(null); }}>
+          <div role="menu" className="pop-shadow absolute w-44 rounded-md bg-[hsl(var(--popover))] p-1 text-xs" style={{ left: lockMenu.x, top: lockMenu.y }}>
+            <button type="button" role="menuitem" className="block w-full rounded px-2 py-1 text-left hover:bg-[hsl(var(--accent))]" onClick={() => { setAllLocked(true); setLockMenu(null); }}>Lock all documents</button>
+            <button type="button" role="menuitem" className="block w-full rounded px-2 py-1 text-left hover:bg-[hsl(var(--accent))]" onClick={() => { setAllLocked(false); setLockMenu(null); }}>Unlock all documents</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -586,9 +635,9 @@ function TypstWorkspaceView({ workspaceId }: { workspaceId: string }) {
 /**
  * Drag handle between two panes.
  *
- * The visible rule is 1px but the grab area is padded out to 9px via a
- * transparent overlay: a 1px hit target is genuinely hard to grab, and
- * widening the rule itself would put a chunky line through the layout.
+ * It is the gap itself: --pane-gap wide (PANE_GAP in lib/pane-resize), no
+ * line, transparent. The accent shows as a slim bar in the middle of the gap
+ * on hover and while dragging. The pane-resize maths reserve this width.
  */
 function PaneDivider({
   onPointerDown,
@@ -602,9 +651,9 @@ function PaneDivider({
       onPointerDown={onPointerDown}
       onDoubleClick={onDoubleClick}
       title="Drag to resize · double-click to reset"
-      className="group relative w-px shrink-0 cursor-col-resize bg-[hsl(var(--border))]"
+      className="group relative w-[var(--pane-gap)] shrink-0 cursor-col-resize"
     >
-      <div className="absolute inset-y-0 -left-1 -right-1 z-10 transition-colors group-hover:bg-[hsl(var(--primary))]/60" />
+      <div className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 rounded-full transition-colors group-hover:bg-[hsl(var(--primary))]/70 group-active:bg-[hsl(var(--primary))]" />
     </div>
   );
 }

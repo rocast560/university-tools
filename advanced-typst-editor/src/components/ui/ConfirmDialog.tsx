@@ -49,7 +49,7 @@ export function ConfirmDialog({
           role="dialog"
           aria-modal="true"
           aria-label={title}
-          className="w-full max-w-sm rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 shadow-2xl"
+          className="w-full max-w-sm pop-shadow rounded-2xl bg-[hsl(var(--card))] p-6"
           onClick={(e) => e.stopPropagation()}
         >
           <div className={`mb-2 flex items-center gap-2 text-sm font-semibold ${destructive ? 'text-[hsl(var(--status-red))]' : ''}`}>

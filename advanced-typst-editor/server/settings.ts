@@ -2,8 +2,10 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { descendantsOf, folderName, renamePath, withAncestors } from '../src/lib/folder-tree';
+import { isLogoName } from '../src/lib/logo';
+import { subtreeIds } from '../src/lib/workspace-nesting';
 import type { FolderMeta, Settings, WorkspaceEntry } from '../src/types';
-import { isDir, readJson, writeAtomic } from './fsx';
+import { isDir, stamp, writeAtomic } from './fsx';
 
 export const DEFAULT_SETTINGS: Settings = {
   version: 1,
@@ -31,7 +33,15 @@ export interface SettingsStore {
   touchWorkspace(id: string): WorkspaceEntry | null;
   /** Write any pending touch now. */
   flush(): void;
+  /** Removes the entry. Its nested documents move up to its own parent (or the top of its folder) in the same write. */
   removeWorkspace(id: string): boolean;
+  /**
+   * Files a document: sets its folder and its parent (`null` = not nested).
+   * Its whole subtree takes the same folder, in one registry write.
+   */
+  moveWorkspace(id: string, group: string | null, parent: string | null): WorkspaceEntry | null;
+  /** Merges icon/color/logo for a document's row; an explicit `null` clears that field. */
+  setWorkspaceAppearance(id: string, patch: FolderMeta): WorkspaceEntry | null;
   /** Register every folder under workspacesDir that is not yet known. Returns the new entries. */
   scanLibrary(workspacesDir: string): WorkspaceEntry[];
   listGroups(): string[];
@@ -49,6 +59,35 @@ export interface SettingsStore {
   setFolderMeta(path: string, patch: FolderMeta): Record<string, FolderMeta>;
 }
 
+/** The valid part of a stored appearance, or null when nothing in it is usable. A logo is only kept under a safe file name. */
+function cleanMeta(v: unknown): FolderMeta | null {
+  if (!v || typeof v !== 'object') return null;
+  const o = v as FolderMeta;
+  const meta: FolderMeta = {};
+  if (typeof o.icon === 'string' && o.icon) meta.icon = o.icon;
+  if (typeof o.color === 'string' && o.color) meta.color = o.color;
+  if (isLogoName(o.logo)) meta.logo = o.logo;
+  return meta.icon || meta.color || meta.logo ? meta : null;
+}
+
+/** `cur` with `patch` applied (a `null` clears a field); null when nothing is left. */
+function mergeMeta(cur: FolderMeta | undefined, patch: FolderMeta): FolderMeta | null {
+  const next: FolderMeta = { ...cur };
+  for (const key of ['icon', 'color', 'logo'] as const) {
+    if (!(key in patch)) continue;
+    const v = patch[key];
+    if (v) next[key] = v; else delete next[key];
+  }
+  return next.icon || next.color || next.logo ? next : null;
+}
+
+/** The entry with `parent` set, or without the key at all when it is null, so un-nested entries stay as they were before nesting existed. */
+function withParent(w: WorkspaceEntry, parent: string | null): WorkspaceEntry {
+  const { parent: _drop, ...rest } = w;
+  void _drop;
+  return parent ? { ...rest, parent } : rest;
+}
+
 function samePath(a: string, b: string): boolean {
   return path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
 }
@@ -62,9 +101,33 @@ const cleanGroups = (raw: unknown[]): string[] =>
 
 function normalise(raw: Partial<Settings>): Settings {
   const b = raw.backup ?? DEFAULT_SETTINGS.backup;
-  const workspaces = Array.isArray(raw.workspaces)
+  const loaded = Array.isArray(raw.workspaces)
     ? raw.workspaces.filter((w): w is WorkspaceEntry => !!w && typeof w.id === 'string' && typeof w.path === 'string')
     : [];
+  // Nesting. A parent must name another entry and must not lead back to the
+  // entry itself; a cycle is cut at the link that would close it.
+  const ids = new Set(loaded.map((w) => w.id));
+  const parentOf = new Map<string, string>();
+  for (const w of loaded) {
+    const p: unknown = w.parent;
+    if (typeof p !== 'string' || p === w.id || !ids.has(p)) continue;
+    let cur: string | undefined = p;
+    while (cur && cur !== w.id) cur = parentOf.get(cur);
+    if (!cur) parentOf.set(w.id, p);
+  }
+  const byId = new Map(loaded.map((w) => [w.id, w]));
+  const rootOf = (id: string): string => { let cur = id; for (let p = parentOf.get(cur); p; p = parentOf.get(cur)) cur = p; return cur; };
+  const workspaces = loaded.map((w): WorkspaceEntry => {
+    const { parent: _p, appearance: _a, ...rest } = w;
+    void _p; void _a;
+    const out: WorkspaceEntry = { ...rest };
+    const parent = parentOf.get(w.id);
+    // A child lives in its parent's folder, so the backup mirror tree (which follows `group`) stays coherent.
+    if (parent) { out.parent = parent; out.group = byId.get(rootOf(w.id))!.group; }
+    const appearance = cleanMeta(w.appearance);
+    if (appearance) out.appearance = appearance;
+    return out;
+  });
   const groups = withAncestors([
     ...cleanGroups(Array.isArray(raw.groups) ? raw.groups : []),
     // A group a workspace references must exist, or that workspace would
@@ -77,10 +140,8 @@ function normalise(raw: Partial<Settings>): Settings {
     // Appearance for a folder that no longer exists is dropped, so a hand
     // edit or a crashed rename cannot leave the map growing forever.
     if (!known.has(k) || !v || typeof v !== 'object') continue;
-    const meta: FolderMeta = {};
-    if (typeof v.icon === 'string' && v.icon) meta.icon = v.icon;
-    if (typeof v.color === 'string' && v.color) meta.color = v.color;
-    if (meta.icon || meta.color) folderMeta[k] = meta;
+    const meta = cleanMeta(v);
+    if (meta) folderMeta[k] = meta;
   }
   return {
     version: 1,
@@ -98,6 +159,13 @@ function normalise(raw: Partial<Settings>): Settings {
       strength: Number.isFinite(raw.redaction?.strength) ? Math.min(3, Math.max(0.25, raw.redaction!.strength)) : 1,
     },
   };
+}
+
+/** Whether a stored registry holds at least one workspace, folder or backup destination. */
+function holdsAnything(r: Partial<Settings>): boolean {
+  return (Array.isArray(r.workspaces) && r.workspaces.length > 0)
+    || (Array.isArray(r.groups) && r.groups.length > 0)
+    || (Array.isArray(r.backup?.destinations) && r.backup!.destinations.length > 0);
 }
 
 /** How often `get` is allowed to stat the file for an edit made by another process. */
@@ -126,18 +194,42 @@ export function createSettingsStore(
   let lastStat = -Infinity;
   const fileMtime = (): number => { try { return fs.statSync(file).mtimeMs; } catch { return 0; } };
 
+  const parsesAsObject = (p: string): Partial<Settings> | null => {
+    try {
+      const v: unknown = JSON.parse(fs.readFileSync(p, 'utf8'));
+      return v && typeof v === 'object' ? (v as Partial<Settings>) : null;
+    } catch { return null; }
+  };
+  // A missing file is a fresh install. An unreadable one is kept aside, then
+  // the rolling backup is tried, so a bad edit never turns into an empty write.
+  const load = (): Partial<Settings> => {
+    if (!fs.existsSync(file)) return {};
+    const good = parsesAsObject(file);
+    if (good) return good;
+    const kept = `${file}.corrupt-${stamp()}`;
+    try { fs.copyFileSync(file, kept); } catch (err) { console.warn(`settings.json is unreadable and could not be copied aside: ${err instanceof Error ? err.message : err}`); }
+    const bak = parsesAsObject(`${file}.bak`);
+    console.warn(`settings.json is unreadable; kept a copy at ${kept}. ${bak ? 'Recovered the registry from settings.json.bak.' : 'No usable settings.json.bak, starting with an empty registry.'}`);
+    return bak ?? {};
+  };
+
   const get = (): Settings => {
     const t = clock();
     if (cache && t - lastStat < STAT_EVERY_MS) return cache;
     lastStat = t;
     const m = fileMtime();
     if (cache && m === cachedMtime) return cache;
-    cache = normalise(readJson<Partial<Settings>>(file, {}));
+    cache = normalise(load());
     cachedMtime = m;
     return cache;
   };
   const write = (s: Settings): Settings => {
     const n = normalise(s);
+    // One rolling backup, only of a file that still parses, so a corrupt file never replaces it.
+    // An empty registry (no documents, folders or destinations) is not worth
+    // keeping over a good copy; it only becomes the .bak when there is none yet.
+    const current = parsesAsObject(file);
+    if (current && (holdsAnything(current) || !fs.existsSync(`${file}.bak`))) { try { fs.copyFileSync(file, `${file}.bak`); } catch { /* best effort */ } }
     writeAtomic(file, JSON.stringify(n, null, 2));
     cache = n;
     cachedMtime = fileMtime();
@@ -195,8 +287,47 @@ export function createSettingsStore(
     flush,
     removeWorkspace(id) {
       let removed = false;
-      update((s) => ({ ...s, workspaces: s.workspaces.filter((w) => { if (w.id === id) { removed = true; return false; } return true; }) }));
+      update((s) => {
+        const up = s.workspaces.find((w) => w.id === id)?.parent ?? null;
+        return {
+          ...s,
+          workspaces: s.workspaces
+            .filter((w) => { if (w.id === id) { removed = true; return false; } return true; })
+            .map((w) => (w.parent === id ? withParent(w, up) : w)),
+        };
+      });
       return removed;
+    },
+    moveWorkspace(id, group, parent) {
+      let out: WorkspaceEntry | null = null;
+      update((s) => {
+        if (!s.workspaces.some((w) => w.id === id)) return s;
+        const g = group?.trim() || null;
+        const sub = new Set(subtreeIds(s.workspaces, id));
+        return {
+          ...s,
+          workspaces: s.workspaces.map((w) => {
+            if (w.id === id) { out = withParent({ ...w, group: g }, parent); return out; }
+            return sub.has(w.id) ? { ...w, group: g } : w;
+          }),
+        };
+      });
+      return out ? (get().workspaces.find((w) => w.id === id) ?? out) : null;
+    },
+    setWorkspaceAppearance(id, patch) {
+      let found = false;
+      update((s) => ({
+        ...s,
+        workspaces: s.workspaces.map((w) => {
+          if (w.id !== id) return w;
+          found = true;
+          const { appearance: _a, ...rest } = w;
+          void _a;
+          const next = mergeMeta(w.appearance, patch);
+          return next ? { ...rest, appearance: next } : rest;
+        }),
+      }));
+      return found ? (get().workspaces.find((w) => w.id === id) ?? null) : null;
     },
     scanLibrary(workspacesDir) {
       if (!isDir(workspacesDir)) return [];
@@ -217,8 +348,16 @@ export function createSettingsStore(
             workspaces[i] = { ...w, path: home };
           } else {
             const owner = workspaces[ownerIndex]!;
-            if (owner.group === null && w.group !== null) workspaces[ownerIndex] = { ...owner, group: w.group };
+            let merged: WorkspaceEntry = owner;
+            if (owner.group === null && w.group !== null) merged = { ...merged, group: w.group };
+            if (!owner.appearance && w.appearance) merged = { ...merged, appearance: w.appearance };
+            // Nesting follows the owner too. A parent that points at the owner itself is dropped; normalise's cycle cut covers longer loops.
+            if (!owner.parent && w.parent && w.parent !== owner.id) merged = { ...merged, parent: w.parent };
+            workspaces[ownerIndex] = merged;
             workspaces.splice(i, 1);
+            for (let k = 0; k < workspaces.length; k++) {
+              if (workspaces[k]!.parent === w.id) workspaces[k] = { ...workspaces[k]!, parent: owner.id };
+            }
           }
         }
         return { ...s, workspaces };
@@ -273,11 +412,9 @@ export function createSettingsStore(
     },
     setFolderMeta(path, patch) {
       update((s) => {
-        const next: FolderMeta = { ...s.folderMeta[path] };
-        if ('icon' in patch) { if (patch.icon) next.icon = patch.icon; else delete next.icon; }
-        if ('color' in patch) { if (patch.color) next.color = patch.color; else delete next.color; }
+        const next = mergeMeta(s.folderMeta[path], patch);
         const folderMeta = { ...s.folderMeta };
-        if (next.icon || next.color) folderMeta[path] = next; else delete folderMeta[path];
+        if (next) folderMeta[path] = next; else delete folderMeta[path];
         return { ...s, folderMeta };
       });
       return get().folderMeta;

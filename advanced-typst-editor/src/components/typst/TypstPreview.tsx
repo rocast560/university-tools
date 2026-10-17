@@ -18,7 +18,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo, memo, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
-import { ZoomIn, ZoomOut, Maximize, Loader2, AlertTriangle } from 'lucide-react';
+import { ZoomIn, ZoomOut, Maximize, Loader2, AlertTriangle, Lock } from 'lucide-react';
 import { compileTypstSvg, typstErrorMessage, type TypstDiagnostic } from '@/lib/typst-compiler';
 import { splitTypstPages, extractTextRuns, reconcileDefs, splitSharedStyle, DEFAULT_PAGE_GAP, type SplitTypstSvg } from '@/lib/typst-pages';
 import { occurrenceIndex } from '@/lib/typst-source-map';
@@ -179,6 +179,7 @@ const SHADOW_CSS = `
 .page > svg { display: block; }
 .whole { background: #fff; border-radius: 4px; box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1); }
 .whole > svg { display: block; height: auto; max-width: none; }
+.locked .pseudo-link { pointer-events: none; cursor: text; }
 `;
 
 /** The shadow root of `ref`'s element, created on mount. */
@@ -332,6 +333,7 @@ export const TypstPreview = memo(function TypstPreview({
   ready = true,
   onRevealSource,
   onRevealImage,
+  locked = false,
 }: {
   source: string;
   revision?: number;
@@ -364,6 +366,13 @@ export const TypstPreview = memo(function TypstPreview({
    * on a rendered image, with that `<image>`'s (data URI) href.
    */
   onRevealImage?: (href: string) => void;
+  /**
+   * Preview lock (lib/preview-lock): clicks never reveal source or assets, so
+   * the operator can click, highlight and copy text without the code or
+   * assets pane opening. A plain prop, so the memo and shadow root are
+   * unaffected: only the handler and the page area's cursor/title change.
+   */
+  locked?: boolean;
 }) {
   const [doc, setDoc] = useState<DocRender>(() => docFromCache(docKey));
   const [fatalError, setFatalError] = useState<string | null>(null);
@@ -465,7 +474,7 @@ export const TypstPreview = memo(function TypstPreview({
   }, [split, textRunCache]);
 
   const onPageClick = useCallback((e: React.MouseEvent) => {
-    if (!onRevealSource && !onRevealImage) return;
+    if (locked || (!onRevealSource && !onRevealImage)) return;
     const root = shadowRoot;
     if (!root) return;
     // React listens both on the shadow root (the portal container) and on the
@@ -490,7 +499,7 @@ export const TypstPreview = memo(function TypstPreview({
     const preceding = card ? textRunsBefore(Number(card.dataset.pageIndex)) : [];
     const candidates = textRunAtPoint(scope, e.clientX, e.clientY, preceding);
     if (candidates.length > 0) onRevealSource(candidates);
-  }, [onRevealSource, onRevealImage, split, textRunsBefore, shadowRoot, shadowHostRef]);
+  }, [locked, onRevealSource, onRevealImage, split, textRunsBefore, shadowRoot, shadowHostRef]);
 
   const zoomIn = useCallback(() => setZoom((z) => Math.min(MAX_ZOOM, +(z + 0.1).toFixed(2))), []);
   const zoomOut = useCallback(() => setZoom((z) => Math.max(MIN_ZOOM, +(z - 0.1).toFixed(2))), []);
@@ -509,6 +518,11 @@ export const TypstPreview = memo(function TypstPreview({
             <span className="text-[hsl(var(--status-red))]">{errors.length} error{errors.length > 1 ? 's' : ''}</span>
           ) : (
             'Preview'
+          )}
+          {locked && (
+            <span className="flex items-center gap-1" title="Preview locked: clicks won't open the code">
+              <Lock size={11} /> Locked
+            </span>
           )}
         </div>
         <div className="flex items-center gap-1">
@@ -556,8 +570,8 @@ export const TypstPreview = memo(function TypstPreview({
         data-testid="preview-pages"
         onClick={onPageClick}
         onScroll={(e) => { scrollTopRef.current = e.currentTarget.scrollTop; }}
-        title={onRevealSource ? 'Click the page to jump to that spot in the code' : undefined}
-        className={`relative flex-1 overflow-auto p-6 ${onRevealSource ? 'cursor-pointer' : ''}`}
+        title={locked ? 'Locked: select and copy text freely. Unlock to jump to the code.' : onRevealSource ? 'Click the page to jump to that spot in the code' : undefined}
+        className={`relative flex-1 overflow-auto p-6 ${locked ? 'cursor-text' : onRevealSource ? 'cursor-pointer' : ''}`}
         style={{ contain: 'layout paint' }}
       >
         {firstLoad && !svg ? (
@@ -587,7 +601,11 @@ export const TypstPreview = memo(function TypstPreview({
             {/* `will-change: transform` promotes the page stack to its own
                 layer, so zooming and pane-resizing composite instead of
                 repainting the document. */}
-            <div className="stack" style={{ transform: `scale(${zoom})` }}>
+            {/* `locked`: typst.ts covers every link (TOC entries, cross-
+                references) with a `.pseudo-link` rect that takes the pointer,
+                so a drag starting on linked text would select nothing useful.
+                Locked, the rect lets the pointer through to the text layer. */}
+            <div className={locked ? 'stack locked' : 'stack'} style={{ transform: `scale(${zoom})` }}>
               {/* SVG is produced by the local WASM compiler from the operator's own
                   source (no remote input): consistent with the app's trusted-LAN
                   threat model. */}

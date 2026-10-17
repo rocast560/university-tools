@@ -1,4 +1,6 @@
+import { useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
+import { logoUrl } from '@/api/client';
 import { folderColorVar, folderIcon } from '@/components/sidebar/folder-icons';
 import { folderName } from '@/lib/folder-tree';
 import { encodeDrag, SIDEBAR_DRAG_MIME, type DragPayload } from '@/lib/sidebar-dnd';
@@ -16,9 +18,12 @@ export function FolderRow({ path, meta, collapsed, count, indent, dropActive, on
   onDragStart: (p: DragPayload) => void;
   onDragOver: (e: React.DragEvent, path: string) => void;
   onDragLeave: (path: string) => void;
-  onDrop: (e: React.DragEvent, path: string) => void;
+  onDrop: (e: React.DragEvent, path: string | null) => void;
 }) {
   const Icon = folderIcon(meta?.icon);
+  // A logo file that will not load falls back to the icon.
+  const [failedLogo, setFailedLogo] = useState<string | null>(null);
+  const logo = meta?.logo && meta.logo !== failedLogo ? meta.logo : null;
   const color = folderColorVar(meta?.color);
   return (
     <button
@@ -43,7 +48,9 @@ export function FolderRow({ path, meta, collapsed, count, indent, dropActive, on
     >
       <span data-folder-stripe className="mr-0.5 h-3.5 w-0.5 shrink-0 rounded-full" style={{ backgroundColor: color ?? 'transparent' }} />
       {collapsed ? <ChevronRight size={12} className="shrink-0" aria-hidden="true" /> : <ChevronDown size={12} className="shrink-0" aria-hidden="true" />}
-      <Icon size={12} data-folder-icon={meta?.icon ?? 'folder'} className="shrink-0" style={color ? { color } : undefined} aria-hidden="true" />
+      {logo
+        ? <img data-folder-logo src={logoUrl(logo)} alt="" draggable={false} onError={() => setFailedLogo(logo)} className="h-3.5 w-3.5 shrink-0 rounded-sm object-contain" />
+        : <Icon size={12} data-folder-icon={meta?.icon ?? 'folder'} className="shrink-0" style={color ? { color } : undefined} aria-hidden="true" />}
       <span className="flex-1 truncate">{folderName(path)}</span>
       {collapsed && count > 0 && (
         <span className="text-[9px] font-normal normal-case tracking-normal" style={color ? { color } : undefined}>{count}</span>

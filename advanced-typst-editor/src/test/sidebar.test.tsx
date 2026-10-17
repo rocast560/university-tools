@@ -109,19 +109,30 @@ describe('Sidebar', () => {
     expect(setWorkspaceGroup).toHaveBeenCalledWith('a', null);
   });
 
-  it('offers rename and delete on a folder via its context menu', () => {
+  it('offers rename and delete on a folder via its context menu', async () => {
     const renameGroup = vi.fn();
     const deleteGroup = vi.fn();
     useAppStore.setState({ workspaces: [], groups: ['CPTC'], renameGroup, deleteGroup });
     const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('CPTC 2026');
     render(<Sidebar />);
-    fireEvent.contextMenu(screen.getByText('CPTC'));
+    fireEvent.contextMenu(screen.getByTestId('folder-CPTC'));
     fireEvent.click(screen.getByText('Rename folder'));
     expect(renameGroup).toHaveBeenCalledWith('CPTC', 'CPTC 2026');
-    fireEvent.contextMenu(screen.getByText('CPTC'));
+
+    fireEvent.contextMenu(screen.getByTestId('folder-CPTC'));
     fireEvent.click(screen.getByText('Delete folder'));
+    fireEvent.click(await screen.findByText('Delete folder', { selector: 'button' }));
     expect(deleteGroup).toHaveBeenCalledWith('CPTC');
     promptSpy.mockRestore();
+  });
+
+  it('warns how many workspaces a folder delete will loosen', async () => {
+    useAppStore.setState({ workspaces: [ws('a', 'CPTC'), ws('b', 'CPTC/inject')], groups: ['CPTC', 'CPTC/inject'] });
+    render(<Sidebar />);
+    fireEvent.contextMenu(screen.getByTestId('folder-CPTC'));
+    fireEvent.click(screen.getByText('Delete folder'));
+    expect(await screen.findByText(/2 workspaces move to the top level/)).toBeInTheDocument();
+    expect(screen.getByText(/Nothing on disk is deleted/)).toBeInTheDocument();
   });
 
   it('collapses a folder from its header, shows a count, and remembers it', () => {
@@ -245,14 +256,16 @@ describe('Sidebar', () => {
     expect(setWorkspaceGroup).toHaveBeenCalledWith('a', 'CPTC/inject');
   });
 
-  it('dropping onto a workspace row inside a folder files the drag in that folder, not the top level', () => {
+  it('dropping onto a workspace row nests the drag under it (it used to file it in that row\'s folder)', () => {
     const setWorkspaceGroup = vi.fn();
-    useAppStore.setState({ workspaces: [ws('a', null), ws('b', 'CPTC')], groups: ['CPTC'], setWorkspaceGroup });
+    const setWorkspaceParent = vi.fn();
+    useAppStore.setState({ workspaces: [ws('a', null), ws('b', 'CPTC')], groups: ['CPTC'], setWorkspaceGroup, setWorkspaceParent });
     render(<Sidebar />);
     const dt = fakeDataTransfer();
     fireEvent.dragStart(screen.getByTestId('workspace-a'), { dataTransfer: dt });
     fireEvent.drop(screen.getByTestId('workspace-b'), { dataTransfer: dt });
-    expect(setWorkspaceGroup).toHaveBeenCalledWith('a', 'CPTC');
+    expect(setWorkspaceParent).toHaveBeenCalledWith('a', 'b');
+    expect(setWorkspaceGroup).not.toHaveBeenCalled();
   });
 
   it('opens Settings from the status footer', () => {
