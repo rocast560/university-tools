@@ -26,7 +26,7 @@ coverage/
 .tmp/
 *.log
 
-# App runtime data (chem-tool workspaces, circuit scratch, typst studio)
+# App runtime data (circuit scratch, typst studio)
 .data/
 
 # --- Tooling -------------------------------------------------------------

@@ -45,7 +45,7 @@ Newest first. Format: date, what was tried, exact error text, why, do instead.
 
 ## Git and the shared repo
 
-- **The git root is `university-tools`, shared with `circut-ai-tool`, `study-app`, `launcher`, `chem-tool`, `lab-parts-case` and more.** `git status` there lists other apps' work. Stage by explicit path inside `advanced-typst-editor/`; never `git add -A`.
+- **The git root is `university-tools`, shared with `circut-ai-tool`, `study-app`, `launcher`, `lab-parts-case` and more.** `git status` there lists other apps' work. Stage by explicit path inside `advanced-typst-editor/`; never `git add -A`.
 - **The working tree was on branch `feat/74ls151-sim` on 2026-10-17**, named after the circut-ai-tool 74LS151 work (inference), yet it also carries this app's history. Check `git branch --show-current` before any commit and ask which branch the user wants.
 - **CRLF warnings** (`LF will be replaced by CRLF`) appear on `git diff` and `git add` because `core.autocrlf=true`. They are noise. Do not run a mass line-ending rewrite.
 - **`data/` is gitignored and private.** It holds the user's reports. Listing folders is fine; do not open documents.
