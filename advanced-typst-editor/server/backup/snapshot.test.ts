@@ -126,3 +126,81 @@ describe('snapshots', () => {
     expect(settings.listWorkspaces().filter((w) => w.name === 'Foo')).toHaveLength(2);
   });
 });
+
+describe('snapshots carry the registry', () => {
+  function liveData(): string {
+    const d = tmpDir(); dirs.push(d);
+    put(d, 'settings.json', JSON.stringify({
+      workspaces: [{ id: 'A', appearance: { logo: 'aaaa1111.png' } }, { id: 'B' }],
+      folderMeta: { G: { logo: 'bbbb2222.svg' }, 'G/Sub': { logo: 'cccc3333.png' } },
+    }));
+    put(d, 'logos/aaaa1111.png', 'A-logo');
+    put(d, 'logos/bbbb2222.svg', 'G-logo');
+    put(d, 'logos/cccc3333.png', 'Sub-logo');
+    put(d, 'logos/dddd4444.png', 'unreferenced');
+    return d;
+  }
+
+  it('stores logos and settings.json in the zip and checksums them in the manifest', () => {
+    const { zip, manifest } = buildSnapshot([item('A', null, { 'main.typ': 'x' })], { now: 5, version: '0.1.0', dataDir: liveData() });
+    const names = Object.keys(unzipSync(zip));
+    expect(names).toContain('.typst-studio/settings.json');
+    expect(names).toContain('.typst-studio/logos/aaaa1111.png');
+    expect(manifest.registry!.map((f) => f.path).sort()).toEqual(names.filter((n) => n.startsWith('.typst-studio/')).sort());
+    expect(manifest.registry![0]!.sha256).toHaveLength(64);
+  });
+
+  it('restores a missing referenced logo, never overwrites an existing one, never touches settings.json', async () => {
+    const dest = tmpDir(); dirs.push(dest);
+    const live = liveData();
+    const info = writeSnapshot(dest, [itemWithId('A', 'A', 'G/Sub', { 'main.typ': 'x' })], { now: 1000, version: '0.1.0', destinationId: 'd1', dataDir: live });
+    // A fresh data dir: its own registry, one logo already present under the same name with other bytes.
+    const dataDir = tmpDir(); dirs.push(dataDir);
+    put(dataDir, 'settings.json', '{"mine":true}');
+    put(dataDir, 'logos/bbbb2222.svg', 'EXISTING');
+    const settings = createSettingsStore(dataDir);
+    await restoreSnapshot({ zipPath: path.join(dest, 'snapshots', info.name), dataDir, workspacesDir: path.join(dataDir, 'workspaces'), settings, now: () => 2000 });
+    const logos = (n: string) => fs.readFileSync(path.join(dataDir, 'logos', n), 'utf8');
+    expect(logos('aaaa1111.png')).toBe('A-logo'); // workspace's own logo, was missing
+    expect(logos('cccc3333.png')).toBe('Sub-logo'); // the group's logo, was missing
+    expect(logos('bbbb2222.svg')).toBe('EXISTING'); // kept
+    expect(fs.existsSync(path.join(dataDir, 'logos', 'dddd4444.png'))).toBe(false); // unreferenced
+    expect(fs.existsSync(path.join(dataDir, '.typst-studio'))).toBe(false);
+    expect(fs.readdirSync(dataDir).filter((n) => n.startsWith('pre-restore-'))).toHaveLength(1);
+    // The live registry only gains the restored workspace; the backup's folderMeta and logo links never replace it.
+    const live2 = JSON.parse(fs.readFileSync(path.join(dataDir, 'settings.json'), 'utf8'));
+    expect(live2.folderMeta ?? {}).toEqual({});
+  });
+
+  it('refuses a snapshot whose registry checksum does not match', async () => {
+    const dest = tmpDir(); dirs.push(dest);
+    const info = writeSnapshot(dest, [item('A', null, { 'main.typ': 'x' })], { now: 1, version: '0.1.0', destinationId: 'd1', dataDir: liveData() });
+    const zipPath = path.join(dest, 'snapshots', info.name);
+    const raw = unzipSync(fs.readFileSync(zipPath));
+    raw['.typst-studio/logos/aaaa1111.png'] = new TextEncoder().encode('tampered');
+    const { zipSync } = await import('fflate');
+    fs.writeFileSync(zipPath, zipSync(raw));
+    const dataDir = tmpDir(); dirs.push(dataDir);
+    await expect(restoreSnapshot({ zipPath, dataDir, workspacesDir: path.join(dataDir, 'workspaces'), settings: createSettingsStore(dataDir), now: () => 1 })).rejects.toThrow(/checksum/);
+    expect(fs.existsSync(path.join(dataDir, 'logos'))).toBe(false);
+  });
+});
+
+describe('stateDigest and the registry', () => {
+  it('ignores openedAt-only registry changes but notices real ones', () => {
+    const dataDir = tmpDir(); dirs.push(dataDir);
+    const reg = (openedAt: number, group: string | null, logo?: string) => JSON.stringify({ workspaces: [{ id: 'A', group, openedAt, appearance: logo ? { logo } : undefined }], groups: [] });
+    const a = item('A', null, { 'main.typ': 'x' });
+    put(dataDir, 'settings.json', reg(1, null));
+    const base = stateDigest([a], dataDir);
+    put(dataDir, 'settings.json', reg(999, null));
+    expect(stateDigest([a], dataDir)).toBe(base);
+    put(dataDir, 'settings.json', reg(999, 'G'));
+    const grouped = stateDigest([a], dataDir);
+    expect(grouped).not.toBe(base);
+    put(dataDir, 'settings.json', reg(999, 'G', 'aaaa1111.png'));
+    expect(stateDigest([a], dataDir)).not.toBe(grouped);
+    put(dataDir, 'logos/aaaa1111.png', 'png');
+    expect(stateDigest([a], dataDir)).not.toBe(grouped);
+  });
+});

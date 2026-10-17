@@ -2,6 +2,14 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* JetBrains Mono, bundled so the code font renders without a network or a
+   local install (OFL, see public/ui-fonts/OFL.txt). Downloaded 2026-10-17 from
+   the JetBrains/JetBrainsMono repo, fonts/webfonts. Italic is here because the
+   Ember code theme sets comments in italic. */
+@font-face { font-family: "JetBrains Mono"; src: url("/ui-fonts/JetBrainsMono-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "JetBrains Mono"; src: url("/ui-fonts/JetBrainsMono-Italic.woff2") format("woff2"); font-weight: 400; font-style: italic; font-display: swap; }
+@font-face { font-family: "JetBrains Mono"; src: url("/ui-fonts/JetBrainsMono-Bold.woff2") format("woff2"); font-weight: 700; font-style: normal; font-display: swap; }
+
 /* Tailwind 4 theme variables, so every existing `rounded-*`, `font-sans` and
    `font-mono` class follows the Ember look. `static` emits them even when no
    class references them yet (CodeMirror reads --font-mono directly). */
@@ -15,8 +23,7 @@
   --radius-2xl: 10px;
 
   --font-sans: Bahnschrift, "DIN Alternate", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
-  /* JetBrains Mono is the intended face but is not bundled yet, so Cascadia
-     Code renders. See brain/gotchas.md. */
+  /* JetBrains Mono is bundled (@font-face above); Cascadia Code is the fallback. */
   --font-mono: "JetBrains Mono", "Cascadia Code", Consolas, ui-monospace, monospace;
 }
 

@@ -65,4 +65,4 @@ Newest first. Format: date, what was tried, exact error text, why, do instead.
 - **Windows `fs.watch` reports directory creation** as an event; `watcher.ts` drops pending paths that are directories.
 - **The CodeMirror editor is a lazy chunk.** Import it only from `TypstEditor.tsx`; everyone else uses `typst-editor-bridge.ts`, or the chunk lands on the first-paint path.
 - **No `window.confirm` or `prompt`.** Use `ConfirmDialog`, which follows the theme.
-- **JetBrains Mono is not bundled yet.** The Ember theme names it first in `--font-mono` (`src/index.css`), but it is not installed or shipped, so Cascadia Code renders. Downloading it needs the user's approval.
+- **JetBrains Mono is bundled** (since 2026-10-17) in `public/ui-fonts/` (Regular, Italic, Bold woff2 + OFL.txt) with `@font-face` rules at the top of `src/index.css`. It is not installed on the machine, so if the `/ui-fonts/` files ever 404 the code pane silently falls back to Cascadia Code.

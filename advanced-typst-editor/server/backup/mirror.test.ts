@@ -4,7 +4,7 @@ import path from 'node:path';
 import type { WorkspaceEntry } from '../../src/types';
 import { openWorkspace } from '../workspace';
 import { tmpDir, rmDir, put } from '../test-util';
-import { MARKER_FILE, claimable, planMirror, runMirror, type MirrorItem } from './mirror';
+import { MARKER_FILE, REGISTRY_DIR, claimable, planMirror, runMirror, type MirrorItem } from './mirror';
 
 const dirs: string[] = [];
 afterEach(() => { for (const d of dirs.splice(0)) rmDir(d); });
@@ -103,5 +103,92 @@ describe('runMirror', () => {
     const dest = tmpDir(); dirs.push(dest);
     put(dest, 'photo.jpg', 'x');
     expect(() => runMirror(dest, planMirror([]), {})).toThrow(/already has files/);
+  });
+});
+
+describe('registry in the mirror', () => {
+  function data(settings: string, logos: Record<string, string>): string {
+    const d = tmpDir(); dirs.push(d);
+    put(d, 'settings.json', settings);
+    for (const [n, t] of Object.entries(logos)) put(d, `logos/${n}`, t);
+    return d;
+  }
+
+  it('copies logos and settings.json under the reserved .typst-studio folder', () => {
+    const dest = tmpDir(); dirs.push(dest);
+    const dataDir = data('{"v":1}', { 'aaaa1111.png': 'png', 'bbbb2222.svg': 'svg' });
+    runMirror(dest, planMirror([item('A', null, { 'main.typ': 'x' })], { dataDir }), { now: () => 1 });
+    expect(fs.readFileSync(path.join(dest, REGISTRY_DIR, 'settings.json'), 'utf8')).toBe('{"v":1}');
+    expect(fs.readFileSync(path.join(dest, REGISTRY_DIR, 'logos', 'aaaa1111.png'), 'utf8')).toBe('png');
+    expect(fs.readFileSync(path.join(dest, REGISTRY_DIR, 'logos', 'bbbb2222.svg'), 'utf8')).toBe('svg');
+    expect(fs.existsSync(path.join(dest, 'A', 'main.typ'))).toBe(true);
+  });
+
+  it('does not duplicate on a second run and trashes the old settings.json when it changes', () => {
+    const dest = tmpDir(); dirs.push(dest);
+    const dataDir = data('{"v":1}', { 'aaaa1111.png': 'png' });
+    const a = item('A', null, { 'main.typ': 'x' });
+    const plan = () => planMirror([a], { dataDir });
+    runMirror(dest, plan(), { now: () => 1000 });
+    const again = runMirror(dest, plan(), { now: () => 2000 });
+    expect(again).toEqual({ written: 0, trashed: 0 });
+    expect(fs.readdirSync(path.join(dest, REGISTRY_DIR)).sort()).toEqual(['logos', 'settings.json']);
+    expect(fs.existsSync(path.join(dest, '_trash'))).toBe(false);
+
+    put(dataDir, 'settings.json', '{"v":2}');
+    runMirror(dest, plan(), { now: () => 3000 });
+    expect(fs.readFileSync(path.join(dest, REGISTRY_DIR, 'settings.json'), 'utf8')).toBe('{"v":2}');
+    const [stampDir] = fs.readdirSync(path.join(dest, '_trash'));
+    expect(fs.readFileSync(path.join(dest, '_trash', stampDir!, REGISTRY_DIR, 'settings.json'), 'utf8')).toBe('{"v":1}');
+  });
+
+  it('keeps a sidebar folder or loose document named .typst-studio away from the reserved folder', () => {
+    const dest = tmpDir(); dirs.push(dest);
+    const dataDir = data('{}', { 'aaaa1111.png': 'png' });
+    const plan = planMirror([item('Doc', '.typst-studio', { 'main.typ': 'g' }, 'g'), item('.Typst-Studio', null, { 'main.typ': 'l' }, 'l')], { dataDir });
+    runMirror(dest, plan, { now: () => 1 });
+    expect(plan.dirOf.get('g')).toBe('.typst-studio (2)/Doc');
+    expect(plan.dirOf.get('l')).toBe('.Typst-Studio (3)');
+    expect(fs.readFileSync(path.join(dest, REGISTRY_DIR, 'logos', 'aaaa1111.png'), 'utf8')).toBe('png');
+    expect(fs.readFileSync(path.join(dest, '.typst-studio (2)', 'Doc', 'main.typ'), 'utf8')).toBe('g');
+  });
+
+  it('skips files in data/logos that are not valid logo names', () => {
+    const dataDir = data('{}', { 'aaaa1111.png': 'png', 'notes.txt': 'x' });
+    const paths = planMirror([], { dataDir }).files.map((f) => f.path).sort();
+    expect(paths).toEqual([`${REGISTRY_DIR}/logos/aaaa1111.png`, `${REGISTRY_DIR}/settings.json`, 'README.txt'].sort());
+  });
+});
+
+describe('registry trash handling', () => {
+  function data(settings: string): string {
+    const d = tmpDir(); dirs.push(d);
+    put(d, 'settings.json', settings);
+    return d;
+  }
+
+  it('keeps the mirror copy when the old one cannot be moved to the trash', () => {
+    const dest = tmpDir(); dirs.push(dest);
+    const dataDir = data('{"v":1}');
+    runMirror(dest, planMirror([], { dataDir }), { now: () => 1000 });
+    put(dest, '_trash', 'a file where the trash folder should be');
+    put(dataDir, 'settings.json', '{"v":2}');
+    const logged: unknown[][] = [];
+    runMirror(dest, planMirror([], { dataDir }), { now: () => 2000, log: (...a) => logged.push(a) });
+    expect(fs.readFileSync(path.join(dest, REGISTRY_DIR, 'settings.json'), 'utf8')).toBe('{"v":1}');
+    expect(logged.length).toBeGreaterThan(0);
+  });
+
+  it('never overwrites an earlier trash copy made in the same second', () => {
+    const dest = tmpDir(); dirs.push(dest);
+    const dataDir = data('{"v":1}');
+    const run = () => runMirror(dest, planMirror([], { dataDir }), { now: () => 5000 });
+    run();
+    put(dataDir, 'settings.json', '{"v":2}'); run();
+    put(dataDir, 'settings.json', '{"v":3}'); run();
+    const [stampDir] = fs.readdirSync(path.join(dest, '_trash'));
+    const dir = path.join(dest, '_trash', stampDir!, REGISTRY_DIR);
+    const copies = fs.readdirSync(dir).map((n) => fs.readFileSync(path.join(dir, n), 'utf8')).sort();
+    expect(copies).toEqual(['{"v":1}', '{"v":2}']);
   });
 });

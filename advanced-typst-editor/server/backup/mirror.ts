@@ -1,16 +1,28 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { FileEntry, WorkspaceEntry } from '../../src/types';
+import { isLogoName } from '../../src/lib/logo';
 import { safeDirName, stamp } from '../fsx';
 import { HttpError } from '../http';
 
 export const MARKER_FILE = '.typst-studio-backup.json';
 export const TRASH_DIR = '_trash';
 export const SNAPSHOTS_DIR = 'snapshots';
-const RESERVED = new Set([TRASH_DIR.toLowerCase(), SNAPSHOTS_DIR.toLowerCase(), MARKER_FILE.toLowerCase(), 'readme.txt']);
+/**
+ * Where the registry (settings.json) and uploaded logos go, at the mirror root. The leading dot keeps it
+ * out of the way, and it is in RESERVED, so a sidebar folder or document called ".typst-studio" is
+ * renamed ".typst-studio (2)" instead of colliding with it.
+ */
+export const REGISTRY_DIR = '.typst-studio';
+const RESERVED = new Set([TRASH_DIR.toLowerCase(), SNAPSHOTS_DIR.toLowerCase(), REGISTRY_DIR.toLowerCase(), MARKER_FILE.toLowerCase(), 'readme.txt']);
 
 export interface MirrorItem { entry: WorkspaceEntry; files: FileEntry[] }
-export interface MirrorFile { path: string; source: { root: string; rel: string } | { text: string } }
+export interface MirrorFile {
+  path: string;
+  source: { root: string; rel: string } | { text: string };
+  /** A changed copy moves the old one to the trash first instead of being overwritten in place. */
+  keepOld?: boolean;
+}
 export interface MirrorPlan { dirs: string[]; files: MirrorFile[]; dirOf: Map<string, string> }
 
 function uniqueNames<T>(items: T[], nameOf: (t: T) => string, taken: Set<string>): Map<T, string> {
@@ -40,6 +52,9 @@ function readme(groups: number, workspaces: number): string {
     'it renders, so redactions are NOT baked into these files; workspace.json records',
     'them. Treat this folder as sensitive, or export a PDF from the app.',
     '',
+    `${REGISTRY_DIR}/ holds the app registry (settings.json: folders, nesting, looks, backup`,
+    'destinations) and the uploaded logos (logos/). Put them back by hand if you need them.',
+    '',
     `Nothing here is ever deleted. Stale files move to ${TRASH_DIR}/<timestamp>/.`,
     `Timed snapshots live in ${SNAPSHOTS_DIR}/.`,
     '',
@@ -49,7 +64,17 @@ function readme(groups: number, workspaces: number): string {
   ].join('\n');
 }
 
-export function planMirror(items: MirrorItem[]): MirrorPlan {
+/** settings.json and every validly named logo in <dataDir>/logos, as mirror files under REGISTRY_DIR. */
+export function registryFiles(dataDir: string): MirrorFile[] {
+  const out: MirrorFile[] = [];
+  if (fs.existsSync(path.join(dataDir, 'settings.json'))) out.push({ path: `${REGISTRY_DIR}/settings.json`, source: { root: dataDir, rel: 'settings.json' }, keepOld: true });
+  let names: string[] = [];
+  try { names = fs.readdirSync(path.join(dataDir, 'logos')); } catch { /* no logos yet */ }
+  for (const n of names.filter(isLogoName).sort()) out.push({ path: `${REGISTRY_DIR}/logos/${n}`, source: { root: dataDir, rel: `logos/${n}` }, keepOld: true });
+  return out;
+}
+
+export function planMirror(items: MirrorItem[], registry?: { dataDir: string }): MirrorPlan {
   const taken = new Set<string>(RESERVED);
   const sorted = [...items].sort((a, b) => a.entry.createdAt - b.entry.createdAt || a.entry.id.localeCompare(b.entry.id));
   const groups = [...new Set(sorted.map((i) => i.entry.group).filter((g): g is string => !!g))].sort();
@@ -91,6 +116,7 @@ export function planMirror(items: MirrorItem[]): MirrorPlan {
     const memberDirs = uniqueNames(members, (i) => i.entry.name, new Set());
     for (const it of members) emit(it, `${groupDirs.get(g)!}/${memberDirs.get(it)!}`);
   }
+  if (registry) files.push(...registryFiles(registry.dataDir));
   files.push({ path: 'README.txt', source: { text: readme(groups.length, items.length) } });
   return { dirs, files, dirOf };
 }
@@ -111,6 +137,8 @@ export function runMirror(dest: string, plan: MirrorPlan, opts: { now?: () => nu
   const expectedFiles = new Set(plan.files.map((f) => f.path));
   const expectedDirs = new Set(plan.dirs);
   const keepAtRoot = new Set([TRASH_DIR, SNAPSHOTS_DIR, MARKER_FILE]);
+  // A plan without a registry must not trash a registry copy an earlier run made.
+  if (!plan.files.some((f) => f.path.startsWith(`${REGISTRY_DIR}/`))) keepAtRoot.add(REGISTRY_DIR);
   const trashStamp = stamp(now());
   let trashed = 0;
   const moveToTrash = (rel: string) => {
@@ -139,7 +167,25 @@ export function runMirror(dest: string, plan: MirrorPlan, opts: { now?: () => nu
     let bytes: Buffer;
     if ('text' in f.source) bytes = Buffer.from(f.source.text, 'utf8');
     else { try { bytes = fs.readFileSync(path.join(f.source.root, ...f.source.rel.split('/'))); } catch { continue; } }
-    try { const existing = fs.readFileSync(target); if (existing.equals(bytes)) continue; } catch { /* new */ }
+    let existing: Buffer | null = null;
+    try { existing = fs.readFileSync(target); } catch { /* new */ }
+    if (existing?.equals(bytes)) continue;
+    if (existing && f.keepOld) {
+      // Never overwrite the mirror copy unless its old bytes are safely in the trash, and never replace a trash copy.
+      try {
+        const slot = path.join(dest, TRASH_DIR, trashStamp, ...f.path.split('/'));
+        fs.mkdirSync(path.dirname(slot), { recursive: true });
+        const ext = path.extname(slot);
+        const stem = slot.slice(0, slot.length - ext.length);
+        let old = slot;
+        for (let n = 2; fs.existsSync(old); n++) old = `${stem} (${n})${ext}`;
+        fs.writeFileSync(old, existing, { flag: 'wx' });
+        trashed += 1;
+      } catch (err) {
+        log(`could not keep the old ${f.path} in ${TRASH_DIR}; leaving the backup copy as it is:`, err instanceof Error ? err.message : err);
+        continue;
+      }
+    }
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, bytes);
     written += 1;

@@ -27,14 +27,14 @@ The user asked that nothing in this app be deleted, and that development not slo
 
 | What | Where | Notes |
 |---|---|---|
-| Registry: workspaces, folders (`groups`), `folderMeta` (icon, colour), backup destinations, redaction defaults | `data/settings.json` (+ `.bak`, `.corrupt-<stamp>`) | losing it loses folders and folder looks, not documents; `.bak` is the previous good copy |
-| Sidebar logos (uploaded PNG, JPEG, WebP, SVG, 512 KB max) | `data/logos/<random>.<ext>` | written with `writeAtomic`, never deleted: clearing or replacing a logo only unlinks it in the registry (`appearance.logo`, `folderMeta[path].logo`); not in the backup mirror or snapshots (they live outside workspace folders) |
+| Registry: workspaces, folders (`groups`), nesting (`parent`), `folderMeta` and document `appearance`, backup destinations, redaction defaults | `data/settings.json` (+ `.bak`, `.corrupt-<stamp>`) | losing it loses folders, nesting and looks, not documents; `.bak` is the previous good copy; holds no secrets (paths and settings only; the MCP token is env config); also in every mirror and snapshot as `.typst-studio/settings.json` |
+| Sidebar logos (uploaded PNG, JPEG, WebP, SVG, 512 KB max) | `data/logos/<random>.<ext>` | written with `writeAtomic`, never deleted: clearing or replacing a logo only unlinks it in the registry (`appearance.logo`, `folderMeta[path].logo`); also copied into every mirror run and snapshot under `.typst-studio/logos/` |
 | Documents: `main.typ` and other files | `data/workspaces/<Name>/` | plain folders; external workspaces live anywhere and are never moved or deleted by the app |
 | Assets and fonts | `<ws>/assets/**`, `<ws>/fonts/*` | originals; crop and blur are never baked into them |
 | Crop, blur, size, font family | `<ws>/workspace.json` | atomic writes; losing it loses framing and redactions, not the images |
 | Trash | `data/trash/<stamp>/<WorkspaceName>/` | whole deleted library workspaces, and single deleted files or assets at their relative path inside it; no restore UI or API, restore is a manual move (plus a registry add for a workspace) |
-| Backup mirror | each destination (`/host` in Docker) | latest copy, `_trash/<stamp>/` for stale items, marker `.typst-studio-backup.json` |
-| Snapshots | `<dest>/snapshots/*.zip` | sha256 per file, newest `keepSnapshots` (30) kept |
+| Backup mirror | each destination (`/host` in Docker) | latest copy, `_trash/<stamp>/` for stale items, marker `.typst-studio-backup.json`; `.typst-studio/` holds `settings.json` and `logos/` (a changed copy goes to `_trash/<stamp>/.typst-studio/` first) |
+| Snapshots | `<dest>/snapshots/*.zip` | sha256 per file (workspaces and `.typst-studio/` registry files), newest `keepSnapshots` (30) kept |
 | Pre-restore copies | `data/pre-restore-<stamp>/` | copy of `workspaces/` made before a snapshot restore; never pruned |
 | Browser prefs | localStorage `tfs-active-workspace`, `tfs-collapsed-groups`, `tfs-sidebar-collapsed`, `tfs-preview-lock`, pane layout, `tfs-perf` | layout only; losing them costs nothing important |
 
@@ -46,7 +46,8 @@ The user asked that nothing in this app be deleted, and that development not slo
 - **Overwrite a source file** (`set_source`, `edit_source`, autosave, REST PUT): atomic write, no history. Way back: snapshots (hourly, only when content changed) and the mirror (latest copy only). There is no per-save undo on disk.
 - **Backup mirror**: never unlinks; stale items move to `_trash/<stamp>/`. Changed files are overwritten in place by design.
 - **Snapshot prune**: unlinks zips beyond the newest 30.
-- **Snapshot restore**: copies `workspaces/` to `data/pre-restore-<stamp>/` first, then overwrites files in matching workspaces. Does not copy `settings.json`.
+- **Snapshot restore**: copies `workspaces/` to `data/pre-restore-<stamp>/` first, then overwrites files in matching workspaces, then copies back logos the restored workspaces or their folders reference that are missing from `data/logos/` (an existing file is never overwritten). It never writes `settings.json`.
+- **Restore the registry by hand** (folders, nesting, looks, destinations): stop the app, copy the live `data/settings.json` to `data/pre-restore-<stamp>-settings.json`, then copy `<dest>/.typst-studio/settings.json` (latest) or `<dest>/_trash/<stamp>/.typst-studio/settings.json` (an older one), or `.typst-studio/settings.json` from inside a snapshot zip, over `data/settings.json`. Copy any missing `<dest>/.typst-studio/logos/*` into `data/logos/` without overwriting. Start the app. Workspace paths in it must still exist.
 
 ## Audit table (2026-10-17)
 

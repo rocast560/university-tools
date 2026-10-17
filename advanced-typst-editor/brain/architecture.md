@@ -93,8 +93,8 @@ Server name `typst-figure-studio`, endpoint `/mcp`. Tools are plain objects in `
 ## Backup
 
 [backup/index.ts](../server/backup/index.ts) subscribes to the bus and, after 1.5 s quiet (10 s max wait), runs:
-- **Mirror** (`mirror.ts`): per destination, folders nested like the sidebar. A destination is accepted only if empty or carrying the marker file `.typst-studio-backup.json`. Nothing is ever unlinked; stale items move to `_trash/<stamp>/`. Images are the originals (redactions are not baked).
-- **Snapshots** (`snapshot.ts`): a zip plus manifest with sha256 per file, every `snapshotIntervalMin` (default 60) when the content digest changed, newest `keepSnapshots` (default 30) kept. Restore copies the current library to `pre-restore-<stamp>` first.
+- **Mirror** (`mirror.ts`): per destination, folders nested like the sidebar. A destination is accepted only if empty or carrying the marker file `.typst-studio-backup.json`. Nothing is ever unlinked; stale items move to `_trash/<stamp>/`. Images are the originals (redactions are not baked). The registry (`settings.json`) and `data/logos/` go to `.typst-studio/` at the mirror root (reserved name, so a folder called that becomes `.typst-studio (2)`); a changed copy moves to `_trash/<stamp>/` first.
+- **Snapshots** (`snapshot.ts`): a zip plus manifest with sha256 per file, every `snapshotIntervalMin` (default 60) when the content digest changed, newest `keepSnapshots` (default 30) kept. Snapshots also hold `.typst-studio/` (manifest `registry`, checksummed). Restore copies the current library to `pre-restore-<stamp>` first, then copies back any missing logo its workspaces reference; `settings.json` is never restored automatically.
 
 ## Data flows
 

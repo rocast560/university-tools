@@ -42,8 +42,8 @@ Details and the full table: [data safety](data-safety.md). Items 1 to 3 were **r
 2. **(resolved)** **`delete_asset`, REST asset delete and file delete are permanent unlinks** (`server/workspace.ts:295`, `:410`). Should they move to a per-workspace `.trash/` instead, like workspace delete does? Without a backup destination there is no way back today.
 3. **(resolved)** **`export_pdf` `to` can overwrite any absolute path, including `/data/settings.json`** (`server/compile.ts:150`). Should it refuse existing files, or paths inside `DATA_DIR`?
 4. **`data/trash/` and `data/pre-restore-*` are never pruned and have no restore button.** Add a "restore from trash" action, or leave it manual?
-5. **Logos are not in backups.** Uploaded logos live in `data/logos/`, outside workspace folders, and `settings.json` is not mirrored either, so a backup restore brings back documents but not logos, nesting or folder looks. Include `data/logos/` and `settings.json` in the backup mirror?
+5. **(resolved 2026-10-17)** **Logos are not in backups.** Uploaded logos live in `data/logos/`, outside workspace folders, and `settings.json` is not mirrored either, so a backup restore brings back documents but not logos, nesting or folder looks. Resolved: the mirror and snapshots now carry both under `.typst-studio/` (see [data safety](data-safety.md)); restore brings back missing logos, and `settings.json` is restored by hand.
 
 ## Theme
 
-1. **Bundle JetBrains Mono?** The user's Ember pick uses it for code, but it is not installed and downloading it needs the user's OK (OFL, about 100 to 200 KB for two weights). Until then Cascadia Code renders (see [gotchas](gotchas.md)).
+1. **(resolved 2026-10-17)** JetBrains Mono is bundled in `public/ui-fonts/` (user approved the download).

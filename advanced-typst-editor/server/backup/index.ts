@@ -66,7 +66,7 @@ export function createBackup(deps: BackupDeps): Backup {
   };
 
   const doMirror = (its: MirrorItem[]): string[] => {
-    const plan = planMirror(its);
+    const plan = planMirror(its, { dataDir: deps.dataDir });
     let files = 0;
     const errors: string[] = [];
     for (const d of cfg().destinations) {
@@ -87,14 +87,14 @@ export function createBackup(deps: BackupDeps): Backup {
     for (const d of c.destinations) {
       if (!d.snapshots) continue;
       try {
-        writeSnapshot(d.path, its, { now: now(), version: deps.version, destinationId: d.id });
+        writeSnapshot(d.path, its, { now: now(), version: deps.version, destinationId: d.id, dataDir: deps.dataDir });
         pruneSnapshots(d.path, c.keepSnapshots);
         any = true;
       } catch (err) {
         errors.push(`${d.path}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
-    if (any) { lastSnapshotAt = now(); lastSnapshotDigest = stateDigest(its); }
+    if (any) { lastSnapshotAt = now(); lastSnapshotDigest = stateDigest(its, deps.dataDir); }
     return errors;
   };
 
@@ -114,7 +114,7 @@ export function createBackup(deps: BackupDeps): Backup {
           const its = items();
           const errors = doMirror(its);
           const due = lastSnapshotAt === null || now() - lastSnapshotAt >= cfg().snapshotIntervalMin * 60_000;
-          if (snapshotWanted || (due && stateDigest(its) !== lastSnapshotDigest)) errors.push(...doSnapshot(its));
+          if (snapshotWanted || (due && stateDigest(its, deps.dataDir) !== lastSnapshotDigest)) errors.push(...doSnapshot(its));
           lastRunAt = now();
           lastError = errors.length ? errors.join('; ') : null;
           snapshotWanted = rerunSnapshot;

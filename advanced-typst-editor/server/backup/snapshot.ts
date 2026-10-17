@@ -3,17 +3,20 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { unzipSync, zipSync, type Zippable } from 'fflate';
 import type { SnapshotInfo } from '../../src/types';
-import { ensureDir, safeDirName, stamp, uniqueDirName } from '../fsx';
+import { ensureDir, safeDirName, stamp, uniqueDirName, writeAtomic } from '../fsx';
 import { HttpError } from '../http';
 import { normalizeRel } from '../paths';
 import type { SettingsStore } from '../settings';
-import { planMirror, SNAPSHOTS_DIR, type MirrorItem } from './mirror';
+import { isLogoName } from '../../src/lib/logo';
+import { parentPath } from '../../src/lib/folder-tree';
+import { planMirror, registryFiles, REGISTRY_DIR, SNAPSHOTS_DIR, type MirrorItem } from './mirror';
 
 export type { MirrorItem };
 
 export interface ManifestFile { path: string; size: number; sha256: string }
 export interface ManifestWorkspace { id: string; name: string; group: string | null; library: boolean; dir: string; files: ManifestFile[] }
-export interface Manifest { app: 'typst-studio'; version: string; createdAt: number; workspaces: ManifestWorkspace[] }
+/** `registry` lists settings.json and the logos, as zip paths under `.typst-studio/`. Absent in older snapshots. */
+export interface Manifest { app: 'typst-studio'; version: string; createdAt: number; workspaces: ManifestWorkspace[]; registry?: ManifestFile[] }
 
 const NAME_RE = /^typst-snapshot-(\d{8})-(\d{6})\.zip$/;
 
@@ -23,9 +26,30 @@ export function snapshotName(now: number): string {
   return `typst-snapshot-${d.getUTCFullYear()}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}-${p(d.getUTCHours())}${p(d.getUTCMinutes())}${p(d.getUTCSeconds())}.zip`;
 }
 
+/** settings.json content with openedAt stripped: opening a document rewrites it, but that is no reason for a snapshot. */
+function registryDigest(raw: string): string {
+  let text = raw;
+  try {
+    const reg = JSON.parse(raw) as { workspaces?: Array<Record<string, unknown>> };
+    for (const w of reg.workspaces ?? []) delete w.openedAt;
+    text = JSON.stringify(reg);
+  } catch { /* unparseable: hash as is */ }
+  return crypto.createHash('sha256').update(text).digest('hex');
+}
+
 /** Cheap fingerprint of every workspace's file list (path, size, mtime): changes whenever anything changed. */
-export function stateDigest(items: MirrorItem[]): string {
+export function stateDigest(items: MirrorItem[], dataDir?: string): string {
   const h = crypto.createHash('sha256');
+  if (dataDir) {
+    for (const f of registryFiles(dataDir)) {
+      if (!('rel' in f.source)) continue;
+      const file = path.join(f.source.root, ...f.source.rel.split('/'));
+      try {
+        if (f.source.rel === 'settings.json') h.update(`settings|${registryDigest(fs.readFileSync(file, 'utf8'))}\n`);
+        else h.update(`${f.path}|${fs.statSync(file).size}\n`);
+      } catch { /* gone */ }
+    }
+  }
   for (const it of [...items].sort((a, b) => a.entry.id.localeCompare(b.entry.id))) {
     h.update(`${it.entry.id}|${it.entry.name}|${it.entry.group ?? ''}\n`);
     for (const f of [...it.files].sort((a, b) => a.path.localeCompare(b.path))) h.update(`${f.path}|${f.size}|${f.mtime}\n`);
@@ -37,7 +61,7 @@ export function stateDigest(items: MirrorItem[]): string {
 const sha256 = (b: Uint8Array) => crypto.createHash('sha256').update(b).digest('hex');
 const STORE_ONLY = /\.(png|jpe?g|gif|webp|woff2?|ttf|otf|ttc|zip|pdf)$/i;
 
-export function buildSnapshot(items: MirrorItem[], opts: { now: number; version: string }): { zip: Uint8Array; manifest: Manifest } {
+export function buildSnapshot(items: MirrorItem[], opts: { now: number; version: string; dataDir?: string }): { zip: Uint8Array; manifest: Manifest } {
   const plan = planMirror(items);
   const zippable: Zippable = {};
   const manifest: Manifest = { app: 'typst-studio', version: opts.version, createdAt: opts.now, workspaces: [] };
@@ -55,11 +79,22 @@ export function buildSnapshot(items: MirrorItem[], opts: { now: number; version:
     }
     manifest.workspaces.push({ id: it.entry.id, name: it.entry.name, group: it.entry.group, library: it.entry.library, dir, files });
   }
+  if (opts.dataDir) {
+    const registry: ManifestFile[] = [];
+    for (const f of registryFiles(opts.dataDir)) {
+      if (!('rel' in f.source)) continue;
+      let bytes: Uint8Array;
+      try { bytes = new Uint8Array(fs.readFileSync(path.join(f.source.root, ...f.source.rel.split('/')))); } catch { continue; }
+      zippable[f.path] = [bytes, { level: STORE_ONLY.test(f.path) ? 0 : 6 }];
+      registry.push({ path: f.path, size: bytes.length, sha256: sha256(bytes) });
+    }
+    manifest.registry = registry;
+  }
   zippable['manifest.json'] = [new TextEncoder().encode(JSON.stringify(manifest, null, 2)), { level: 6 }];
   return { zip: zipSync(zippable), manifest };
 }
 
-export function writeSnapshot(dest: string, items: MirrorItem[], opts: { now: number; version: string; destinationId: string }): SnapshotInfo {
+export function writeSnapshot(dest: string, items: MirrorItem[], opts: { now: number; version: string; destinationId: string; dataDir?: string }): SnapshotInfo {
   const dir = path.join(dest, SNAPSHOTS_DIR);
   ensureDir(dir);
   const name = snapshotName(opts.now);
@@ -117,6 +152,12 @@ export async function restoreSnapshot(deps: { zipPath: string; dataDir: string; 
       if (!bytes || sha256(bytes) !== f.sha256) throw new HttpError(400, `checksum mismatch for ${w.dir}/${f.path}; the snapshot is damaged`);
     }
   }
+  for (const f of manifest.registry ?? []) {
+    const nf = normalizeRel(f.path);
+    if (!nf || nf !== f.path || !f.path.startsWith(`${REGISTRY_DIR}/`)) throw new HttpError(400, `unsafe path in snapshot manifest: ${f.path}`);
+    const bytes = entries[f.path];
+    if (!bytes || sha256(bytes) !== f.sha256) throw new HttpError(400, `checksum mismatch for ${f.path}; the snapshot is damaged`);
+  }
   const t = stamp(deps.now());
   ensureDir(deps.workspacesDir);
   const pre = path.join(deps.dataDir, `pre-restore-${t}`);
@@ -145,5 +186,32 @@ export async function restoreSnapshot(deps: { zipPath: string; dataDir: string; 
     if (!deps.settings.findByPath(target)) deps.settings.addWorkspace({ path: target, name: w.name, group: w.group, library: true });
     restored += 1;
   }
+  restoreLogos(manifest, entries, deps.dataDir);
   return { restored };
+}
+
+/**
+ * Copies back the logos the restored workspaces and their folders referenced in the snapshot's registry,
+ * only where no file of that name exists. Logo names are random, so an existing name is the same logo
+ * or a different one, and either way it stays. settings.json is never touched: restoring it is a manual step.
+ */
+function restoreLogos(manifest: Manifest, entries: Record<string, Uint8Array>, dataDir: string): void {
+  const raw = entries[`${REGISTRY_DIR}/settings.json`];
+  if (!raw) return;
+  let reg: { workspaces?: Array<{ id?: unknown; appearance?: { logo?: unknown } | null }>; folderMeta?: Record<string, { logo?: unknown } | null> };
+  try { reg = JSON.parse(new TextDecoder().decode(raw)); } catch { return; }
+  const wanted = new Set<string>();
+  const want = (v: unknown) => { if (isLogoName(v)) wanted.add(v); };
+  for (const w of manifest.workspaces) {
+    want(reg.workspaces?.find((e) => e.id === w.id)?.appearance?.logo);
+    for (let g: string | null = w.group; g; g = parentPath(g)) want(reg.folderMeta?.[g]?.logo);
+  }
+  const dir = path.join(dataDir, 'logos');
+  for (const name of wanted) {
+    const bytes = entries[`${REGISTRY_DIR}/logos/${name}`];
+    if (!bytes) continue;
+    const target = path.join(dir, name);
+    if (fs.existsSync(target)) continue;
+    writeAtomic(target, bytes);
+  }
 }
