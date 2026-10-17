@@ -10,7 +10,9 @@ description: Current state of Typst Studio work after the 2026-10-17 session (pr
 
 ## State (2026-10-17, end of session)
 
-Everything below is built, tested and browser-checked, and **all of it is uncommitted** in the `university-tools` working tree. The user's running app is the `typst-studio` container on http://localhost:8090; it still runs the **old image** until `docker compose up --build -d` ([environment](environment.md)).
+Everything below is built, tested, browser-checked, **committed** on branch `feat/typst-studio-lock-theme-nesting` (`aaaf2fd` docs + brain, `37c5152` code; not pushed), and **live**: the `typst-studio` container was rebuilt on 2026-10-17 and serves it on http://localhost:8090 ([environment](environment.md)).
+
+Rebuild check: health ok; 14 workspaces before and after; `settings.json` entries field-for-field identical, only additive changes (`groups` gained `CPTC` and `ECE-2300L`, which workspaces already referenced, and `folderMeta: {}`); `settings.json.bak` now exists. Side effect: the CPTC and ECE-2300L folders (11 documents) show in the sidebar again; the old server's groups list lacked them. Pre-rebuild registry copy kept in the lead's session scratchpad only.
 
 Verified by the lead at the end: `bun run test:ui` 459 passed (48 files), `bun run test:server` 184 passed (22 files), `bun run typecheck` clean.
 
@@ -29,17 +31,13 @@ Theme picker artifact: https://claude.ai/artifact/USQrvguth7bWyqGrdy5KeU (picks 
 
 ## Uncommitted local work (protect it)
 
-- Earlier session: `server/mcp-tools.ts` (`move_workspace` description), `Sidebar.tsx` + `sidebar.test.tsx` (folder-delete confirm dialog).
-- Today: everything in the table above, plus `CLAUDE.md`, `AGENTS.md`, `brain/`, `docs/research/`, the new spec.
-
-Never `git add -A`, stash, reset or checkout over these. Ask the user before committing ([how we work](how-we-work.md)).
+- Not ours: `circut-ai-tool/src/sim/*` and its tests are uncommitted circuit-simulator work, left untouched in the working tree on the new branch. Never `git add -A`, stash, reset or checkout over it.
 
 ## Next steps
 
-1. **Commit, once the user says so.** Check the branch first (`feat/74ls151-sim` holds unrelated circuit work); stage explicit `advanced-typst-editor/` paths only. Done when: `git status --short -- advanced-typst-editor` is empty.
-2. **Rebuild the container.** Done when: `docker compose up --build -d` succeeds and `GET http://localhost:8090/api/health` returns `{"ok":true,...}`, and the sidebar shows the Ember look.
-3. **Answer the open questions**: JetBrains Mono bundle, logos/settings in backups, a trash restore button, the brain hook ([open questions](open-questions.md)).
-4. **Preview-to-source mapping, phase 1** (context-aware text alignment) from the research doc, when the user wants it.
+1. **Push or merge the branch** when the user says so (it is local only).
+2. **Answer the open questions**: JetBrains Mono bundle, logos/settings in backups, a trash restore button, the brain hook ([open questions](open-questions.md)).
+3. **Preview-to-source mapping, phase 1** (context-aware text alignment) from the research doc, when the user wants it.
 
 ## Watch-outs
 
