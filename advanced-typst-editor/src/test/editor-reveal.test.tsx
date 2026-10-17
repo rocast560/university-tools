@@ -5,6 +5,7 @@ import { EditorView } from '@codemirror/view';
 import { TypstEditor } from '@/components/typst/TypstEditor';
 import {
   revealTypstRange,
+  showTypstPreviewHighlight,
   setTypstDocKey,
   setTypstEditorHandle,
 } from '@/components/typst/typst-editor-bridge';
@@ -18,6 +19,14 @@ const viewIn = (container: HTMLElement): EditorView => {
 const DOC = '= Report\n\n#let department = "Information Technology"\n';
 const FROM = DOC.indexOf('Information');
 const TO = FROM + 'Information Technology'.length;
+
+// jsdom has no layout: CodeMirror's own measuring (it runs on a frame, after a test may have ended)
+// needs these on Range, as it does in any browser. Without them a late frame throws an uncaught error.
+{
+  const proto = Range.prototype as Partial<Range>;
+  if (!proto.getClientRects) proto.getClientRects = () => ({ length: 0, item: () => null, [Symbol.iterator]: function* () {} }) as unknown as DOMRectList;
+  if (!proto.getBoundingClientRect) proto.getBoundingClientRect = () => ({ top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON() { return {}; } }) as DOMRect;
+}
 
 beforeEach(() => setTypstEditorHandle(null));
 
@@ -107,5 +116,76 @@ describe('reveal correction after measuring', () => {
     revealTypstRange(FROM, TO);
     await frames(); await frames();
     expect(dispatch).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * The preview-selection mark (phase 2): the passage a highlight in the preview maps to is shown
+ * in the editor as a transient mark. It must never touch the caret, the selection or focus: the
+ * operator is working in the preview, and Ctrl+C there must still copy the preview's text.
+ */
+describe('preview-selection highlight', () => {
+  const mountLive = () => {
+    setTypstDocKey('ws:hl.typ');
+    const { container } = render(<TypstEditor value={DOC} onChange={() => {}} docKey="ws:hl.typ" />);
+    return { view: viewIn(container), container };
+  };
+  const marks = (c: HTMLElement) => Array.from(c.querySelectorAll('.cm-previewSelection')).map((n) => n.textContent).join('');
+
+  it('adds and clears the mark without changing the selection or focus', async () => {
+    const { view, container } = mountLive();
+    const outside = document.createElement('input');
+    document.body.appendChild(outside);
+    outside.focus();
+    view.dispatch({ selection: { anchor: 3 } });
+    const before = view.state.selection.main.toJSON();
+
+    expect(showTypstPreviewHighlight({ from: FROM, to: TO, approximate: false })).toBe(true);
+    await waitFor(() => expect(marks(container)).toBe('Information Technology'));
+    expect(view.state.selection.main.toJSON()).toEqual(before);
+    expect(view.hasFocus).toBe(false);
+    expect(document.activeElement).toBe(outside);
+
+    expect(showTypstPreviewHighlight(null)).toBe(true);
+    await waitFor(() => expect(marks(container)).toBe(''));
+    expect(view.state.selection.main.toJSON()).toEqual(before);
+    expect(document.activeElement).toBe(outside);
+  });
+
+  it('marks an approximate range differently, and moves the mark with edits', async () => {
+    const { view, container } = mountLive();
+    showTypstPreviewHighlight({ from: FROM, to: TO, approximate: true });
+    await waitFor(() => expect(container.querySelector('.cm-previewSelection.cm-previewSelection-approx')).not.toBeNull());
+    view.dispatch({ changes: { from: 0, insert: 'XX' } });
+    await waitFor(() => expect(marks(container)).toBe('Information Technology'));
+  });
+
+  it('returns false with no editor mounted and does not queue a scroll or open anything', () => {
+    setTypstEditorHandle(null);
+    expect(showTypstPreviewHighlight({ from: 1, to: 2, approximate: false })).toBe(false);
+  });
+
+  it('scrolls an off-screen range into view, checking after render, without moving the caret', async () => {
+    const { view } = mountLive();
+    vi.spyOn(view.scrollDOM, 'getBoundingClientRect').mockReturnValue({ top: 0, bottom: 300, left: 0, right: 400, width: 400, height: 300, x: 0, y: 0, toJSON() { return {}; } });
+    vi.spyOn(view, 'coordsAtPos').mockReturnValue({ top: -3828, bottom: -3810, left: 0, right: 5 });
+    const dispatch = vi.spyOn(view, 'dispatch');
+    const caret = view.state.selection.main.head;
+    showTypstPreviewHighlight({ from: FROM, to: TO, approximate: false });
+    await waitFor(() => expect(dispatch.mock.calls.length).toBeGreaterThanOrEqual(2));
+    await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => r())))));
+    // The reveal itself plus at most two corrective scrolls.
+    expect(dispatch.mock.calls.length).toBeLessThanOrEqual(3);
+    expect(view.state.selection.main.head).toBe(caret);
+  });
+
+  it('does not scroll a range that is already visible', async () => {
+    const { view } = mountLive();
+    vi.spyOn(view.scrollDOM, 'getBoundingClientRect').mockReturnValue({ top: 0, bottom: 300, left: 0, right: 400, width: 400, height: 300, x: 0, y: 0, toJSON() { return {}; } });
+    vi.spyOn(view, 'coordsAtPos').mockReturnValue({ top: 140, bottom: 158, left: 0, right: 5 });
+    const dispatch = vi.spyOn(view, 'dispatch');
+    showTypstPreviewHighlight({ from: FROM, to: TO, approximate: false });
+    await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+    expect(dispatch).toHaveBeenCalledTimes(1); // just the mark
   });
 });

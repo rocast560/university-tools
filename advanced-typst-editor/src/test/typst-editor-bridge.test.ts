@@ -9,6 +9,8 @@ import {
   setTypstSearchRequest,
   requestTypstSearch,
   setTypstDocKey,
+  showTypstPreviewHighlight,
+  type PreviewHighlight,
   type TypstEditorHandle,
 } from '@/components/typst/typst-editor-bridge';
 
@@ -16,8 +18,9 @@ function fakeHandle() {
   const reveal = vi.fn<(from: number, to: number, focus: boolean) => void>();
   const insert = vi.fn<(text: string) => boolean>(() => true);
   const setContent = vi.fn<(next: string, echo: boolean) => boolean>(() => true);
-  const handle: TypstEditorHandle = { reveal, caret: () => 42, insert, setContent };
-  return { handle, reveal, insert, setContent };
+  const highlight = vi.fn<(range: PreviewHighlight | null) => void>();
+  const handle: TypstEditorHandle = { reveal, caret: () => 42, insert, setContent, highlight };
+  return { handle, reveal, insert, setContent, highlight };
 }
 
 beforeEach(() => {
@@ -140,5 +143,42 @@ describe('typst editor bridge', () => {
     setTypstSearchRequest(null);
     expect(() => requestTypstSearch()).not.toThrow();
     expect(onSearch).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('preview highlight', () => {
+  const range: PreviewHighlight = { from: 3, to: 9, approximate: false };
+
+  it('forwards to the editor, and clears with null', () => {
+    const { handle, highlight } = fakeHandle();
+    setTypstEditorHandle(handle);
+    expect(showTypstPreviewHighlight(range)).toBe(true);
+    expect(highlight).toHaveBeenLastCalledWith(range);
+    expect(showTypstPreviewHighlight(null)).toBe(true);
+    expect(highlight).toHaveBeenLastCalledWith(null);
+  });
+
+  it('reports false with no editor mounted: a passive highlight never opens the pane', () => {
+    expect(showTypstPreviewHighlight(range)).toBe(false);
+  });
+
+  it('shows a highlight that is still up on an editor that mounts later, but not a cleared one', () => {
+    showTypstPreviewHighlight(range);
+    const first = fakeHandle();
+    setTypstEditorHandle(first.handle);
+    expect(first.highlight).toHaveBeenCalledWith(range);
+
+    showTypstPreviewHighlight(null);
+    const second = fakeHandle();
+    setTypstEditorHandle(second.handle);
+    expect(second.highlight).not.toHaveBeenCalled();
+  });
+
+  it('forgets the highlight when the document changes (its offsets belong to the old text)', () => {
+    showTypstPreviewHighlight(range);
+    setTypstDocKey('another.typ');
+    const { handle, highlight } = fakeHandle();
+    setTypstEditorHandle(handle);
+    expect(highlight).not.toHaveBeenCalled();
   });
 });

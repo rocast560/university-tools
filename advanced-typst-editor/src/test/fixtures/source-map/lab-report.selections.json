@@ -1,0 +1,18 @@
+[
+{"s":[0,14,"first-order RC"],"e":[0,14,"first-order RC"],"line":26,"src":"first-order RC","why":"within one run"},
+{"s":[0,14,"first-order RC"],"e":[0,14,"first-order RC"],"line":26,"src":"first-order RC","swap":true,"why":"backwards drag inside one run"},
+{"s":[0,4,"frequency response of a first-order"],"e":[0,4,"frequency response of a first-order"],"line":18,"src":"frequency response of a first-order","why":"within one wrapped run"},
+{"s":[0,4,"measured the frequency"],"e":[0,5,"1.58 kHz"],"line":18,"src":"measured the frequency response of a first-order RC low-pass filter. The measured cutoff frequency of 1.58 kHz","why":"across two runs of a paragraph"},
+{"s":[0,5,"within 3"],"e":[0,8,"Introduction"],"line":[18,20],"src":"within 3 percent.\n\n= Introduction","why":"across a heading counter into the next section"},
+{"s":[0,14,"Build a"],"e":[0,16,"ten frequencies"],"line":[26,27],"src":"Build a first-order RC low-pass filter.\n- Measure the gain at ten frequencies","why":"across list items"},
+{"s":[0,21,"transfer function"],"e":[0,33,"cutoff frequency follows"],"line":[32,36],"src":"transfer function of the filter is\n\n$ H(s) = 1 / (1 + s R C) $\n\nand the cutoff frequency follows","why":"across an equation"},
+{"s":[1,10,"100"],"e":[1,12,"0.02"],"line":61,"src":"100], [0.998], [-0.02","why":"across a table row"},
+{"s":[1,16,"1000"],"e":[1,21,"3.01"],"line":[63,64],"src":"1000], [0.846], [-1.45],\n    [1580], [0.707], [-3.01","why":"across two table rows"},
+{"s":[0,50,"The oscilloscope"],"e":[1,5," shows the circuit under test"],"line":[44,55],"why":"across a page break, past a figure"},
+{"s":[1,28,"Discussion"],"e":[1,29,"The 3 percent"],"line":[72,74],"src":"Discussion\n\nThe 3 percent","why":"heading into its paragraph"},
+{"s":[1,25,"Measured gain of the filter"],"e":[1,25,"Measured gain of the filter"],"line":67,"src":"Measured gain of the filter","why":"caption text after a generated label"},
+{"s":[1,41,"Sedra"],"e":[1,43,"8th edition"],"line":86,"src":"Sedra and Smith, _Microelectronic Circuits_, 8th edition","why":"across emphasis in a reference"},
+{"s":[0,18,"Compare the measured cutoff with the calculated cutoff."],"e":[0,18,"Compare the measured cutoff with the calculated cutoff."],"line":28,"src":"Compare the measured cutoff with the calculated cutoff.","why":"a whole run"},
+{"s":[0,7,"1."],"e":[0,8,"Introduction"],"line":20,"approx":true,"why":"starts on a generated heading counter"},
+{"s":[0,22,"𝐻"],"e":[0,32,"𝐶"],"line":34,"approx":true,"why":"the glyph runs of an equation"}
+]

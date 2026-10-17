@@ -21,11 +21,15 @@ import { createPortal } from 'react-dom';
 import { ZoomIn, ZoomOut, Maximize, Loader2, AlertTriangle, Lock } from 'lucide-react';
 import { compileTypstSvg, typstErrorMessage, type TypstDiagnostic } from '@/lib/typst-compiler';
 import { splitTypstPages, extractTextRuns, reconcileDefs, splitSharedStyle, DEFAULT_PAGE_GAP, type SplitTypstSvg } from '@/lib/typst-pages';
-import { fallbackCandidates, type SourceClick, type SourceHint, type SourceRange } from '@/lib/typst-source-map';
+import {
+  fallbackCandidates, rangeFromSelection,
+  type ClickTarget, type SelectionRange, type SourceClick, type SourceHint, type SourceRange,
+} from '@/lib/typst-source-map';
+import { PreviewSelectionBar, type BarAnchor } from './PreviewSelectionBar';
 import { renderCache } from '@/lib/workspace-cache';
 import { switchTrace } from '@/lib/perf';
 
-export type { SourceCandidate, SourceClick } from '@/lib/typst-source-map';
+export type { SourceCandidate, SourceClick, SelectionRange } from '@/lib/typst-source-map';
 
 /** Where the rendered pages live: the shadow root, or one page card inside it. */
 type Scope = Element | ShadowRoot;
@@ -101,6 +105,108 @@ function imageHrefAtPoint(
   }
   return best?.href ?? null;
 }
+
+// ── Selection to source (phase 2) ──────────────────────────────────────────
+
+/** A selection is mapped this long after the last mouseup / Shift release, never during a drag. */
+const SELECTION_DEBOUNCE_MS = 120;
+
+interface DomPoint { node: Node; offset: number }
+
+/**
+ * The ends of the user's selection, when it is a non-empty one anchored inside
+ * the preview's pages; null for anything else (collapsed, or living in the
+ * editor).
+ *
+ * Both the shadow root's selection and the document's are read. Chrome gives
+ * ShadowRoot a getSelection() whose nodes are the real ones inside the pages,
+ * while window.getSelection() reports the shadow host instead; but while the
+ * selection lives in the *editor*, that same shadow getSelection() stringifies
+ * to the editor's text with a null anchor (seen in the app on 2026-10-17), so
+ * the text alone proves nothing: both ends must sit inside the pages.
+ * Browsers without ShadowRoot.getSelection expose the real ends through
+ * getComposedRanges.
+ */
+function previewSelection(root: ShadowRoot): { text: string; a: DomPoint; b: DomPoint } | null {
+  const inside = (n: Node | null | undefined): n is Node => !!n && root.contains(n);
+  const doc = window.getSelection();
+  const own = (root as ShadowRoot & { getSelection?: () => Selection | null }).getSelection?.();
+  for (const s of [own, doc]) {
+    if (!s || !s.toString()) continue;
+    if (inside(s.anchorNode) && inside(s.focusNode)) {
+      return { text: s.toString(), a: { node: s.anchorNode, offset: s.anchorOffset }, b: { node: s.focusNode, offset: s.focusOffset } };
+    }
+  }
+  const composed = (doc as (Selection & { getComposedRanges?: (o: { shadowRoots: ShadowRoot[] }) => StaticRange[] }) | null)?.getComposedRanges;
+  if (doc && doc.toString() && composed) {
+    try {
+      const [r] = composed.call(doc, { shadowRoots: [root] });
+      if (r && inside(r.startContainer) && inside(r.endContainer)) {
+        return { text: doc.toString(), a: { node: r.startContainer, offset: r.startOffset }, b: { node: r.endContainer, offset: r.endOffset } };
+      }
+    } catch { /* an older shape of the API: no selection to read */ }
+  }
+  return null;
+}
+
+/** A selection end resolved to a text run of a page. */
+interface RunPoint {
+  page: number;
+  run: number;
+  /** Character offset inside the run's text. */
+  offset: number;
+  /** The run boxes of the page card (or of the whole document), and their texts. */
+  boxes: Element[];
+  texts: string[];
+  pageCount: number;
+  paged: boolean;
+}
+
+/** UTF-16 offset of `p` inside the text of `box`. */
+function textOffsetIn(box: Element, p: DomPoint): number {
+  try {
+    const r = document.createRange();
+    r.selectNodeContents(box);
+    r.setEnd(p.node, p.offset);
+    return r.toString().length;
+  } catch { return 0; }
+}
+
+/**
+ * The run a selection end is in, and where in it. An end that Chrome anchors
+ * on a container instead of a text node (a triple-click, a drag from the
+ * margin) snaps to the nearest run on the right side of the boundary.
+ */
+function runPointAt(root: ShadowRoot, p: DomPoint, side: 'start' | 'end'): RunPoint | null {
+  const el = p.node.nodeType === 1 ? (p.node as Element) : p.node.parentElement;
+  if (!el) return null;
+  const card = el.closest<HTMLElement>('[data-page-index]');
+  const scope: Scope = card ?? root;
+  const boxes = Array.from(scope.querySelectorAll('foreignObject'));
+  const texts = boxes.map((o) => o.textContent ?? '');
+  const base = {
+    page: card ? Number(card.dataset.pageIndex) : 0,
+    boxes, texts,
+    pageCount: 0, // filled by the caller, which knows the split
+    paged: !!card,
+  };
+  const own = el.closest('foreignObject');
+  if (own && boxes.includes(own)) return { ...base, run: boxes.indexOf(own), offset: textOffsetIn(own, p) };
+  try {
+    const at = document.createRange();
+    at.setStart(p.node, p.offset);
+    at.collapse(true);
+    const usable = (i: number) => texts[i]!.trim().length > 0;
+    if (side === 'start') {
+      for (let i = 0; i < boxes.length; i++) if (usable(i) && at.comparePoint(boxes[i]!, 0) >= 0) return { ...base, run: i, offset: 0 };
+    } else {
+      for (let i = boxes.length - 1; i >= 0; i--) if (usable(i) && at.comparePoint(boxes[i]!, 0) <= 0) return { ...base, run: i, offset: texts[i]!.length };
+    }
+  } catch { /* no usable boundary point */ }
+  return null;
+}
+
+const cmpRunPoints = (a: RunPoint, b: RunPoint) => a.page - b.page || a.run - b.run || a.offset - b.offset;
 
 const DEBOUNCE_MS = 350;
 const MIN_ZOOM = 0.25;
@@ -263,6 +369,13 @@ function pageCardAt(host: Scope, target: Element | null, clientY: number): HTMLE
   return best;
 }
 
+/** A highlight in the preview, mapped to the source (range is null when nothing aligned), and where its bar goes. */
+interface MappedSelection {
+  range: SelectionRange | null;
+  text: string;
+  anchor: BarAnchor;
+}
+
 /** What the preview shows for one document: its last good render. */
 interface DocRender {
   key: string;
@@ -295,6 +408,8 @@ export const TypstPreview = memo(function TypstPreview({
   onRevealSource,
   onRevealImage,
   locked = false,
+  onSelectionRange,
+  onSelectInCode,
 }: {
   source: string;
   revision?: number;
@@ -336,6 +451,18 @@ export const TypstPreview = memo(function TypstPreview({
    * unaffected: only the handler and the page area's cursor/title change.
    */
   locked?: boolean;
+  /**
+   * Selection-to-source. Called with the source range a highlight in the
+   * preview maps to (once, after the drag ends), or null when the highlight is
+   * gone. The tab uses it to mark the passage in the editor, which never moves
+   * the caret or takes focus, so it is also called while the preview is locked.
+   */
+  onSelectionRange?: (range: SelectionRange | null) => void;
+  /**
+   * "Select in code" in the selection bar: make the mapped range the editor's
+   * real selection (opening the code pane). Never offered while locked.
+   */
+  onSelectInCode?: (range: SourceRange) => void;
 }) {
   const [doc, setDoc] = useState<DocRender>(() => docFromCache(docKey));
   const [fatalError, setFatalError] = useState<string | null>(null);
@@ -444,6 +571,184 @@ export const TypstPreview = memo(function TypstPreview({
   // order is mostly source order, so the next click is probably near it.
   const hintRef = useRef<{ docKey: string; hint: SourceHint } | null>(null);
 
+  // ── Selection to source ──
+  // The mapped selection, shown as a bar next to it. Mirrored in a ref so the
+  // window listeners below (registered once) always see the current one.
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [selection, setSelection] = useState<MappedSelection | null>(null);
+  const selectionRef = useRef<MappedSelection | null>(null);
+  const [copied, setCopied] = useState<'text' | 'source' | null>(null);
+  const sourceRef = useRef(source);
+  sourceRef.current = source;
+  const onSelectionRangeRef = useRef(onSelectionRange);
+  onSelectionRangeRef.current = onSelectionRange;
+  // What the bar is anchored to, so a scroll or zoom can move it with the text.
+  const anchorSrc = useRef<{ range: Range | null; endBox: Element | null } | null>(null);
+
+  const computeAnchor = useCallback((): BarAnchor | null => {
+    const wrap = wrapRef.current;
+    const src = anchorSrc.current;
+    if (!wrap || !src) return null;
+    const w = wrap.getBoundingClientRect();
+    let rects: DOMRect[] = [];
+    try { rects = src.range?.getClientRects ? Array.from(src.range.getClientRects()) : []; } catch { /* no layout */ }
+    rects = rects.filter((r) => r.width > 0 || r.height > 0);
+    const last = rects[rects.length - 1] ?? src.endBox?.getBoundingClientRect();
+    const first = rects[0] ?? last;
+    if (!last || !first) return null;
+    return { x: last.right - w.left, below: last.bottom - w.top + 6, above: first.top - w.top - 6 };
+  }, []);
+
+  const clearSelection = useCallback(() => {
+    if (!selectionRef.current) return;
+    selectionRef.current = null;
+    anchorSrc.current = null;
+    setSelection(null);
+    onSelectionRangeRef.current?.(null);
+  }, []);
+
+  /**
+   * Read the selection and map it, once. Called a moment after a drag ends or
+   * Shift is released, never from selectionchange: during a drag the selection
+   * changes on every mouse move, and aligning each of those would be wasted
+   * work on a text the user has not finished choosing.
+   */
+  const mapSelection = useCallback(() => {
+    const root = shadowRoot;
+    if (!root) return;
+    const sel = previewSelection(root);
+    if (!sel) { clearSelection(); return; }
+    const pa = runPointAt(root, sel.a, 'start');
+    const pb = runPointAt(root, sel.b, 'end');
+    const pageCount = split ? split.pages.length : 1;
+    let range: SelectionRange | null = null;
+    let ends: [RunPoint, RunPoint] | null = null;
+    if (pa && pb) {
+      pa.pageCount = pb.pageCount = pageCount;
+      let [s, e] = cmpRunPoints(pa, pb) <= 0 ? [pa, pb] : [pb, pa];
+      // An end exactly on a run boundary (a triple-click ends at the start of the next block) belongs to
+      // the neighbouring run: end the selection after the previous run, start it in the next one.
+      const snapped = { s: { ...s }, e: { ...e } };
+      for (let n = 0; snapped.e.offset === 0 && snapped.e.run > 0 && n < 4; n++) {
+        snapped.e.run--;
+        snapped.e.offset = snapped.e.texts[snapped.e.run]!.length;
+        if (snapped.e.texts[snapped.e.run]!.trim()) break;
+      }
+      for (let n = 0; snapped.s.offset >= snapped.s.texts[snapped.s.run]!.length && snapped.s.run < snapped.s.texts.length - 1 && n < 4; n++) {
+        snapped.s.run++;
+        snapped.s.offset = 0;
+        if (snapped.s.texts[snapped.s.run]!.trim()) break;
+      }
+      if (cmpRunPoints(snapped.s, snapped.e) < 0) { s = snapped.s; e = snapped.e; }
+      const targetOf = (rp: RunPoint): ClickTarget => ({
+        page: rp.page, run: rp.run, pageCount: rp.pageCount,
+        runsOf: (p) => (p === rp.page ? rp.texts : runsOfPage(p)),
+      });
+      range = rangeFromSelection(
+        sourceRef.current,
+        { target: targetOf(s), offset: s.offset },
+        { target: targetOf(e), offset: e.offset },
+        hintRef.current?.docKey === docKey ? hintRef.current.hint : null,
+      );
+      if (range) hintRef.current = { docKey, hint: { page: s.page, run: s.run, from: range.from } };
+      ends = [s, e];
+    }
+
+    // Where the bar sits: after the selection's last line, from the browser's own range rects.
+    let domRange: Range | null = null;
+    try {
+      domRange = document.createRange();
+      domRange.setStart(sel.a.node, sel.a.offset);
+      domRange.setEnd(sel.b.node, sel.b.offset);
+      if (domRange.collapsed) { domRange.setStart(sel.b.node, sel.b.offset); domRange.setEnd(sel.a.node, sel.a.offset); }
+    } catch { domRange = null; }
+    anchorSrc.current = { range: domRange, endBox: ends ? ends[1].boxes[ends[1].run] ?? null : null };
+    const anchor = computeAnchor() ?? { x: 0, below: 0, above: 0 };
+
+    const prev = selectionRef.current;
+    const same = prev && prev.text === sel.text && prev.range?.from === range?.from && prev.range?.to === range?.to
+      && prev.range?.approximate === range?.approximate;
+    const next: MappedSelection = { range, text: sel.text, anchor };
+    selectionRef.current = next;
+    setSelection(next);
+    if (!same) onSelectionRangeRef.current?.(range);
+  }, [shadowRoot, split, runsOfPage, docKey, clearSelection, computeAnchor]);
+  const mapRef = useRef(mapSelection);
+  mapRef.current = mapSelection;
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let pressedInPreview = false;
+    const schedule = () => { clearTimeout(timer); timer = setTimeout(() => mapRef.current(), SELECTION_DEBOUNCE_MS); };
+    const inPreview = (t: EventTarget | null) => !!pageAreaRef.current && t instanceof Node && pageAreaRef.current.contains(t);
+    const inBar = (t: EventTarget | null) => t instanceof Node && !!wrapRef.current?.querySelector('[data-testid="preview-selection-bar"]')?.contains(t);
+    // A new press on the pages starts a new selection: the old bar would only sit in the way of the drag.
+    const onDown = (e: MouseEvent) => {
+      pressedInPreview = inPreview(e.target);
+      if (pressedInPreview && !inBar(e.target)) { clearTimeout(timer); clearSelection(); }
+    };
+    // A drag can end outside the pages, so this is on the window; mouseups elsewhere in the app are ignored
+    // unless a selection is up (a click elsewhere then dismisses it, because the selection has collapsed).
+    const onUp = (e: MouseEvent) => {
+      if (!inPreview(e.target) && !pressedInPreview && !selectionRef.current) return;
+      pressedInPreview = false;
+      schedule();
+    };
+    const onKeyUp = (e: KeyboardEvent) => { if (e.key === 'Shift') schedule(); };
+    const onKeyDown = (e: KeyboardEvent) => { if (e.key === 'Escape' && selectionRef.current) { clearTimeout(timer); clearSelection(); } };
+    window.addEventListener('mousedown', onDown, true);
+    window.addEventListener('mouseup', onUp, true);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('mousedown', onDown, true);
+      window.removeEventListener('mouseup', onUp, true);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [clearSelection]);
+
+  // Offsets belong to one source and one render: an edit, another document or a new compile ends the selection.
+  useEffect(() => { clearSelection(); }, [source, docKey, svg, clearSelection]);
+
+  // The bar follows the text it belongs to when the pages scroll or zoom.
+  const moveBar = useCallback(() => {
+    const anchor = computeAnchor();
+    if (anchor) setSelection((s) => (s ? { ...s, anchor } : s));
+  }, [computeAnchor]);
+  const barFrame = useRef(0);
+  const onPagesScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    scrollTopRef.current = e.currentTarget.scrollTop;
+    if (!selectionRef.current) return;
+    cancelAnimationFrame(barFrame.current);
+    barFrame.current = requestAnimationFrame(moveBar);
+  }, [moveBar]);
+  useEffect(() => { if (selectionRef.current) moveBar(); }, [zoom, moveBar]);
+  useEffect(() => () => cancelAnimationFrame(barFrame.current), []);
+
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(copyTimer.current), []);
+  const copy = useCallback(async (kind: 'text' | 'source') => {
+    const sel = selectionRef.current;
+    if (!sel) return;
+    const text = kind === 'text' ? sel.text : sel.range ? sourceRef.current.slice(sel.range.from, sel.range.to) : '';
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(kind);
+      clearTimeout(copyTimer.current);
+      copyTimer.current = setTimeout(() => setCopied(null), 1200);
+    } catch { /* clipboard blocked: the highlight is still there for Ctrl+C */ }
+  }, []);
+  const selectInCode = useCallback(() => {
+    const sel = selectionRef.current;
+    if (locked || !onSelectInCode || !sel?.range) return;
+    onSelectInCode({ from: sel.range.from, to: sel.range.to });
+    // The editor's own selection takes over from here: drop the bar and the transient mark.
+    clearSelection();
+  }, [locked, onSelectInCode, clearSelection]);
+
   const onPageClick = useCallback((e: React.MouseEvent) => {
     if (locked || (!onRevealSource && !onRevealImage)) return;
     const root = shadowRoot;
@@ -501,7 +806,7 @@ export const TypstPreview = memo(function TypstPreview({
   const resetZoom = useCallback(() => setZoom(1), []);
 
   return (
-    <div className="flex h-full flex-col bg-[hsl(var(--muted)/0.35)]">
+    <div ref={wrapRef} className="relative flex h-full flex-col bg-[hsl(var(--muted)/0.35)]">
       {/* Toolbar */}
       <div className="flex h-8 shrink-0 items-center justify-between border-b border-[hsl(var(--border))] bg-[hsl(var(--card))] px-2">
         <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-[hsl(var(--muted-foreground))]">
@@ -564,7 +869,7 @@ export const TypstPreview = memo(function TypstPreview({
         ref={pageAreaRef}
         data-testid="preview-pages"
         onClick={onPageClick}
-        onScroll={(e) => { scrollTopRef.current = e.currentTarget.scrollTop; }}
+        onScroll={onPagesScroll}
         title={locked ? 'Locked: select and copy text freely. Unlock to jump to the code.' : onRevealSource ? 'Click the page to jump to that spot in the code' : undefined}
         className={`relative flex-1 overflow-auto p-6 ${locked ? 'cursor-text' : onRevealSource ? 'cursor-pointer' : ''}`}
         style={{ contain: 'layout paint' }}
@@ -631,6 +936,19 @@ export const TypstPreview = memo(function TypstPreview({
           shadowRoot,
         )}
       </div>
+      {selection && (
+        <PreviewSelectionBar
+          anchor={selection.anchor}
+          bounds={{ w: wrapRef.current?.clientWidth ?? 0, h: wrapRef.current?.clientHeight ?? 0 }}
+          approximate={!!selection.range?.approximate}
+          canSource={!!selection.range}
+          canSelect={!locked && !!onSelectInCode && !!selection.range}
+          copied={copied}
+          onCopy={() => void copy('text')}
+          onCopySource={() => void copy('source')}
+          onSelect={selectInCode}
+        />
+      )}
     </div>
   );
 });

@@ -27,6 +27,18 @@ export interface TypstEditorHandle {
   insert(text: string): boolean;
   /** Replace the whole document as a minimal change. */
   setContent(next: string, echo: boolean): boolean;
+  /**
+   * Show (or, with null, clear) the transient "preview selection" mark. Never
+   * touches the caret, the selection or focus.
+   */
+  highlight(range: PreviewHighlight | null): void;
+}
+
+/** The passage a highlight in the preview maps to; approximate ones are drawn dashed. */
+export interface PreviewHighlight {
+  from: number;
+  to: number;
+  approximate: boolean;
 }
 
 let handle: TypstEditorHandle | null = null;
@@ -57,6 +69,14 @@ let pendingDocKey: string | null = null;
 let currentDocKey: string | null = null;
 
 /**
+ * The preview highlight currently showing, replayed onto an editor that mounts
+ * while it is still up (the pane was closed when the selection was made and
+ * has been opened since). A highlight requested with the pane hidden never
+ * opens it; it just waits here.
+ */
+let lastHighlight: PreviewHighlight | null = null;
+
+/**
  * Announce the document the pane is showing. Switching files invalidates any
  * reveal still waiting for an editor: its offsets belong to the old text.
  */
@@ -65,6 +85,7 @@ export function setTypstDocKey(key: string): void {
   currentDocKey = key;
   pendingReveal = null;
   pendingDocKey = null;
+  lastHighlight = null;
 }
 
 /**
@@ -78,6 +99,7 @@ export function setTypstEditorHandle(next: TypstEditorHandle | null): void {
   if (next && pendingReveal && pendingDocKey === currentDocKey) {
     next.reveal(pendingReveal.from, pendingReveal.to, pendingReveal.focus);
   }
+  if (next && lastHighlight) next.highlight(lastHighlight);
 }
 
 /**
@@ -111,6 +133,21 @@ export function revealTypstRange(from: number, to: number, focus = true): boolea
   pendingDocKey = currentDocKey;
   if (!handle) return false;
   handle.reveal(from, to, focus);
+  return true;
+}
+
+/**
+ * Mark `range` in the editor as "what the preview selection came from", or
+ * clear the mark with null. A mark, not a selection: the caret, the editor's
+ * selection and focus stay exactly where they were, so the operator can keep
+ * working (and copying) in the preview. Scrolls the range into view when it is
+ * off screen. Returns false when no editor is mounted: a passive highlight
+ * does not open the pane.
+ */
+export function showTypstPreviewHighlight(range: PreviewHighlight | null): boolean {
+  lastHighlight = range;
+  if (!handle) return false;
+  handle.highlight(range);
   return true;
 }
 

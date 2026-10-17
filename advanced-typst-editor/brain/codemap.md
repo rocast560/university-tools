@@ -67,7 +67,7 @@ Pure logic; most files have a test of the same name.
 | [typst-compiler.ts](../src/lib/typst-compiler.ts), [.worker.ts](../src/lib/typst-compiler.worker.ts), [.driver.ts](../src/lib/typst-compiler.driver.ts), [-types.ts](../src/lib/typst-compiler-types.ts) | browser compile client, worker, wasm driver, shared types | `typst-compiler-client.test.ts` |
 | [typst-default-fonts.ts](../src/lib/typst-default-fonts.ts) | the 17 default font file names | `fonts-manifest.test.ts` |
 | [typst-pages.ts](../src/lib/typst-pages.ts) | split the SVG per page; shared style and defs reconcile | `typst-pages.test.ts`, `typst-shared-defs.test.ts` |
-| [typst-source-map.ts](../src/lib/typst-source-map.ts) | preview click to source range: source projection, windowed alignment, then the old text search as fallback | `typst-source-map.test.ts`, `typst-source-align.test.ts`, `typst-source-map-corpus.test.ts` |
+| [typst-source-map.ts](../src/lib/typst-source-map.ts) | preview click to source range and selection to source range (`rangeFromSelection`): source projection, windowed alignment, then the old text search as fallback | `typst-source-map.test.ts`, `typst-source-align.test.ts`, `typst-source-map-corpus.test.ts`, `typst-source-selection.test.ts` |
 | [typst-placeholders.ts](../src/lib/typst-placeholders.ts) | figure slots: find, add, set path and height, retarget asset paths | `typst-placeholders.test.ts` |
 | [typst-assets.ts](../src/lib/typst-assets.ts) | upload, fetch, crop, blur, mount into the compiler | `typst-assets.test.ts` |
 | [typst-mount.ts](../src/lib/typst-mount.ts) | which files a document sees; plain-file byte cache | `typst-mount.test.ts` |
@@ -89,9 +89,10 @@ Other: [api/client.ts](../src/api/client.ts) (REST client, sends `x-client-id`; 
 | File | Job | Test |
 |---|---|---|
 | [typst/TypstView.tsx](../src/components/typst/TypstView.tsx) | the tab: panes, file picker, export, asset sync | none direct |
-| [typst/TypstPreview.tsx](../src/components/typst/TypstPreview.tsx) | debounced compile, per-page cards, click to source | `typst-preview-pages.test.tsx` |
+| [typst/TypstPreview.tsx](../src/components/typst/TypstPreview.tsx) | debounced compile, per-page cards, click to source, selection mapping and bar | `typst-preview-pages.test.tsx`, `typst-preview-selection.test.tsx` |
+| [typst/PreviewSelectionBar.tsx](../src/components/typst/PreviewSelectionBar.tsx) | the Copy / Copy Typst source / Select in code bar next to a preview highlight | `typst-preview-selection.test.tsx` |
 | [typst/TypstEditor.tsx](../src/components/typst/TypstEditor.tsx) | CodeMirror (only importer of it) | `editor-echo.test.tsx`, `editor-reveal.test.tsx` |
-| [typst/typst-editor-bridge.ts](../src/components/typst/typst-editor-bridge.ts) | command interface to the editor | `typst-editor-bridge.test.ts` |
+| [typst/typst-editor-bridge.ts](../src/components/typst/typst-editor-bridge.ts) | command interface to the editor (reveal, insert, preview highlight) | `typst-editor-bridge.test.ts`, `editor-reveal.test.tsx` |
 | [typst/TypstAssetsPanel.tsx](../src/components/typst/TypstAssetsPanel.tsx) | assets rail: tree, drag, fonts | none direct |
 | [typst/PlaceScreenshotDialog.tsx](../src/components/typst/PlaceScreenshotDialog.tsx), [FigureViewport.tsx](../src/components/typst/FigureViewport.tsx) | crop, blur and place into a slot | `place-dialog-defaults.test.tsx` |
 | [typst/TypstSearchPanel.tsx](../src/components/typst/TypstSearchPanel.tsx), [DiskChangeBar.tsx](../src/components/typst/DiskChangeBar.tsx) | search and replace; disk-change notice | none direct |

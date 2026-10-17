@@ -126,6 +126,23 @@ Caveats: the thresholds were tuned against this same corpus, so treat 99% as an 
 
 Cost, on the 8-page, 724-run, 7.9K-character multi-page fixture: median 0.4 ms, p95 1.5 ms, max 2.8 ms per click once the projection exists (budget: under 5 ms, asserted under 25). The projection plus gram index is built once per source text on the first click (about 15 ms for 79K characters). A stress copy ten times larger, whose ten copies are identical so every click widens its window, takes a median of 4.5 ms and a worst case of about 37 ms.
 
+## Phase 2 results
+
+Measured 2026-10-17 by `src/test/typst-source-selection.test.ts` on the same synthetic fixtures. 52 hand-labelled selections (labels in `<fixture>.selections.json`, written before the mapper ran and not changed to fit it): within one run, across runs, across list items, across an equation, across table rows, across page breaks, over a variable, over generated text, a heading counter, a footnote, a backwards drag. A hit on lines means the range lies on the labelled line(s); exact means `source.slice(from, to)` equals the labelled source text (given for the 40 selections whose text is literal).
+
+| fixture | selections | on the right lines | exact source text | flagged approximate (where generated) | not flagged (where literal) |
+|---|---|---|---|---|---|
+| helpers-vars | 11 | 11 (100%) | 7 of 7 | 5 of 5 | 6 of 6 |
+| lab-report | 16 | 16 (100%) | 13 of 13 | 2 of 2 | 14 of 14 |
+| long-report | 2 | 2 (100%) | 1 of 1 | n/a | 2 of 2 |
+| pentest-report | 11 | 11 (100%) | 9 of 9 | 1 of 1 | 10 of 10 |
+| prose-quotes | 12 | 12 (100%) | 10 of 10 | 2 of 2 | 10 of 10 |
+| **overall** | **52** | **52 (100%)** | **40 of 40** | **10 of 10** | **42 of 42** |
+
+Caveats: 100% is an upper bound for the same reason as phase 1 (the mapper was built and tuned while reading these fixtures, and the labels are mine), so spot-check on real documents. The approximate cases are the ones that cannot be exact by construction: an end inside variable, `#lorem` or helper output (the whole generated passage is used), a header or footer from `#set`, a generated heading counter (the heading text is used), and a selection into a footnote body (it renders at the foot of the page but sits mid-paragraph in the source, so the span inverts and the shorter end's run is returned).
+
+Cost on the largest fixture (the 1792-run contents report, 8.3K source characters, 172 two-run selections, warm): median 3.2 ms, p95 8.1 ms, max 13.6 ms per selection, which is two click-sized alignments (a click is a 1.1 ms median there). The test asserts p95 under 25 ms. The projection is shared with click mapping and built once per source text.
+
 ## Phased plan
 
 **Phase 1: context-aware alignment (about 1-2 days).**

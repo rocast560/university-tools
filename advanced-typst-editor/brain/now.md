@@ -28,6 +28,8 @@ Verified by the lead at the end: `bun run test:ui` 459 passed (48 files), `bun r
 | **Ember theme** (dark, coral, Bahnschrift, 4px radius, floating panes) | `src/index.css`, `src/App.tsx`, `TypstView.tsx`, `src/lib/pane-resize.ts` (`PANE_GAP = 8`), D23 | dev UI; divider resize works |
 | **Sidebar logos + nested documents** (icon/colour/uploaded logo for folders and documents; documents nest under documents, sidebar only) | spec `docs/superpowers/specs/2026-10-17-sidebar-logos-and-nesting-design.md`, `server/logos.ts`, `src/lib/workspace-nesting.ts`, `src/lib/logo.ts`, D24, D25 | throwaway server on 8091 with an empty data dir: nest, logo, icon, parent delete re-parents; data guard SAFE WITH NOTES (fold fix applied) |
 | **Research** | `docs/research/2026-10-17-preview-source-mapping.md`, `docs/research/2026-10-17-ui-themes.md` | n/a |
+| **Click-to-source, phase 1** (context-aware alignment; corpus 86.7% -> 98.7%) | `src/lib/typst-source-map.ts`, `TypstPreview.tsx`, `TypstEditor.tsx` (`settleReveal`), fixtures in `src/test/fixtures/source-map/`, D27 | real 23-page report: TOC clicks 4.2/7.2/6.1/2.1/8 land on their headings, on screen |
+| **Selection-to-source, phase 2** (highlight in the preview -> transient editor mark + bar: Copy, Copy Typst source, Select in code; locked = copy buttons only) | `rangeFromSelection` in `typst-source-map.ts`, `PreviewSelectionBar.tsx`, `typst-editor-bridge.ts` `showTypstPreviewHighlight`, D28 | real report: mark, copy source, select in code, locked mode, narrow-pane bar |
 
 Theme picker artifact: https://claude.ai/artifact/USQrvguth7bWyqGrdy5KeU (picks in its db at `picks/current`; the applied pick is Ember, dark, radius 4, surface shadows).
 
@@ -37,8 +39,8 @@ Theme picker artifact: https://claude.ai/artifact/USQrvguth7bWyqGrdy5KeU (picks 
 
 ## Next steps
 
-1. **Answer the open questions**: JetBrains Mono bundle, logos/settings in backups, a trash restore button, the brain hook ([open questions](open-questions.md)).
-2. **Preview-to-source mapping, phase 1** is built (uncommitted, 2026-10-17: `typst-source-map.ts`, `TypstPreview.tsx`, `TypstView.tsx`, fixtures, tests); next is a browser check on real documents, then phase 2 (selection to range) when the user wants it.
+1. **Answer the open questions**: the brain hook, pruning old trash ([open questions](open-questions.md)). JetBrains Mono, logos/settings in backups and the trash restore button are done.
+2. **Mapping, phase 3** (exact spans from a custom wasm) only if real use shows phases 1-2 miss too often; see the research doc. Known approximate cases: math, page counters, footnote markers, helper/`#include` output.
 
 ## Watch-outs
 

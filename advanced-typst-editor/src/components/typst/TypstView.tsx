@@ -15,7 +15,7 @@ import { useAppStore } from '@/stores';
 import { isLocked } from '@/lib/preview-lock';
 import { useWorkspaceFile } from '@/hooks/use-workspace-file';
 import {
-  revealTypstRange, getTypstCaret, setTypstSearchRequest, setTypstEditorContent, setTypstDocKey,
+  revealTypstRange, getTypstCaret, setTypstSearchRequest, setTypstEditorContent, setTypstDocKey, showTypstPreviewHighlight,
 } from './typst-editor-bridge';
 import { DiskChangeBar } from './DiskChangeBar';
 import { TypstPreview } from './TypstPreview';
@@ -254,6 +254,13 @@ function TypstWorkspaceView({ workspaceId }: { workspaceId: string }) {
     if (hit) revealRange(hit.from, hit.to);
     return hit;
   }, [revealRange]);
+
+  // Selection-to-source: "Select in code" in the preview's selection bar makes the mapped range the
+  // editor's real selection (opening the code pane, like a click does). The bar never offers it
+  // while the preview is locked. The passive mark in the editor (showTypstPreviewHighlight, passed
+  // straight to the preview) opens nothing and moves neither caret nor focus, so it also shows
+  // while locked, whenever the code pane is already open.
+  const selectInCode = useCallback((r: SourceRange) => revealRange(r.from, r.to), [revealRange]);
 
   // Assets panel: full-tab mode, and click-to-reveal from the preview
   // (clicking a rendered figure selects + flashes its asset card).
@@ -581,7 +588,7 @@ function TypstWorkspaceView({ workspaceId }: { workspaceId: string }) {
         )}
 
         <div className="pane-card min-w-0 flex-1" style={{ contain: 'layout paint' }}>
-          <TypstPreview locked={locked} source={source} revision={assetRevision} mainPath={`/${file}`} docKey={docKey} ready={!loading && assetsReady} onRevealSource={revealSource} onRevealImage={revealImage} />
+          <TypstPreview locked={locked} source={source} revision={assetRevision} mainPath={`/${file}`} docKey={docKey} ready={!loading && assetsReady} onRevealSource={revealSource} onRevealImage={revealImage} onSelectionRange={showTypstPreviewHighlight} onSelectInCode={selectInCode} />
         </div>
 
         {showAssets && !assetsMax && (

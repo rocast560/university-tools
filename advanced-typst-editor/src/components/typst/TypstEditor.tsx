@@ -13,9 +13,9 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 import { useEffect, useRef, memo } from 'react';
-import { Annotation, EditorState, Transaction } from '@codemirror/state';
+import { Annotation, EditorState, StateEffect, StateField, Transaction, type Extension } from '@codemirror/state';
 import {
-  EditorView, lineNumbers, highlightActiveLine, highlightActiveLineGutter,
+  EditorView, Decoration, type DecorationSet, lineNumbers, highlightActiveLine, highlightActiveLineGutter,
   drawSelection, keymap,
 } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
@@ -25,6 +25,7 @@ import {
   clearTypstEditorHandle,
   requestTypstSearch,
   setTypstEditorHandle,
+  type PreviewHighlight,
   type TypstEditorHandle,
 } from './typst-editor-bridge';
 
@@ -118,6 +119,17 @@ const editorTheme = EditorView.theme(
       backgroundColor: 'hsl(var(--primary) / 0.55)',
     },
     '.cm-selectionMatch': { backgroundColor: 'hsl(var(--foreground) / 0.12)' },
+    // The passage a highlight in the preview maps to: an accent tint with an outline, so it reads
+    // as different from the editor's own selection. Approximate matches are dashed.
+    '.cm-previewSelection': {
+      backgroundColor: 'hsl(var(--primary) / 0.18)',
+      outline: '1px solid hsl(var(--primary) / 0.7)',
+      borderRadius: '2px',
+    },
+    '.cm-previewSelection.cm-previewSelection-approx': {
+      backgroundColor: 'hsl(var(--primary) / 0.1)',
+      outlineStyle: 'dashed',
+    },
   },
   { dark: true },
 );
@@ -138,7 +150,62 @@ function revealIn(view: EditorView, from: number, to: number, focus: boolean): v
     effects: EditorView.scrollIntoView(anchor, { y: 'center' }),
   });
   if (focus) view.focus();
-  settleReveal(view, anchor, 0);
+  settleReveal(view, anchor, 0, () => view.state.selection.main.anchor === anchor);
+}
+
+/**
+ * The transient "preview selection" mark: where a highlight in the rendered
+ * preview comes from in the source. A decoration, not a selection, so showing
+ * or clearing it never touches the caret, the editor's selection or focus.
+ * The range maps through edits, so a mark that is still up while the operator
+ * types stays on its passage.
+ */
+const setPreviewMark = StateEffect.define<PreviewHighlight | null>();
+
+interface PreviewMark { range: PreviewHighlight | null; deco: DecorationSet }
+
+const previewMarkField: StateField<PreviewMark> = StateField.define<PreviewMark>({
+  create: () => ({ range: null, deco: Decoration.none }),
+  update(value, tr) {
+    let range = value.range;
+    let changed = false;
+    if (range && tr.docChanged) {
+      const from = tr.changes.mapPos(range.from, 1);
+      const to = tr.changes.mapPos(range.to, -1);
+      range = to > from ? { ...range, from, to } : null;
+      changed = true;
+    }
+    for (const effect of tr.effects) if (effect.is(setPreviewMark)) { range = effect.value; changed = true; }
+    if (!changed) return value;
+    if (!range) return { range: null, deco: Decoration.none };
+    const cls = range.approximate ? 'cm-previewSelection cm-previewSelection-approx' : 'cm-previewSelection';
+    return { range, deco: Decoration.set([Decoration.mark({ class: cls }).range(range.from, range.to)]) };
+  },
+  provide: (f): Extension => EditorView.decorations.from(f, (v) => v.deco),
+});
+
+/**
+ * Show (or clear) the preview-selection mark, scrolling it into view only when
+ * it is off screen. Focus, caret and selection are left alone on purpose:
+ * focus stays in the preview, so Ctrl+C there still copies the preview's text.
+ * The scroll gets the same settle-after-render correction as a reveal.
+ */
+function highlightIn(view: EditorView, range: PreviewHighlight | null): void {
+  if (!range) {
+    if (view.state.field(previewMarkField).range) view.dispatch({ effects: setPreviewMark.of(null) });
+    return;
+  }
+  const max = view.state.doc.length;
+  const from = Math.min(Math.max(range.from, 0), max);
+  const to = Math.min(Math.max(range.to, 0), max);
+  if (to <= from) return;
+  const at = view.coordsAtPos(from);
+  const box = view.scrollDOM.getBoundingClientRect();
+  const visible = !!at && at.bottom >= box.top && at.top <= box.bottom;
+  const effects: Array<StateEffect<unknown>> = [setPreviewMark.of({ from, to, approximate: range.approximate })];
+  if (!visible) effects.push(EditorView.scrollIntoView(from, { y: 'center' }));
+  view.dispatch({ effects });
+  settleReveal(view, from, 0, () => view.state.field(previewMarkField).range?.from === from);
 }
 
 /**
@@ -155,18 +222,18 @@ function revealIn(view: EditorView, from: number, to: number, focus: boolean): v
  * the same estimate that caused the miss, judged the target visible and never
  * corrected: in the real app every jump after the first stayed off screen.
  */
-function settleReveal(view: EditorView, anchor: number, pass: number): void {
+function settleReveal(view: EditorView, anchor: number, pass: number, wanted: () => boolean): void {
   if (pass >= 2) return;
   requestAnimationFrame(() => requestAnimationFrame(() => {
     // The user moved the caret (or another reveal ran) in the meantime: leave it alone.
-    if (view.state.selection.main.anchor !== anchor) return;
+    if (!wanted()) return;
     const at = view.coordsAtPos(anchor);
     const box = view.scrollDOM.getBoundingClientRect();
     // No coordinates means the line is not even laid out: certainly off screen.
     const off = !at || at.bottom < box.top || at.top > box.bottom;
     if (!off) return;
     view.dispatch({ effects: EditorView.scrollIntoView(anchor, { y: 'center' }) });
-    settleReveal(view, anchor, pass + 1);
+    settleReveal(view, anchor, pass + 1, wanted);
   }));
 }
 
@@ -237,7 +304,7 @@ export const TypstEditor = memo(function TypstEditor({ value, onChange, docKey }
         doc: value,
         extensions: [
           lineNumbers(), highlightActiveLineGutter(), highlightActiveLine(), drawSelection(), EditorView.lineWrapping, EditorState.tabSize.of(2),
-          history(), typstLanguage(), typstHighlightExtension, editorTheme, highlightSelectionMatches(),
+          history(), typstLanguage(), typstHighlightExtension, editorTheme, highlightSelectionMatches(), previewMarkField,
           keymap.of([
             { key: 'Mod-f', preventDefault: true, run: () => { requestTypstSearch(); return true; } },
             ...historyKeymap, ...defaultKeymap, indentWithTab,
@@ -259,6 +326,7 @@ export const TypstEditor = memo(function TypstEditor({ value, onChange, docKey }
       caret: () => view.state.selection.main.head,
       insert: (text) => insertIn(view, text),
       setContent: (next, echo) => setContentIn(view, next, echo),
+      highlight: (range) => highlightIn(view, range),
     };
     setTypstEditorHandle(handle);
     return () => {

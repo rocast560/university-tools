@@ -930,6 +930,13 @@ interface Segment {
   a: number;
   b: number;
   text: string;
+  /**
+   * For each window character of the run (`a + k`), the UTF-16 offset in
+   * `text` it was folded from. Folding drops and merges characters (soft
+   * hyphens, doubled spaces), so a selection's character offset in the run
+   * needs this to find its window character.
+   */
+  src: number[];
 }
 
 interface Window {
@@ -998,14 +1005,19 @@ function buildWindow(target: ClickTarget, budget: { runs: number; chars: number 
   const add = (text: string, rel: number, weight: number, glued: boolean) => {
     if (!glued && q.length > 0 && q[q.length - 1] !== 32) { q.push(32); w.push(1); }
     const a = q.length;
+    const src: number[] = [];
+    let pos = 0;
     for (const cp of text) {
+      const at = pos;
+      pos += cp.length;
       const f = foldChar(cp);
       if (f === '') continue;
       if (f === ' ' && (q.length === 0 || q[q.length - 1] === 32)) continue;
       q.push(f.charCodeAt(0));
       w.push(weight);
+      src.push(at);
     }
-    segs.push({ rel, a, b: q.length, text });
+    segs.push({ rel, a, b: q.length, text, src });
   };
   for (const r of before) add(r.text, r.rel, 1, r.joined);
   add(clicked, 0, 2, clickedJoined);
@@ -1379,6 +1391,29 @@ function designRange(proj: SourceProjection, r: SourceRange, target: ClickTarget
  * enough: the caller falls back to the text search.
  */
 export function resolveClick(source: string, target: ClickTarget, hint: SourceHint | null = null): SourceRange | null {
+  return resolveRun(source, target, hint)?.range ?? null;
+}
+
+/**
+ * How a run's own characters aligned, kept so a selection can ask where *inside*
+ * the run it starts or ends. Present only when the run itself (not a
+ * neighbour, not the design layer) matched the body text.
+ */
+interface RunChars {
+  proj: SourceProjection;
+  aln: Alignment;
+  seg: Segment;
+  /** The source span the run's trusted characters cover (before trimming): characters outside it are stray matches. */
+  bound: SourceRange;
+}
+
+interface RunResolution {
+  range: SourceRange;
+  chars: RunChars | null;
+}
+
+/** `resolveClick`, plus the alignment of the run's characters when it has one. */
+function resolveRun(source: string, target: ClickTarget, hint: SourceHint | null): RunResolution | null {
   const clickedText = target.runsOf(target.page)[target.run];
   if (clickedText === undefined) return null;
   const proj = projectSource(source);
@@ -1407,7 +1442,9 @@ export function resolveClick(source: string, target: ClickTarget, hint: SourceHi
     if (!seg) continue;
     if (result) {
       const hit = segmentRange(proj, win, result.best, seg);
-      if (hit) return trimRange(source, hit);
+      if (hit) {
+        return { range: trimRange(source, hit), chars: rel === 0 ? { proj, aln: result.best, seg, bound: hit } : null };
+      }
     }
     // Not in the body: perhaps in a header, a footer, or a helper's definition.
     const text = foldKey(seg.text);
@@ -1417,7 +1454,7 @@ export function resolveClick(source: string, target: ClickTarget, hint: SourceHi
     const found = alignWindow(proj.design, alone, 0);
     if (!found) continue;
     const range = segmentRange(proj.design, alone, found.best, alone.segs[0]!);
-    if (range) return designRange(proj, trimRange(source, range), target, seg.text);
+    if (range) return { range: designRange(proj, trimRange(source, range), target, seg.text), chars: null };
   }
   return null;
 }
@@ -1432,7 +1469,7 @@ function soloWindow(text: string): Window | null {
   }
   while (q.length > 0 && q[q.length - 1] === 32) q.pop();
   if (q.length < GRAM) return null;
-  return { q: Uint16Array.from(q), w: new Uint8Array(q.length).fill(2), segs: [{ rel: 0, a: 0, b: q.length, text }] };
+  return { q: Uint16Array.from(q), w: new Uint8Array(q.length).fill(2), segs: [{ rel: 0, a: 0, b: q.length, text, src: [] }] };
 }
 
 /**
@@ -1442,4 +1479,155 @@ function soloWindow(text: string): Window | null {
  */
 export function resolveSourceClick(source: string, click: SourceClick): SourceRange | null {
   return resolveClick(source, click.target, click.hint) ?? findByCandidates(source, click.candidates());
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// Phase 2: a highlighted selection to a source range
+// ═════════════════════════════════════════════════════════════════════════
+
+/** One end of a selection: a run, and a character offset (UTF-16) inside that run's text. */
+export interface SelectionEnd {
+  target: ClickTarget;
+  offset: number;
+}
+
+export interface SelectionRange extends SourceRange {
+  /**
+   * True when the range could not be pinned to characters at both ends: an end
+   * sits in generated text (a variable, a helper's output), in a header or
+   * footer, or was matched only as a whole run, or a sanity check rejected the
+   * first answer. The caller says so rather than presenting it as exact.
+   */
+  approximate: boolean;
+}
+
+/**
+ * The source position of character offset `offset` of a run, between its
+ * characters: `start` takes the character at or after the offset (a selection
+ * begins at it), `end` the character before it (a selection finishes after
+ * it), each falling back to the nearest aligned character on the other side.
+ * Null when no character of the run aligned to the source.
+ *
+ * Only characters inside the run's trusted span count (see `RunChars.bound`),
+ * so one stray coincidental match cannot drag an end across the document. The
+ * aligner's own per-character offsets do the work: this is a read of the
+ * traceback `resolveClick` already computed, not a second alignment.
+ */
+function charPosition(c: RunChars, offset: number, side: 'start' | 'end'): { pos: number; wild: boolean } | null {
+  const { proj, aln, seg, bound } = c;
+  const n = seg.src.length;
+  const usable = (k: number): number => {
+    const kind = aln.kind[seg.a + k]!;
+    if (kind !== 1 && kind !== 3) return -1;
+    const t = aln.qT[seg.a + k]!;
+    return t >= 0 && proj.from[t]! >= bound.from && proj.to[t]! <= bound.to ? t : -1;
+  };
+  // First window character at or after the offset.
+  let i = 0;
+  while (i < n && seg.src[i]! < offset) i++;
+  const after = (): { pos: number; wild: boolean } | null => {
+    for (let k = i; k < n; k++) { const t = usable(k); if (t !== -1) return { pos: proj.from[t]!, wild: aln.kind[seg.a + k] === 3 }; }
+    return null;
+  };
+  const before = (): { pos: number; wild: boolean } | null => {
+    for (let k = i - 1; k >= 0; k--) { const t = usable(k); if (t !== -1) return { pos: proj.to[t]!, wild: aln.kind[seg.a + k] === 3 }; }
+    return null;
+  };
+  return side === 'start' ? (after() ?? before()) : (before() ?? after());
+}
+
+/** Document order of two ends: page, then run, then offset. */
+function compareEnds(a: SelectionEnd, b: SelectionEnd): number {
+  return a.target.page - b.target.page || a.target.run - b.target.run || a.offset - b.offset;
+}
+
+/** Characters the selection covers in the rendered runs, each run boundary counting one (the space between lines). */
+function selectedLength(s: SelectionEnd, e: SelectionEnd): number {
+  const sp = s.target.page, ep = e.target.page;
+  if (sp === ep && s.target.run === e.target.run) return Math.max(0, e.offset - s.offset);
+  let n = 0;
+  for (let p = sp; p <= ep; p++) {
+    const runs = s.target.runsOf(p);
+    const first = p === sp ? s.target.run : 0;
+    const last = p === ep ? e.target.run : runs.length - 1;
+    for (let r = first; r <= last; r++) {
+      const len = runs[r]?.length ?? 0;
+      const from = p === sp && r === s.target.run ? Math.min(s.offset, len) : 0;
+      const to = p === ep && r === e.target.run ? Math.min(e.offset, len) : len;
+      n += Math.max(0, to - from) + 1;
+    }
+  }
+  return n;
+}
+
+/**
+ * Where does a highlighted span of the preview come from in the source?
+ *
+ * Each end is placed with the click aligner (`resolveRun`: its own context
+ * window, the hint as a position prior) and then read down to the character:
+ * the aligned projection characters already carry their source offsets. An end
+ * that cannot be placed that precisely (generated text, a header, a run that
+ * did not align) uses its whole run, the start of the start run or the end of
+ * the end run, and the result is flagged approximate.
+ *
+ * Sanity checks, so a bad match never becomes a surprising selection:
+ *  - the ends are put in document order first (a backwards drag), and a result
+ *    that still comes out reversed (a footnote renders far from where it is
+ *    written) is swapped only inside one run; across runs it falls back to the
+ *    shorter end's run and is approximate;
+ *  - a source span longer than 3x the rendered selection plus 200 characters is
+ *    approximate and falls back the same way. It is never returned as is.
+ *
+ * Null when the selection is empty or neither end aligns to the source.
+ */
+export function rangeFromSelection(
+  source: string,
+  a: SelectionEnd,
+  b: SelectionEnd,
+  hint: SourceHint | null = null,
+): SelectionRange | null {
+  const [s, e] = compareEnds(a, b) <= 0 ? [a, b] : [b, a];
+  const same = s.target.page === e.target.page && s.target.run === e.target.run;
+  if (same && s.offset === e.offset) return null;
+
+  const rs = resolveRun(source, s.target, hint);
+  const re = same ? rs : resolveRun(source, e.target, rs ? { page: s.target.page, run: s.target.run, from: rs.range.from } : hint);
+  if (!rs && !re) return null;
+
+  let approximate = false;
+  const place = (res: RunResolution | null, end: SelectionEnd, side: 'start' | 'end'): number | null => {
+    if (res?.chars) {
+      const hit = charPosition(res.chars, end.offset, side);
+      if (hit) { if (hit.wild) approximate = true; return hit.pos; }
+    }
+    approximate = true;
+    return null;
+  };
+  const fromChar = place(rs, s, 'start');
+  const toChar = place(re, e, 'end');
+  let from = fromChar ?? rs?.range.from ?? re!.range.from;
+  let to = toChar ?? re?.range.to ?? rs!.range.to;
+  // Any run-level answer is one the user should treat as a guess about its extent.
+  if (rs && !rs.chars) approximate = true;
+  if (re && !re.chars) approximate = true;
+
+  /** The shorter of the two ends' own run ranges: the safest thing to say when the span itself is not trusted. */
+  const shorterRun = (): SourceRange => {
+    const cands = [rs?.range, re?.range].filter((r): r is SourceRange => !!r);
+    return cands.reduce((x, y) => (y.to - y.from < x.to - x.from ? y : x));
+  };
+
+  if (to < from) {
+    if (same) { [from, to] = [to, from]; }
+    else { approximate = true; ({ from, to } = shorterRun()); }
+  }
+  const limit = 3 * selectedLength(s, e) + 200;
+  if (to - from > limit) {
+    approximate = true;
+    ({ from, to } = shorterRun());
+    if (to - from > limit) to = from + limit;
+  }
+
+  const r = trimRange(source, { from, to });
+  return r.to > r.from ? { ...r, approximate } : null;
 }

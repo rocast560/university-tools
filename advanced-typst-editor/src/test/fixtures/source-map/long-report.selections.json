@@ -1,0 +1,4 @@
+[
+{"s":[2,32,"Anyone on the"],"e":[2,33,"inventory record."],"line":69,"src":"Anyone on the staff network can sign in and read every host inventory record.","why":"across a wrapped paragraph"},
+{"s":[2,34,"Recommendation:"],"e":[3,1,"exposes backups"],"line":[71,75],"why":"across a page break, past a soft hyphen and a generated figure"}
+]

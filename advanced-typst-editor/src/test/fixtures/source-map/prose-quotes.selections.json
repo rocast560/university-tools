@@ -1,0 +1,14 @@
+[
+{"s":[0,1,"it’s “ready” – but"],"e":[0,1,"it’s “ready” – but"],"line":9,"src":"it's \"ready\" -- but","why":"quotes and a dash"},
+{"s":[0,1,"Nobody argued"],"e":[0,2,"“go” decision"],"line":9,"src":"Nobody argued with the \"go\" decision","why":"across two runs with quotes"},
+{"s":[0,3,"10–20 ms is typical, and the worst case—a cold cache—took"],"e":[0,3,"10–20 ms is typical, and the worst case—a cold cache—took"],"line":11,"src":"10--20 ms is typical, and the worst case---a cold cache---took","why":"en and em dashes"},
+{"s":[0,4,"Wait for it…"],"e":[0,4,"Wait for it…"],"line":11,"src":"Wait for it...","why":"ellipsis"},
+{"s":[0,6,"We "],"e":[0,9,"public interface"],"line":15,"src":"We *replaced the parser* and kept the _public interface","why":"across strong and emphasis"},
+{"s":[0,11,"normalize()"],"e":[0,12," call now runs once"],"line":15,"src":"normalize()` call now runs once","why":"across raw text"},
+{"s":[0,13,"The release notes live at"],"e":[0,14,"the project page"],"line":17,"src":"The release notes live at #link(\"https://example.test/notes\")[the project page","why":"across a link"},
+{"s":[0,17,"the price is $5"],"e":[0,17,"the price is $5"],"line":19,"src":"the price is \\$5","why":"escaped dollar"},
+{"s":[0,25,"the build shipped on Friday"],"e":[0,25,"the build shipped on Friday"],"line":27,"src":"the build shipped on Friday","why":"phrase repeated earlier in the document"},
+{"s":[0,30,"Fix the flaky"],"e":[0,32,"report query"],"line":[33,34],"src":"Fix the flaky upload test.\n+ Add an index for the report query","why":"across numbered items"},
+{"s":[0,35,"the plan will change"],"e":[0,37,"tracked in the issue board"],"line":[23,37],"approx":true,"why":"to a footnote body, which sits before its text in the source"},
+{"s":[0,35,"the plan will change"],"e":[0,37,"tracked in the issue board"],"line":[23,37],"approx":true,"swap":true,"why":"the same footnote selection dragged backwards"}
+]
