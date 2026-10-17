@@ -1,4 +1,4 @@
-import type { BackupState, CompileResult, DirListing, FolderMeta, McpStatus, RedactionDefaults, SnapshotInfo, TypstAsset, TypstAssetKind, WorkspaceDetail, WorkspaceEntry, WorkspaceStatus, AssetFolder } from '@/types';
+import type { BackupState, CompileResult, DirListing, FolderMeta, McpStatus, RedactionDefaults, SnapshotInfo, TrashEntry, TrashRestoreResult, TypstAsset, TypstAssetKind, WorkspaceDetail, WorkspaceEntry, WorkspaceStatus, AssetFolder } from '@/types';
 
 export const CLIENT_ID: string = (() => {
   try {
@@ -138,4 +138,7 @@ export const api = {
   restoreSnapshot: (destination: string, snapshot: string) => req<{ restored: number }>('POST', '/api/backup/restore', { destination, snapshot }),
   browse: (path: string) => req<DirListing>('GET', `/api/fs/browse?path=${enc(path)}`),
   mcpStatus: () => req<McpStatus>('GET', '/api/mcp/status'),
+  /** The app trash, newest first. There is deliberately no call that empties it or deletes from it. */
+  listTrash: () => req<{ items: TrashEntry[] }>('GET', '/api/trash').then((r) => r.items),
+  restoreTrash: (id: string) => req<TrashRestoreResult>('POST', `/api/trash/${enc(id)}/restore`),
 };

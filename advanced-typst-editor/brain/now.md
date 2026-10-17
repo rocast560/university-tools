@@ -10,7 +10,9 @@ description: Current state of Typst Studio work after the 2026-10-17 session (pr
 
 ## State (2026-10-17, end of session)
 
-Everything below is built, tested, browser-checked, **committed** on branch `feat/typst-studio-lock-theme-nesting` (`aaaf2fd` docs + brain, `37c5152` code; not pushed), and **live**: the `typst-studio` container was rebuilt on 2026-10-17 and serves it on http://localhost:8090 ([environment](environment.md)).
+Everything below is built, tested, browser-checked, **committed and pushed** to GitHub `main` (https://github.com/rocast560/university-tools), and **live** in the `typst-studio` container on http://localhost:8090 ([environment](environment.md)). Later additions the same day: backups carry logos + `settings.json` (`.typst-studio/` in the mirror), JetBrains Mono bundled, and restore from trash (Trash row in the sidebar footer, D26).
+
+**Publishing:** GitHub's history had been rewritten to strip "Co-Authored-By: Claude" lines, so the 121 local commits were replayed onto `origin/main` with identical trees (parents re-pointed, trailers removed) and pushed without force. Never force-push over it, and never add the co-author trailer in this repo. The pre-replay commit IDs survive locally on branch `backup/typst-pre-publish-2026-10-17`; other old local branches (`circuit-*`, `sidebar-*`) still sit on the old IDs.
 
 Rebuild check: health ok; 14 workspaces before and after; `settings.json` entries field-for-field identical, only additive changes (`groups` gained `CPTC` and `ECE-2300L`, which workspaces already referenced, and `folderMeta: {}`); `settings.json.bak` now exists. Side effect: the CPTC and ECE-2300L folders (11 documents) show in the sidebar again; the old server's groups list lacked them. Pre-rebuild registry copy kept in the lead's session scratchpad only.
 
@@ -35,9 +37,8 @@ Theme picker artifact: https://claude.ai/artifact/USQrvguth7bWyqGrdy5KeU (picks 
 
 ## Next steps
 
-1. **Push or merge the branch** when the user says so (it is local only).
-2. **Answer the open questions**: JetBrains Mono bundle, logos/settings in backups, a trash restore button, the brain hook ([open questions](open-questions.md)).
-3. **Preview-to-source mapping, phase 1** (context-aware text alignment) from the research doc, when the user wants it.
+1. **Answer the open questions**: JetBrains Mono bundle, logos/settings in backups, a trash restore button, the brain hook ([open questions](open-questions.md)).
+2. **Preview-to-source mapping, phase 1** (context-aware text alignment) from the research doc, when the user wants it.
 
 ## Watch-outs
 

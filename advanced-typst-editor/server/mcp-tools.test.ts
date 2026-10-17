@@ -26,11 +26,11 @@ function setup(): ToolDeps & { dataDir: string } {
 const call = (deps: ToolDeps, name: string, args: Record<string, unknown> = {}) => callTool(name, args, deps);
 
 describe('MCP tools', () => {
-  it('exposes exactly the 27 tools from the spec (no open_workspace_folder: every workspace lives in the app library)', () => {
+  it('exposes exactly the 29 tools from the spec (no open_workspace_folder: every workspace lives in the app library; list_trash and restore_from_trash, but nothing that empties the trash)', () => {
     expect(TOOLS.map((t) => t.name).sort()).toEqual([
       'add_font', 'add_slot', 'backup_status', 'clear_slot', 'compile', 'create_workspace', 'delete_asset', 'delete_workspace',
-      'edit_source', 'export_pdf', 'get_source', 'get_workspace', 'list_assets', 'list_slots', 'list_snapshots', 'list_workspaces',
-      'move_asset', 'move_workspace', 'place_image', 'rename_asset', 'rename_workspace', 'render_preview', 'run_backup',
+      'edit_source', 'export_pdf', 'get_source', 'get_workspace', 'list_assets', 'list_slots', 'list_snapshots', 'list_trash', 'list_workspaces',
+      'move_asset', 'move_workspace', 'place_image', 'rename_asset', 'rename_workspace', 'render_preview', 'restore_from_trash', 'run_backup',
       'set_slot_height', 'set_source', 'update_asset', 'upload_asset',
     ]);
     for (const t of TOOLS) expect(t.description.length).toBeGreaterThan(20);

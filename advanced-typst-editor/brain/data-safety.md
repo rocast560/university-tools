@@ -32,7 +32,7 @@ The user asked that nothing in this app be deleted, and that development not slo
 | Documents: `main.typ` and other files | `data/workspaces/<Name>/` | plain folders; external workspaces live anywhere and are never moved or deleted by the app |
 | Assets and fonts | `<ws>/assets/**`, `<ws>/fonts/*` | originals; crop and blur are never baked into them |
 | Crop, blur, size, font family | `<ws>/workspace.json` | atomic writes; losing it loses framing and redactions, not the images |
-| Trash | `data/trash/<stamp>/<WorkspaceName>/` | whole deleted library workspaces, and single deleted files or assets at their relative path inside it; no restore UI or API, restore is a manual move (plus a registry add for a workspace) |
+| Trash | `data/trash/<stamp>/<name>/` plus `data/trash/<stamp>/.trash.json` | whole deleted library workspaces, and single deleted files or assets at their relative path inside `<WorkspaceName>/`. The sidecar (written with `writeAtomic` by both delete paths) records kind, original path or workspace id, deleted-at and a document's registry entry; items from before it are detected by shape. Restore is the **Trash** button in the sidebar footer (`GET /api/trash`, `POST /api/trash/:id/restore`, MCP `list_trash` and `restore_from_trash`). There is no empty-trash or permanent delete anywhere |
 | Backup mirror | each destination (`/host` in Docker) | latest copy, `_trash/<stamp>/` for stale items, marker `.typst-studio-backup.json`; `.typst-studio/` holds `settings.json` and `logos/` (a changed copy goes to `_trash/<stamp>/.typst-studio/` first) |
 | Snapshots | `<dest>/snapshots/*.zip` | sha256 per file (workspaces and `.typst-studio/` registry files), newest `keepSnapshots` (30) kept |
 | Pre-restore copies | `data/pre-restore-<stamp>/` | copy of `workspaces/` made before a snapshot restore; never pruned |
@@ -40,9 +40,11 @@ The user asked that nothing in this app be deleted, and that development not slo
 
 ## How deletion works today, and the way back
 
-- **Delete a library workspace** (`service.remove`): the folder is renamed into `data/trash/<stamp>/`, then the registry entry is dropped. An external folder is only forgotten. Way back: manual move out of trash.
+- **Delete a library workspace** (`service.remove`): the folder is moved into `data/trash/<stamp>/` (`trashDocument` in `server/trash.ts`; across drives it copies first, then removes the original), a `.trash.json` record is written, then the registry entry is dropped. An external folder is only forgotten. Way back: the **Trash** button in the sidebar footer (now a button, no longer a manual move).
+- **Restore from trash** (`restoreFromTrash`, `server/trash.ts`): moves the item back out and never overwrites; a taken name becomes `<name> (restored)`, then `(restored 2)`. Across drives it copies first and removes the trash copy only after the copy succeeded; a failed copy removes only its own half-made copy. A stamp folder goes only when empty (non-recursive `rmdir`; the sidecar is dropped first only once it describes nothing). A restored document is registered again with its folder (recreated if gone), look and parent (only if that document still exists). Files go back to their workspace (found by id, else by folder name); an item whose document is gone is listed but disabled. An asset's crop, blur, size and font family are recorded in its sidecar entry and re-applied on restore (under the restored name if it had to change).
+- **No empty-trash, no permanent delete** (D26): nothing in the trash is removed except by moving it back out.
 - **Delete a sidebar folder** (`removeGroup`): members become loose; the folder's icon and colour are dropped. Documents untouched.
-- **Delete an asset or a file** (`toTrash` in `workspace.ts`): moved to `data/trash/<stamp>/<WorkspaceName>/<relative path>`. Way back: move it back by hand. If `openWorkspace` is given no `trash` option, delete throws instead of unlinking.
+- **Delete an asset or a file** (`toTrash` in `workspace.ts`): moved to `data/trash/<stamp>/<WorkspaceName>/<relative path>`, with a `.trash.json` record. Way back: the **Trash** button (restore puts it back at its path, or a "(restored)" name). If `openWorkspace` is given no `trash` option, delete throws instead of unlinking.
 - **Overwrite a source file** (`set_source`, `edit_source`, autosave, REST PUT): atomic write, no history. Way back: snapshots (hourly, only when content changed) and the mirror (latest copy only). There is no per-save undo on disk.
 - **Backup mirror**: never unlinks; stale items move to `_trash/<stamp>/`. Changed files are overwritten in place by design.
 - **Snapshot prune**: unlinks zips beyond the newest 30.
@@ -55,11 +57,11 @@ Risk: none, low, real. Line numbers are from this audit and drift.
 
 | Operation | Where | Destroys | Way back | Risk |
 |---|---|---|---|---|
-| Delete library workspace (REST, MCP `delete_workspace`) | `service.ts:247` | nothing (moved to trash) | `data/trash` (manual) | none |
+| Delete library workspace (REST, MCP `delete_workspace`) | `service.ts:247` | nothing (moved to trash) | Trash button (`POST /api/trash/:id/restore`) | none |
 | Delete external workspace | `service.ts:247` | registry entry only | re-add by path | none |
 | Rename workspace | `service.ts:172` | nothing; `uniqueDirName` avoids collision | rename back | none |
 | Delete sidebar folder | `settings.ts:262` | folder, icon, colour | none for the look | low |
-| Delete asset or font (`delete_asset`, REST) | `workspace.ts` `deleteAsset` | its crop/blur entry only; the file moves to `data/trash/<stamp>/<ws>/<path>` | trash (manual move back; crop/blur must be redone) | low (fixed 2026-10-17) |
+| Delete asset or font (`delete_asset`, REST) | `workspace.ts` `deleteAsset` | its crop/blur entry only; the file moves to `data/trash/<stamp>/<ws>/<path>` | Trash button (crop/blur restored with it) | low (fixed 2026-10-17) |
 | Delete file (REST `DELETE .../files/*`) | `workspace.ts` `deleteFile` | nothing; the file moves to the same trash path (also for `main.typ`) | trash | none (fixed 2026-10-17) |
 | Delete asset folder | `workspace.ts:372` | nothing; contents are renamed up first, then empty dir removed | none needed | none |
 | Overwrite source (`set_source`, `edit_source`, autosave) | `workspace.ts:402` | previous text | snapshot, mirror | low |

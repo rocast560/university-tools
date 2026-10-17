@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { AssetFolder, TypstAsset, TypstAssetKind, WorkspaceDetail, WorkspaceEntry, WorkspaceStatus } from '../src/types';
+import type { AssetFolder, TrashEntry, TrashRestoreResult, TypstAsset, TypstAssetKind, WorkspaceDetail, WorkspaceEntry, WorkspaceStatus } from '../src/types';
 import type { EventBus } from './events';
 import { ensureDir, isDir, safeDirName, stamp, uniqueDirName } from './fsx';
 import { HttpError } from './http';
@@ -11,6 +11,7 @@ import type { SettingsStore } from './settings';
 import type { Watcher } from './watcher';
 import { openWorkspace, type WorkspaceFs } from './workspace';
 import { createWorkspaceIndex, type WorkspaceIndex } from './workspace-index';
+import { restoreDocument, restoreFiles, scanTrash, trashDocument, type MoveOps, type TrashItem } from './trash';
 
 export interface ServiceDeps {
   settings: SettingsStore;
@@ -23,6 +24,8 @@ export interface ServiceDeps {
   now?: () => number;
   /** The folder index; one is created when not given. */
   index?: WorkspaceIndex;
+  /** The moves trash and restore make; only tests replace them (to simulate another drive). */
+  trashOps?: Partial<MoveOps>;
 }
 
 const MAX_ENTRIES = 5000;
@@ -43,6 +46,10 @@ export interface WorkspaceService {
   /** Merges icon/colour/logo into the document's row appearance; an explicit `null` clears that field. */
   setAppearance(id: string, patch: FolderMeta): WorkspaceEntry;
   remove(id: string): void;
+  /** Everything in `data/trash`, newest first. Read-only. */
+  listTrash(): TrashEntry[];
+  /** Moves one trash item back out (never overwriting) and re-registers a document. Throws 404 for an id not in the trash, 409 when a files item's document is not in the app. */
+  restoreFromTrash(id: string): TrashRestoreResult;
   listGroups(): string[];
   folderMeta(): Record<string, FolderMeta>;
   createGroup(name: string, parent: string | null): string[];
@@ -84,10 +91,11 @@ export function createWorkspaceService(deps: ServiceDeps): WorkspaceService {
     if (!e) throw new HttpError(404, `workspace not found: ${id}`);
     return e;
   };
+  const trashDir = path.join(deps.dataDir, 'trash');
   const liveFs = (id: string): WorkspaceFs => {
     const e = entry(id);
     if (!isDir(e.path)) throw new HttpError(409, `workspace folder is missing: ${e.path}`);
-    return openWorkspace(e.path, { now, trash: { dir: path.join(deps.dataDir, 'trash'), name: path.basename(e.path) } });
+    return openWorkspace(e.path, { now, trash: { dir: trashDir, name: path.basename(e.path), id } });
   };
   const status = (e: WorkspaceEntry): WorkspaceStatus => ({ ...e, status: isDir(e.path) ? 'ok' : 'missing' });
   const registryChanged = () => bus.emit({ type: 'workspaces.changed' });
@@ -123,6 +131,14 @@ export function createWorkspaceService(deps: ServiceDeps): WorkspaceService {
     for (const p of files) watcher?.markOwnWrite(id, p);
     changed(id, [...new Set(meta)], origin);
     if (files.length) bus.emit({ type: 'workspace.changed', id, paths: [...new Set(files)], origin: null });
+  };
+
+  const NO_HOME = "its document isn't in the app; restore the document first";
+  /** The live workspace a files item belongs to: the id written when it was deleted, else the one whose folder name matches. */
+  const trashHome = (item: TrashItem): WorkspaceEntry | null => {
+    const byId = item.record?.kind === 'files' && item.record.workspaceId ? settings.getWorkspace(item.record.workspaceId) : null;
+    if (byId && isDir(byId.path)) return byId;
+    return settings.listWorkspaces().find((w) => safeDirName(path.basename(w.path)) === item.name && isDir(w.path)) ?? null;
   };
 
   const register = (input: { path: string; name: string; group: string | null; library: boolean }): WorkspaceEntry => {
@@ -280,12 +296,72 @@ export function createWorkspaceService(deps: ServiceDeps): WorkspaceService {
       watcher?.unwatch(id);
       index.invalidate(e.path);
       if (e.library && isDir(e.path)) {
-        const trash = path.join(deps.dataDir, 'trash', stamp(now()));
-        ensureDir(trash);
-        fs.renameSync(e.path, path.join(trash, path.basename(e.path)));
+        trashDocument(trashDir, stamp(now()), e.path, {
+          kind: 'document',
+          name: path.basename(e.path),
+          originalPath: e.path,
+          deletedAt: now(),
+          entry: { id: e.id, name: e.name, group: e.group, ...(e.parent ? { parent: e.parent } : {}), ...(e.appearance ? { appearance: e.appearance } : {}), library: e.library },
+        }, deps.trashOps);
       }
       settings.removeWorkspace(id);
       registryChanged();
+    },
+    listTrash() {
+      return scanTrash(trashDir).map((item): TrashEntry => {
+        if (item.kind === 'document') {
+          return { id: item.id, kind: 'document', name: item.record?.kind === 'document' ? item.record.entry.name : item.name, workspace: null, deletedAt: item.deletedAt, size: item.size, fileCount: item.fileCount, canRestore: true, reason: null };
+        }
+        const home = trashHome(item);
+        return {
+          id: item.id,
+          kind: 'files',
+          name: item.files.length === 1 ? item.files[0]!.original : `${item.files.length} files`,
+          workspace: home?.name ?? item.name,
+          deletedAt: item.deletedAt,
+          size: item.size,
+          fileCount: item.fileCount,
+          canRestore: !!home,
+          reason: home ? null : NO_HOME,
+        };
+      });
+    },
+    restoreFromTrash(id) {
+      const item = scanTrash(trashDir).find((i) => i.id === id);
+      if (!item) throw new HttpError(404, 'that item is not in the trash');
+      if (item.kind === 'files') {
+        const home = trashHome(item);
+        if (!home) throw new HttpError(409, NO_HOME);
+        const moved = restoreFiles(trashDir, item, home.path, deps.trashOps);
+        // Put back the crop, blur and font family the asset had, under the name it came back with.
+        const withMeta = moved.filter((m) => m.meta);
+        if (withMeta.length) {
+          const ws = liveFs(home.id);
+          const meta = ws.readMeta();
+          for (const m of withMeta) (m.meta!.kind === 'fonts' ? meta.fonts : meta.assets)[m.to] = m.meta!.record as never;
+          ws.writeMeta(meta);
+        }
+        changed(home.id, moved.map((m) => m.to), null);
+        const renamed = moved.some((m) => m.renamed);
+        const message = moved.length === 1 && renamed
+          ? `Restored as '${moved[0]!.to}'`
+          : `Restored ${moved.length === 1 ? moved[0]!.to : `${moved.length} files`} to ${home.name}${renamed ? ` (${moved.filter((m) => m.renamed).length} under a "(restored)" name)` : ''}`;
+        return { id, kind: 'files', location: home.name, renamed, message, workspaceId: home.id };
+      }
+      const rec = item.record?.kind === 'document' ? item.record.entry : null;
+      const back = restoreDocument(trashDir, item, deps.workspacesDir, deps.trashOps);
+      const name = (rec?.name ?? back.folderName.slice(0, back.folderName.length - back.suffix.length)) + back.suffix;
+      const e = settings.findByPath(back.dir) ?? settings.addWorkspace({ path: back.dir, name, group: rec?.group ?? null, library: true });
+      if (rec?.group) settings.addGroup(rec.group);
+      if (rec?.appearance) settings.setWorkspaceAppearance(e.id, rec.appearance);
+      const parent = rec?.parent ? settings.getWorkspace(rec.parent) : null;
+      if (parent && parent.id !== e.id && !nestError(settings.listWorkspaces(), e.id, parent.id)) settings.moveWorkspace(e.id, parent.group, parent.id);
+      watcher?.watch(e.id, e.path);
+      registryChanged();
+      const final = settings.getWorkspace(e.id) ?? e;
+      const location = final.group ? `${final.group}/${final.name}` : final.name;
+      const renamed = back.suffix !== '';
+      return { id, kind: 'document', location, renamed, message: renamed ? `Restored as '${final.name}'` : `Restored to ${location}`, workspaceId: final.id };
     },
     boot() {
       ensureDir(deps.workspacesDir);

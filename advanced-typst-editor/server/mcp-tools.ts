@@ -133,6 +133,9 @@ export const TOOLS: ToolDef[] = [
     return { ok: true, page: res.page, image: { data: Buffer.from(res.png!).toString('base64'), mimeType: 'image/png' } };
   } },
 
+  { name: 'list_trash', description: 'List what is in the app trash (data/trash), newest first: deleted documents and deleted files or assets. Each item has an id, kind (document or files), name, the document its files came from, when it was deleted, size, file count, and canRestore (with a reason when false). Read-only.', schema: {}, run: (_a, d) => d.service.listTrash() },
+  { name: 'restore_from_trash', description: 'Move one trash item back out, using an id from list_trash. A document is moved back to its original folder and registered again with its sidebar folder, look and parent. Files go back to their original paths in their document. Nothing is overwritten: if the original name is taken, the item comes back as "<name> (restored)". There is no tool to empty the trash or delete from it.', schema: { id: z.string().describe('Item id from list_trash.') }, run: (a, d) => d.service.restoreFromTrash(a.id as string) },
+
   { name: 'backup_status', description: 'Backup destinations, snapshot interval and retention, and how the last run went.', schema: {}, run: (_a, d) => d.backup.state() },
   { name: 'run_backup', description: 'Mirror and snapshot to every destination now.', schema: {}, run: (_a, d) => d.backup.run() },
   { name: 'list_snapshots', description: 'Snapshots in one destination, newest first.', schema: { destination_id: z.string() }, run: (a, d) => d.backup.listSnapshots(a.destination_id as string) },

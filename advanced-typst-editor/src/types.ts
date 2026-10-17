@@ -127,3 +127,33 @@ export type ServerEvent =
   | { type: 'workspaces.changed' }
   | { type: 'backup.state'; state: BackupState }
   | { type: 'mcp.clients'; clients: McpClientStatus[] };
+
+/** One thing in the app trash (`data/trash`), as `GET /api/trash` lists it. */
+export interface TrashEntry {
+  /** `<stamp>/<item name>`; stable, and only ever looked up in the listing, never used as a path. */
+  id: string;
+  kind: 'document' | 'files';
+  /** A document's name, or the file's path (or "N files") for deleted files. */
+  name: string;
+  /** For files: the document they were deleted from (its name in the app, else its folder name). */
+  workspace: string | null;
+  deletedAt: number;
+  size: number;
+  fileCount: number;
+  canRestore: boolean;
+  /** Why `canRestore` is false. */
+  reason: string | null;
+}
+
+export interface TrashRestoreResult {
+  id: string;
+  kind: 'document' | 'files';
+  /** Where it went: a document's sidebar path ("School/Lab 4"), or the document the files went back into. */
+  location: string;
+  /** True when the original name was taken and a "(restored)" name was used. */
+  renamed: boolean;
+  /** The status line the UI shows. */
+  message: string;
+  /** The restored document's id (document), or the document the files went into. */
+  workspaceId: ID;
+}

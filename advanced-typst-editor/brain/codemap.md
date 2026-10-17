@@ -35,6 +35,7 @@ Paths are relative to `advanced-typst-editor/`. Tests live in `server/*.test.ts`
 | [service.ts](../server/service.ts) | workspace, folder and asset operations; emits bus events | [service.test.ts](../server/service.test.ts) |
 | [settings.ts](../server/settings.ts) | registry store, groups, folder appearance, path self-heal | [settings.test.ts](../server/settings.test.ts) |
 | [workspace.ts](../server/workspace.ts) | `WorkspaceFs`: files, assets, meta, reference rewriting | [workspace.test.ts](../server/workspace.test.ts) |
+| [trash.ts](../server/trash.ts) | the app trash: `.trash.json` sidecar, listing (sidecar or legacy shape), move-in, restore (document, files), stamp clean-up | [trash.test.ts](../server/trash.test.ts) |
 | [workspace-index.ts](../server/workspace-index.ts) | async folder snapshot and etag | [workspace-index.test.ts](../server/workspace-index.test.ts) |
 | [watcher.ts](../server/watcher.ts) | `fs.watch`, debounce, own-write marks | [watcher.test.ts](../server/watcher.test.ts) |
 | [events.ts](../server/events.ts) | in-process event bus | [events.test.ts](../server/events.test.ts) |
@@ -96,6 +97,7 @@ Other: [api/client.ts](../src/api/client.ts) (REST client, sends `x-client-id`; 
 | [sidebar/Sidebar.tsx](../src/components/sidebar/Sidebar.tsx) and siblings (`FolderTree`, `FolderRow`, `WorkspaceRow`, `FolderAppearance`, `folder-icons.ts`) | workspace tree, drag and drop, folder menu, status footer | `sidebar.test.tsx`, `folder-icons.test.ts` |
 | [settings/SettingsView.tsx](../src/components/settings/SettingsView.tsx), [CopyRow.tsx](../src/components/settings/CopyRow.tsx) | Connect Claude, backups, CLI path, redaction defaults | `settings-connect.test.tsx` |
 | [ui/ConfirmDialog.tsx](../src/components/ui/ConfirmDialog.tsx), [FolderBrowserDialog.tsx](../src/components/ui/FolderBrowserDialog.tsx), [Portal.tsx](../src/components/ui/Portal.tsx) | shared dialogs | none direct |
+| [ui/TrashDialog.tsx](../src/components/ui/TrashDialog.tsx), [lib/trash-format.ts](../src/lib/trash-format.ts) | the Trash dialog (list, Restore only), time and size text | [trash-dialog.test.tsx](../src/test/trash-dialog.test.tsx) |
 
 ## Import boundary (Docker)
 

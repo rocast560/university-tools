@@ -6,8 +6,9 @@ import { ALLOWED_EXTENSIONS, extensionOf, mimeFor, MAX_ASSET_BYTES, reconcileIma
 import { readJson, safeDirName, stamp, writeAtomic } from './fsx';
 import { HttpError } from './http';
 import { normalizeRel, resolveInside } from './paths';
+import { recordTrash, WORKSPACE_META, type TrashAssetMeta } from './trash';
 
-export const META_FILE = 'workspace.json';
+export const META_FILE = WORKSPACE_META;
 export const ASSETS_DIR = 'assets';
 export const FONTS_DIR = 'fonts';
 export const SKIP_DIRS = new Set(['node_modules', '.git', 'target', '__pycache__']);
@@ -110,16 +111,23 @@ export function normaliseMeta(raw: Partial<WorkspaceJson>): WorkspaceJson {
 }
 
 /** Where deleted files go: `<dir>/<stamp>/<name>/<relative path>`. `dir` is the app's `data/trash`. */
-export interface WorkspaceTrash { dir: string; name: string }
+export interface WorkspaceTrash {
+  dir: string;
+  name: string;
+  /** The registry id of the workspace, written to the trash's `.trash.json` so a restore finds it again. */
+  id?: string;
+}
 
 export function openWorkspace(root: string, opts: { now?: () => number; trash?: WorkspaceTrash } = {}): WorkspaceFs {
   const now = opts.now ?? (() => Date.now());
   const rootAbs = path.resolve(root);
 
   /** Move a workspace file into the app trash, keeping its relative path. Never unlinks. */
-  const toTrash = (rel: string, src: string): void => {
+  const toTrash = (rel: string, src: string, meta?: TrashAssetMeta): void => {
     if (!opts.trash) throw new HttpError(500, 'no trash folder configured, refusing to delete permanently');
-    const dest = path.join(opts.trash.dir, stamp(now()), safeDirName(opts.trash.name), ...rel.split('/'));
+    const st = stamp(now());
+    const folder = safeDirName(opts.trash.name);
+    const dest = path.join(opts.trash.dir, st, folder, ...rel.split('/'));
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     let target = dest;
     const ext = path.extname(dest);
@@ -130,6 +138,18 @@ export function openWorkspace(root: string, opts: { now?: () => number; trash?: 
       if ((err as NodeJS.ErrnoException).code !== 'EXDEV') throw err;
       fs.copyFileSync(src, target); // trash on another drive: copy first, remove the original only after
       fs.unlinkSync(src);
+    }
+    try {
+      recordTrash(opts.trash.dir, st, {
+        kind: 'files',
+        name: folder,
+        ...(opts.trash.id ? { workspaceId: opts.trash.id } : {}),
+        deletedAt: now(),
+        files: [{ original: rel, stored: path.relative(path.join(opts.trash.dir, st, folder), target).split(path.sep).join('/'), ...(meta ? { meta } : {}) }],
+      });
+    } catch (err) {
+      // The file is already safe in the trash; without a record it still lists and restores.
+      console.warn(`could not write .trash.json for ${target}: ${err instanceof Error ? err.message : err}`);
     }
   };
 
@@ -314,7 +334,9 @@ export function openWorkspace(root: string, opts: { now?: () => number; trash?: 
 
   const deleteAsset: WorkspaceFs['deleteAsset'] = (id) => {
     const asset = getAsset(id);
-    toTrash(asset.id, path.join(rootAbs, ...asset.id.split('/')));
+    const before = readMeta();
+    const record = asset.kind === 'font' ? before.fonts[asset.id] : before.assets[asset.id];
+    toTrash(asset.id, path.join(rootAbs, ...asset.id.split('/')), record === undefined ? undefined : { kind: asset.kind === 'font' ? 'fonts' : 'assets', record });
     const meta = readMeta();
     delete meta.assets[id];
     delete meta.fonts[id];

@@ -147,6 +147,13 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
       return json(404, { error: 'logo not found' });
     }
 
+    // The trash can be listed and restored from, nothing else: no empty-trash and no permanent delete, on purpose.
+    if (seg[1] === 'trash') {
+      if (seg.length === 2 && method === 'GET') return json(200, { items: service.listTrash() });
+      if (seg.length === 4 && seg[3] === 'restore' && method === 'POST') return json(200, service.restoreFromTrash(seg[2]!));
+      return json(404, { error: `no route: ${method} ${url.pathname}` });
+    }
+
     if (seg[1] === 'groups') {
       const state = () => ({ groups: service.listGroups(), folderMeta: service.folderMeta() });
       if (seg.length === 2) {

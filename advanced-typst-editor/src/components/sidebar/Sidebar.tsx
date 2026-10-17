@@ -1,8 +1,9 @@
 import { useState, useCallback, useEffect, useRef, lazy, Suspense } from 'react';
 import {
-  FolderPlus, Plus, Settings,
+  FolderPlus, Plus, Settings, Trash2,
   PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react';
+import { api } from '@/api/client';
 import { useAppStore } from '@/stores';
 import { FolderTree } from '@/components/sidebar/FolderTree';
 import { subtreeCount, workspacesByFolder } from '@/lib/workspace-groups';
@@ -15,13 +16,14 @@ import {
   EMPTY_SELECTION, pruneSelection, rangeTo, resetTo, selectedList, toggle as toggleSelected, visibleOrder,
   type ClickMods, type Selection,
 } from '@/lib/sidebar-selection';
-import type { BackupState, WorkspaceStatus } from '@/types';
+import type { BackupState, TrashEntry, WorkspaceStatus } from '@/types';
 
 // All three only appear on a deliberate action (locating a moved workspace,
 // confirming a destructive one, picking a folder's look), so they stay off
 // the app's first-paint chunk.
 const FolderBrowserDialog = lazy(() => import('@/components/ui/FolderBrowserDialog').then((m) => ({ default: m.FolderBrowserDialog })));
 const ConfirmDialog = lazy(() => import('@/components/ui/ConfirmDialog').then((m) => ({ default: m.ConfirmDialog })));
+const TrashDialog = lazy(() => import('@/components/ui/TrashDialog').then((m) => ({ default: m.TrashDialog })));
 const FolderAppearance = lazy(() => import('@/components/sidebar/FolderAppearance').then((m) => ({ default: m.FolderAppearance })));
 
 /**
@@ -113,6 +115,20 @@ export function Sidebar() {
   const [removingMany, setRemovingMany] = useState<WorkspaceStatus[] | null>(null);
   const [removeError, setRemoveError] = useState<string | null>(null);
   const [selection, setSelection] = useState<Selection>(EMPTY_SELECTION);
+  // The app trash, for the footer count and the dialog. Null until the first load answers.
+  const [trash, setTrash] = useState<TrashEntry[] | null>(null);
+  const [trashOpen, setTrashOpen] = useState(false);
+  const refreshTrash = useCallback(() => { api.listTrash().then(setTrash).catch(() => { /* the row just shows no count */ }); }, []);
+  // A delete reloads the document list, so the count follows it; opening the dialog reads the trash fresh.
+  useEffect(() => { refreshTrash(); }, [workspaces, refreshTrash]);
+  // A file or asset delete announces itself as workspace.changed; a short trailing debounce keeps autosave bursts from rescanning the trash each time.
+  const lastChange = useAppStore((s) => s.lastChange);
+  useEffect(() => {
+    if (!lastChange) return;
+    const t = setTimeout(refreshTrash, 400);
+    return () => clearTimeout(t);
+  }, [lastChange, refreshTrash]);
+  useEffect(() => { if (trashOpen) refreshTrash(); }, [trashOpen, refreshTrash]);
   const asideRef = useRef<HTMLElement>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => loadCollapsedGroups());
   const toggle = (group: string) => setCollapsed((prev) => { const next = toggleGroup(prev, group); saveCollapsedGroups(next); return next; });
@@ -384,6 +400,11 @@ export function Sidebar() {
           <span className={`h-2 w-2 shrink-0 rounded-full ${online ? 'bg-[hsl(var(--status-green))]' : 'bg-[hsl(var(--status-red))]'}`} />
           <span className="truncate">{backupLabel(backup)}</span>
         </button>
+        <button type="button" onClick={() => setTrashOpen(true)} title="Restore deleted documents and files" className="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left hover:bg-[hsl(var(--accent))]">
+          <Trash2 size={10} className="shrink-0" />
+          <span className="truncate">Trash</span>
+          {!!trash?.length && <span className="ml-auto shrink-0 rounded bg-[hsl(var(--accent))] px-1.5 text-[10px] tabular-nums">{trash.length}</span>}
+        </button>
       </div>
 
       {menu && (
@@ -431,6 +452,22 @@ export function Sidebar() {
       {browsing && (
         <Suspense fallback={null}>
           <FolderBrowserDialog title={`Locate ${browsing.locate.name}`} onClose={() => setBrowsing(null)} onPick={(p) => { const ws = browsing.locate; setBrowsing(null); void remove(ws.id).then(() => openFolder(p)); }} />
+        </Suspense>
+      )}
+      {trashOpen && (
+        <Suspense fallback={null}>
+          <TrashDialog
+            items={trash}
+            onClose={() => setTrashOpen(false)}
+            onRestored={(id, result) => {
+              setTrash((prev) => prev?.filter((t) => t.id !== id) ?? prev);
+              // A document is new to the sidebar; files change the open document, which the server's own event already announces.
+              if (result.kind === 'document') {
+                const s = useAppStore.getState();
+                void Promise.all([s.loadWorkspaces(), s.loadGroups()]).catch(() => { /* the SSE event reloads it */ });
+              }
+            }}
+          />
         </Suspense>
       )}
       {removing && (
